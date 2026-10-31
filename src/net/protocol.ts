@@ -87,6 +87,8 @@ export interface InputMsg {
   type: 'input';
   /** Teleport counter; inputs from before the last host teleport are ignored. */
   tp: number;
+  /** Client simulation clock in ms (used to validate speed independent of network jitter). */
+  ct: number;
   p: Vec3;
   yw: number;
   pt: number;
@@ -297,6 +299,7 @@ export function parseClientMsg(raw: unknown): ClientMsg | null {
       return isStr(m.name, NAME_MAX) && isStr(m.color, 16) && isFiniteNum(m.v) ? (m as unknown as HelloMsg) : null;
     case 'input':
       return isFiniteNum(m.tp) &&
+        isFiniteNum(m.ct) &&
         isVec3(m.p) &&
         isFiniteNum(m.yw) &&
         isFiniteNum(m.pt) &&

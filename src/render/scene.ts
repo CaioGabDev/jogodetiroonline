@@ -4,7 +4,7 @@ import { buildMap, buildSky, PickupView } from './map';
 
 const QUALITY = {
   low: { pixelRatioCap: 1, antialias: false, shadowSize: 512, shadowType: THREE.BasicShadowMap, anisotropy: 1 },
-  medium: { pixelRatioCap: 1.25, antialias: true, shadowSize: 1024, shadowType: THREE.PCFShadowMap, anisotropy: 4 },
+  medium: { pixelRatioCap: 1, antialias: true, shadowSize: 1024, shadowType: THREE.PCFShadowMap, anisotropy: 4 },
   high: { pixelRatioCap: 2, antialias: true, shadowSize: 2048, shadowType: THREE.PCFSoftShadowMap, anisotropy: 8 },
 };
 
@@ -125,6 +125,18 @@ export class SceneManager {
       }
     });
     this.resize();
+  }
+
+  /** GPU name when WebGL is running in software (no hardware acceleration), else null. */
+  softwareRenderer(): string | null {
+    try {
+      const gl = this.renderer.getContext();
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      const name = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+      return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(name) ? name : null;
+    } catch {
+      return null;
+    }
   }
 
   resize(): void {

@@ -108,7 +108,10 @@ class App {
         input.endFrame();
       },
       render: (alpha, dt) => {
-        if (this.game) this.game.render(alpha, dt, this.loop.fps);
+        if (this.game) {
+          this.game.render(alpha, dt, this.loop.fps);
+          this.watchFps(dt);
+        }
         else this.idleCamera(dt);
         this.sm.render();
       },
@@ -121,6 +124,29 @@ class App {
       toast(`Convite para a sala ${code}: digite seu nickname e clique em "Entrar na Sala".`, 'info', 6000);
     }
     this.loop.start();
+
+    if (this.sm.softwareRenderer()) {
+      toast(
+        'Seu navegador está sem aceleração de vídeo, então o jogo vai travar. Ative em Configurações do navegador → ' +
+          'Sistema → "Usar aceleração gráfica quando disponível" e reinicie o navegador.',
+        'error',
+        15000,
+      );
+    }
+  }
+
+  private lowFpsTime = 0;
+  private lowFpsWarned = false;
+
+  /** Suggests lowering quality once if the match runs below 30 FPS for a while. */
+  private watchFps(dt: number): void {
+    if (this.lowFpsWarned || !this.game || !input.locked) return;
+    const fps = this.loop.fps;
+    this.lowFpsTime = fps > 0 && fps < 30 ? this.lowFpsTime + dt : 0;
+    if (this.lowFpsTime > 6) {
+      this.lowFpsWarned = true;
+      toast(`FPS baixo (${fps}). Em Configurações → Vídeo, use qualidade Baixa, desligue sombras e reduza a escala de resolução.`, 'warn', 9000);
+    }
   }
 
   // ------------------------------------------------------------------ screens
@@ -228,6 +254,14 @@ class App {
       const welcome = await net.handshake(nick, color);
       this.attach(net, welcome);
       history.replaceState(null, '', location.pathname);
+      const joined = net;
+      window.setTimeout(() => {
+        void joined.route().then((r) => {
+          if (r === 'relay' && this.net === joined) {
+            toast('Conectado via servidor TURN (relay). A latência fica maior que numa conexão direta.', 'info', 7000);
+          }
+        });
+      }, 3000);
     } catch (e) {
       net?.close();
       this.menu.setBusy(null);

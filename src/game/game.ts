@@ -89,6 +89,10 @@ export class Game {
   private pendingShots: Array<{ s: number; w: number }> = [];
   /** Simulation clock (ms) advanced by the fixed step; weapon timing uses it so fire rate is exact at any FPS. */
   private simT = 0;
+  // Values from the previous fixed step, for smooth rendering on >60 Hz displays.
+  private prevRecoilP = 0;
+  private prevRecoilY = 0;
+  private prevAimT = 0;
   private jumpQueued = false;
 
   // Net / match
@@ -514,6 +518,9 @@ export class Game {
 
   fixed(dt: number): void {
     this.simT += dt * 1000;
+    this.prevRecoilP = this.recoilP;
+    this.prevRecoilY = this.recoilY;
+    this.prevAimT = this.aimT;
     const act = this.canAct;
     const s = settings.get();
 
@@ -551,7 +558,8 @@ export class Game {
     const def = WEAPONS[this.weapon];
     const aimTarget = ads && this.alive ? 1 : 0;
     const aStep = dt / def.adsTime;
-    this.aimT = aimTarget > this.aimT ? Math.min(1, this.aimT + aStep) : Math.max(0, this.aimT - aStep * 1.5);
+    if (aimTarget > this.aimT) this.aimT = Math.min(1, this.aimT + aStep);
+    else if (aimTarget < this.aimT) this.aimT = Math.max(0, this.aimT - aStep * 1.5);
 
     if (this.alive) {
       this.prev.x = this.me.x;
@@ -588,6 +596,7 @@ export class Game {
       this.net.send({
         type: 'input',
         tp: this.tp,
+        ct: Math.round(this.simT),
         p: [r2(this.me.x), r2(this.me.y), r2(this.me.z)],
         yw: r3(this.yaw),
         pt: r3(this.pitch),
@@ -617,6 +626,9 @@ export class Game {
     const s = settings.get();
     const cam = this.sm.camera;
     const def = WEAPONS[this.weapon];
+    const recoilP = this.prevRecoilP + (this.recoilP - this.prevRecoilP) * alpha;
+    const recoilY = this.prevRecoilY + (this.recoilY - this.prevRecoilY) * alpha;
+    const aimT = this.prevAimT + (this.aimT - this.prevAimT) * alpha;
 
     // Mouse look (per frame for responsiveness)
     const [mdx, mdy] = input.takeMouse();
@@ -630,7 +642,7 @@ export class Game {
       this.pitch = clamp(this.pitch, -1.55, 1.55);
     }
 
-    const rt = this.net.renderTime();
+    const rt = this.net.tickRenderClock();
     for (const r of this.remotes.values()) {
       const moved = r.interpolate(rt, dt);
       r.model.root.visible = r.hasData && r.y > -20;
@@ -669,7 +681,7 @@ export class Game {
       const speed = Math.hypot(this.me.vx, this.me.vz);
       const bobOn = this.me.onGround && speed > 1;
       if (bobOn) this.bobPhase += dt * speed * 1.45;
-      const bobAmt = bobOn ? Math.min(1, speed / 6) * (1 - this.aimT * 0.9) : 0;
+      const bobAmt = bobOn ? Math.min(1, speed / 6) * (1 - this.aimT) : 0;
       const bobY = Math.sin(this.bobPhase * 2) * 0.035 * bobAmt;
       const bobX = Math.cos(this.bobPhase) * 0.025 * bobAmt;
       this.landDip -= this.landDip * damp(9, dt);
@@ -677,8 +689,8 @@ export class Game {
       this.shake -= this.shake * damp(8, dt);
       const sh = this.shake * 0.02;
       cam.rotation.set(
-        this.pitch + this.recoilP + (Math.random() - 0.5) * sh,
-        this.yaw + this.recoilY + (Math.random() - 0.5) * sh,
+        this.pitch + recoilP + (Math.random() - 0.5) * sh,
+        this.yaw + recoilY + (Math.random() - 0.5) * sh,
         0,
       );
     } else {
@@ -686,8 +698,8 @@ export class Game {
     }
 
     // Zoom & scope
-    this.sm.zoom = 1 + (def.zoom - 1) * this.aimT;
-    const scoped = this.alive && this.weapon === 3 && this.aimT > 0.85;
+    this.sm.zoom = 1 + (def.zoom - 1) * aimT;
+    const scoped = this.alive && this.weapon === 3 && aimT > 0.85;
     this.hud.setScope(scoped);
     this.sm.showViewmodel = this.alive && !scoped;
     this.hud.setCrosshairVisible(this.alive && !scoped && !this.ended);
@@ -695,7 +707,7 @@ export class Game {
     // Viewmodel
     const t = this.simT;
     this.viewmodel.update(dt, {
-      aim: this.aimT,
+      aim: aimT,
       speed: Math.hypot(this.me.vx, this.me.vz),
       onGround: this.me.onGround,
       sprint: this.sprinting,

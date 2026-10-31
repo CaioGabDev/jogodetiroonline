@@ -92,15 +92,25 @@ class Input {
 
   requestLock(): void {
     if (!this.target || this.locked) return;
-    try {
-      const res = this.target.requestPointerLock() as unknown;
-      if (res && typeof (res as Promise<void>).catch === 'function') {
-        (res as Promise<void>).catch(() => {
-          /* browser refused (cooldown after ESC); user can click again */
-        });
+    const target = this.target;
+    const lock = (opts?: { unadjustedMovement: boolean }): Promise<void> | undefined => {
+      try {
+        const res = (target.requestPointerLock as (o?: unknown) => unknown).call(target, opts) as unknown;
+        return res && typeof (res as Promise<void>).then === 'function' ? (res as Promise<void>) : undefined;
+      } catch {
+        return undefined;
       }
-    } catch {
-      /* ignore */
+    };
+    // Raw mouse input (no OS acceleration) gives steadier aim; fall back where unsupported.
+    const p = lock({ unadjustedMovement: true });
+    if (p) {
+      p.catch((e: unknown) => {
+        if ((e as { name?: string } | null)?.name === 'NotSupportedError') {
+          lock()?.catch(() => {
+            /* refused (cooldown after ESC); user can click again */
+          });
+        }
+      });
     }
   }
 

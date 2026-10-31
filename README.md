@@ -112,24 +112,47 @@ Não há variáveis de ambiente nem backend: o site é 100% estático.
 - **Desconexões:** quem sai é removido e todos recebem aviso. Se o host sair, os clientes voltam ao menu com
   "Host saiu da partida". O host continua simulando mesmo com a aba em segundo plano (timer em Web Worker).
 
-### Amigos não conseguem conectar? Adicione um servidor TURN
+### Alguém não consegue entrar na sala (ex.: notebook no Wi-Fi)? Configure um servidor TURN
 
-Só com STUN (padrão: `stun.l.google.com:19302`) a conexão funciona na maioria das redes domésticas, mas pode falhar
-em NAT simétrico, redes corporativas/escolares ou 4G. Edite **`src/net/iceConfig.ts`** e adicione um TURN, por exemplo:
+Só com STUN (padrão) a conexão direta funciona na maioria das redes de casa, mas **falha em Wi-Fi de escola/empresa,
+redes com isolamento de clientes, NAT simétrico e 4G**. É o caso típico de "no PC (cabo) entra, no notebook (Wi-Fi) não".
+Nesses casos o jogador vê a mensagem *"esta rede bloqueia conexões P2P"*. A solução é um servidor **TURN**, que
+retransmite o tráfego quando a conexão direta é impossível. O TURN gratuito sem cadastro que existia (Open Relay)
+foi desativado, então é preciso uma conta (grátis).
 
-```ts
-export const ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  {
-    urls: ['turn:seu-turn.exemplo.com:3478', 'turns:seu-turn.exemplo.com:5349'],
-    username: 'usuario',
-    credential: 'senha',
-  },
-];
-```
+**Opção A: Metered (grátis até 20 GB/mês, suficiente para partidas entre amigos)**
 
-Serviços com plano gratuito: Metered (Open Relay), Twilio Network Traversal, Cloudflare Calls TURN,
-ou hospede o seu com `coturn`. No mesmo arquivo dá para apontar `PEER_SERVER` para um servidor PeerJS próprio.
+1. Crie uma conta em [metered.ca](https://www.metered.ca/stun-turn) e crie um app de TURN.
+2. No painel, copie o **domínio** do app (ex.: `seuapp.metered.live`) e a **API key** das credenciais TURN.
+3. Na Vercel: *Project → Settings → Environment Variables*, adicione:
+   - `VITE_METERED_DOMAIN` = `seuapp.metered.live`
+   - `VITE_METERED_API_KEY` = sua chave
+4. Faça um novo deploy (*Deployments → ⋯ → Redeploy*). As variáveis `VITE_*` entram no build, então
+   **sem redeploy nada muda**.
+
+O jogo busca as credenciais TURN ao criar/entrar numa sala. A chave fica visível no navegador; é assim que o
+Metered foi pensado para uso no front-end. Se quiser, restrinja o domínio permitido no painel deles.
+
+**Opção B: qualquer TURN com usuário e senha fixos** (ex.: seu próprio `coturn`)
+
+- `VITE_TURN_URLS` = `turn:seu-turn.com:3478,turns:seu-turn.com:443?transport=tcp`
+- `VITE_TURN_USERNAME` e `VITE_TURN_CREDENTIAL`
+
+Para rodar localmente com TURN, copie `.env.example` para `.env` e preencha. Também dá para colocar servidores
+direto no código em `EXTRA_ICE_SERVERS` (`src/net/iceConfig.ts`), onde também é possível apontar `PEER_SERVER`
+para um servidor PeerJS próprio.
+
+**Importante:** host e convidados precisam estar usando o site já com o TURN (todos recarregam a página após o redeploy).
+
+### Ping alto ou jogo travando para alguém
+
+- **Ping alto com conexão via TURN é normal**: o tráfego passa por um servidor intermediário (o jogo avisa
+  "Conectado via servidor TURN"). O jogo tolera atrasos e rajadas sem "puxar o jogador de volta",
+  aumenta o buffer de interpolação automaticamente (até 350 ms) e descarta snapshots velhos em vez de acumular atraso.
+  Para menos ping, prefira uma rede que permita conexão direta (cabo / roteador de casa) ou um TURN mais próximo.
+- **Tudo travando (FPS baixo)**: ative *Mostrar FPS* em Configurações → HUD. Se aparecer o aviso de
+  "sem aceleração de vídeo", ative *Usar aceleração gráfica quando disponível* nas configurações do navegador.
+  Em PC fraco, use qualidade Baixa, desligue sombras e reduza a escala de resolução.
 
 Para depurar a conexão, rode no console do navegador `localStorage.setItem('arenafps.peerdebug', '1')` e recarregue:
 o PeerJS passa a registrar tudo no console.

@@ -78,7 +78,7 @@ class AudioEngine {
     const target = bus === 'sfx' ? this.sfx : this.ui;
     if (!pos) return target;
     const p = this.ctx.createPanner();
-    p.panningModel = 'HRTF';
+    p.panningModel = 'equalpower';
     p.distanceModel = 'inverse';
     p.refDistance = refDist;
     p.maxDistance = 200;

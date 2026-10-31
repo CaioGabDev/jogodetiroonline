@@ -1,10 +1,12 @@
 import { Peer, type DataConnection, type PeerOptions } from 'peerjs';
-import { ICE_SERVERS, PEER_SERVER } from './iceConfig';
+import { loadIceServers, PEER_SERVER, turnConfigured } from './iceConfig';
 import { PEER_PREFIX } from '../game/constants';
 
 /** Bidirectional message channel. Implemented by PeerJS connections and by an in-memory loopback for the host. */
 export interface Conn {
   send(msg: unknown): void;
+  /** True when outgoing data is piling up (slow link); disposable messages should be skipped. */
+  congested(): boolean;
   close(): void;
   onMessage: ((data: unknown) => void) | null;
   onClose: (() => void) | null;
@@ -15,6 +17,10 @@ class LoopbackEnd implements Conn {
   onMessage: ((data: unknown) => void) | null = null;
   onClose: (() => void) | null = null;
   closed = false;
+
+  congested(): boolean {
+    return false;
+  }
 
   send(msg: unknown): void {
     if (this.closed) return;
@@ -55,6 +61,34 @@ export class PeerConn implements Conn {
     dc.on('error', () => this.fireClose());
   }
 
+  congested(): boolean {
+    const ch = (this.dc as unknown as { dataChannel?: RTCDataChannel | null }).dataChannel;
+    return !!ch && ch.bufferedAmount > 32 * 1024;
+  }
+
+  async route(): Promise<'relay' | 'direct' | null> {
+    const pc = (this.dc as unknown as { peerConnection?: RTCPeerConnection | null }).peerConnection;
+    if (!pc) return null;
+    try {
+      const stats = await pc.getStats();
+      let pair: { localCandidateId?: string; remoteCandidateId?: string } | undefined;
+      stats.forEach((r) => {
+        if (r.type === 'transport' && r.selectedCandidatePairId) pair = stats.get(r.selectedCandidatePairId);
+      });
+      if (!pair) {
+        stats.forEach((r) => {
+          if (r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pair = r;
+        });
+      }
+      if (!pair) return null;
+      const local = pair.localCandidateId ? stats.get(pair.localCandidateId) : undefined;
+      const remote = pair.remoteCandidateId ? stats.get(pair.remoteCandidateId) : undefined;
+      return local?.candidateType === 'relay' || remote?.candidateType === 'relay' ? 'relay' : 'direct';
+    } catch {
+      return null;
+    }
+  }
+
   private fireClose(): void {
     if (this.closed) return;
     this.closed = true;
@@ -89,8 +123,8 @@ function debugLevel(): 0 | 3 {
   }
 }
 
-export function peerOptions(): PeerOptions {
-  const opts: PeerOptions = { debug: debugLevel(), config: { iceServers: ICE_SERVERS } };
+function peerOptions(iceServers: RTCIceServer[]): PeerOptions {
+  const opts: PeerOptions = { debug: debugLevel(), config: { iceServers } };
   if (PEER_SERVER) Object.assign(opts, PEER_SERVER);
   return opts;
 }
@@ -123,7 +157,10 @@ export function friendlyPeerError(err: unknown): string {
     case 'disconnected':
       return 'Desconectado do servidor de pareamento.';
     case 'webrtc':
-      return 'Falha na conexão WebRTC. Pode ser necessário um servidor TURN (veja o README).';
+      return turnConfigured()
+        ? 'Não foi possível conectar ao host, mesmo usando o servidor TURN. Verifique a internet dos dois lados e tente de novo.'
+        : 'Não foi possível conectar diretamente ao host: esta rede (Wi-Fi de escola/empresa, 4G…) bloqueia conexões P2P. ' +
+            'O dono do site precisa configurar um servidor TURN (veja o README). Enquanto isso, tente outra rede (ex.: cabo ou roteador de casa).';
     default:
       return 'Erro de conexão: ' + ((err as PeerErrorLike | null)?.message ?? 'desconhecido');
   }
@@ -137,11 +174,12 @@ export function describeError(err: unknown): string {
 }
 
 /** Creates a Peer and resolves once registered with the signaling server. */
-export function openPeer(id?: string, timeoutMs = 12000): Promise<Peer> {
+export async function openPeer(id?: string, timeoutMs = 12000): Promise<Peer> {
+  const iceServers = await loadIceServers();
   return new Promise((resolve, reject) => {
     let peer: Peer;
     try {
-      peer = id ? new Peer(id, peerOptions()) : new Peer(peerOptions());
+      peer = id ? new Peer(id, peerOptions(iceServers)) : new Peer(peerOptions(iceServers));
     } catch (e) {
       reject(e);
       return;
@@ -178,6 +216,7 @@ export function connectToHost(peer: Peer, code: string, timeoutMs = 15000): Prom
       if (done) return;
       done = true;
       clearTimeout(timer);
+      clearInterval(icePoll);
       peer.off('error', onErr);
       if (err) {
         try {
@@ -194,6 +233,21 @@ export function connectToHost(peer: Peer, code: string, timeoutMs = 15000): Prom
       timeoutMs,
     );
     peer.on('error', onErr);
+    // Fail fast when ICE gives up (blocked network) instead of waiting for the timeout.
+    let watched: RTCPeerConnection | null = null;
+    const icePoll = window.setInterval(() => {
+      const pc = (dc as unknown as { peerConnection?: RTCPeerConnection | null }).peerConnection;
+      if (!pc || pc === watched) return;
+      watched = pc;
+      const check = (): void => {
+        if (pc.iceConnectionState === 'failed' || pc.connectionState === 'failed') {
+          finish({ type: 'webrtc', message: 'ice-failed' });
+        }
+      };
+      pc.addEventListener('iceconnectionstatechange', check);
+      pc.addEventListener('connectionstatechange', check);
+      check();
+    }, 200);
     dc.once('open', () => finish(null));
     dc.once('error', (e) => finish({ type: 'webrtc', message: String(e) }));
   });

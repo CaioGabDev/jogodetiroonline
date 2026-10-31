@@ -4,7 +4,8 @@ import {
   FFA_COLORS,
   HEALTH_PICKUP,
   HISTORY_MS,
-  INTERP_DELAY,
+  MAX_INTERP_DELAY,
+  SNAP_SAMPLE_DELAY,
   MAX_HP,
   MAX_PLAYERS,
   MOVE,
@@ -99,8 +100,13 @@ interface SPlayer {
   lastShotSeq: number;
   history: PositionHistory;
   lastMoveT: number;
-  moveBudget: number;
-  upBudget: number;
+  /** Client simulation clock (ms) of the last accepted input; -1 = none since spawn/correction. */
+  lastCt: number;
+  /** How far the client's clock has run ahead of real time (speed-hack guard), in ms. */
+  clockAhead: number;
+  /** Maps client clock to host clock (host ms = ct + ctOff), estimated from the least-delayed inputs. */
+  ctOff: number | null;
+  lastHistT: number;
 }
 
 interface PickupState {
@@ -351,8 +357,10 @@ export class HostServer {
       lastShotSeq: 0,
       history: new PositionHistory(),
       lastMoveT: now(),
-      moveBudget: 3,
-      upBudget: 2.5,
+      lastCt: -1,
+      ctOff: null,
+      lastHistT: 0,
+      clockAhead: 0,
     };
   }
 
@@ -580,11 +588,13 @@ export class HostServer {
     p.reloadW = -1;
     p.weapon = 0;
     p.tp++;
-    p.moveBudget = 3;
-    p.upBudget = 2.5;
+    p.lastCt = -1;
+    p.clockAhead = 0;
+    p.ctOff = null;
     p.lastMoveT = t;
     p.history.clear();
     p.history.push({ t, x: p.x, y: p.y, z: p.z, crouch: p.crouch });
+    p.lastHistT = t;
     this.send(p, { type: 'spawn', p: [p.x, p.y, p.z], yw: p.yaw, tp: p.tp, full: true });
     this.sendAmmo(p);
   }
@@ -595,6 +605,7 @@ export class HostServer {
 
   private correct(p: SPlayer): void {
     p.tp++;
+    p.lastCt = -1;
     this.send(p, { type: 'spawn', p: [r2(p.x), r2(p.y), r2(p.z)], yw: p.yaw, tp: p.tp, full: false });
   }
 
@@ -609,36 +620,56 @@ export class HostServer {
     }
     if (!p.alive || this.phase !== 'playing') return;
 
+    // Movement is validated against the client's own simulation clock, so network
+    // jitter (inputs arriving in bursts) never looks like speed hacking. A separate
+    // check makes sure that clock doesn't run faster than real time.
     const t = now();
-    const dt = Math.min((t - p.lastMoveT) / 1000, 2);
+    const realDt = t - p.lastMoveT;
     p.lastMoveT = t;
-    p.moveBudget = Math.min(p.moveBudget + MOVE.sprint * 1.3 * dt, 4);
-    p.upBudget = Math.min(p.upBudget + 9 * dt, 3);
+    let dct: number;
+    if (p.lastCt < 0) {
+      dct = 1000 / 30;
+    } else {
+      dct = m.ct - p.lastCt;
+      if (dct <= 0) return; // duplicate/out of order
+      dct = Math.min(dct, 1000);
+      p.clockAhead = Math.max(-1000, p.clockAhead + dct - realDt);
+    }
+    p.lastCt = m.ct;
     const [nx, ny, nz] = m.p;
     const horiz = Math.hypot(nx - p.x, nz - p.z);
     const up = Math.max(0, ny - p.y);
     const h = m.c ? PLAYER.crouchHeight : PLAYER.height;
     const half = MAP.size / 2;
+    const maxHoriz = (MOVE.sprint * 1.25 * dct) / 1000 + 0.3;
+    const maxUp = (9 * dct) / 1000 + 0.35;
     const invalid =
-      horiz > p.moveBudget ||
-      up > p.upBudget ||
+      p.clockAhead > 1500 ||
+      horiz > maxHoriz ||
+      up > maxUp ||
       Math.abs(nx) > half ||
       Math.abs(nz) > half ||
       ny < -2 ||
       ny > 20 ||
       this.world.overlapsSolid(nx, ny + 0.05, nz, h - 0.1, PLAYER.radius * 0.7);
     if (invalid) {
+      p.clockAhead = 0;
       this.correct(p);
       return;
     }
-    p.moveBudget -= horiz;
-    p.upBudget -= up;
     p.x = nx;
     p.y = ny;
     p.z = nz;
     p.crouch = m.c;
     p.onGround = m.g;
-    p.history.push({ t, x: nx, y: ny, z: nz, crouch: m.c });
+    // Timestamp the sample with when it actually happened on the client (mapped to host
+    // time via the least-delayed input), not when it arrived. Bursty arrival no longer
+    // distorts the motion others see or the lag-compensation history.
+    const off = t - m.ct;
+    p.ctOff = p.ctOff === null ? off : Math.min(p.ctOff + realDt * 0.01, off);
+    const sampleT = Math.max(p.lastHistT + 1, Math.min(t, m.ct + p.ctOff));
+    p.lastHistT = sampleT;
+    p.history.push({ t: sampleT, x: nx, y: ny, z: nz, crouch: m.c });
     this.checkPickups(p);
   }
 
@@ -724,8 +755,9 @@ export class HostServer {
     p.protectedUntil = 0;
 
     const rtt = p.slot?.rtt ?? 0;
-    const minT = t - Math.min(HISTORY_MS, rtt + INTERP_DELAY + 200);
-    const rewindT = clamp(m.rt, minT, t);
+    // Clients see positions sampled SNAP_SAMPLE_DELAY in the past (see tick()).
+    const minT = t - Math.min(HISTORY_MS, rtt + MAX_INTERP_DELAY + SNAP_SAMPLE_DELAY + 200);
+    const rewindT = clamp(m.rt - SNAP_SAMPLE_DELAY, minT, t);
 
     const targets: Array<{ pl: SPlayer; pos: { x: number; y: number; z: number; crouch: boolean } }> = [];
     for (const o of this.players.values()) {
@@ -896,6 +928,7 @@ export class HostServer {
       }
       if (best) p.yaw = Math.atan2(-(best.x - p.x), -(best.z - p.z));
       p.history.push({ t, x: p.x, y: p.y, z: p.z, crouch: p.crouch });
+      p.lastHistT = t;
     }
   }
 
@@ -932,9 +965,18 @@ export class HostServer {
         if (p.ads) f |= F_ADS;
         if (p.onGround) f |= F_GROUND;
         if (p.reloadW >= 0) f |= F_RELOAD;
-        ps.push({ i: p.info.id, p: [r2(p.x), r2(p.y), r2(p.z)], yw: r3(p.yaw), pt: r3(p.pitch), f, hp: Math.max(0, p.hp), w: p.weapon });
+        // Everyone is sampled at the same instant so motion between snapshots is consistent.
+        const h = p.alive ? p.history.at(t - SNAP_SAMPLE_DELAY) : null;
+        const x = h ? h.x : p.x;
+        const y = h ? h.y : p.y;
+        const z = h ? h.z : p.z;
+        ps.push({ i: p.info.id, p: [r2(x), r2(y), r2(z)], yw: r3(p.yaw), pt: r3(p.pitch), f, hp: Math.max(0, p.hp), w: p.weapon });
       }
-      this.broadcast({ type: 'snap', t: Math.round(t), ps });
+      const snap: HostMsg = { type: 'snap', t: Math.round(t), ps };
+      for (const p of this.players.values()) {
+        // Old snapshots are worthless: drop them instead of queueing on a slow link.
+        if (p.slot && !p.slot.conn.congested()) p.slot.conn.send(snap);
+      }
       if (this.tickCount % 10 === 0) this.sendScores();
     }
 

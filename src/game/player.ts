@@ -59,8 +59,16 @@ export class RemotePlayer {
     let s0 = b[0];
     let s1 = b[0];
     let k = 0;
-    if (rt >= b[b.length - 1].t) {
-      s0 = s1 = b[b.length - 1];
+    const last = b[b.length - 1];
+    if (rt >= last.t) {
+      // Snapshot is late: extrapolate briefly along the last segment instead of freezing.
+      s0 = s1 = last;
+      const prev = b[b.length - 2];
+      if (prev && rt - last.t < 120 && (last.f & F_ALIVE) && last.t > prev.t) {
+        s0 = prev;
+        s1 = last;
+        k = (rt - prev.t) / (last.t - prev.t);
+      }
     } else if (rt > b[0].t) {
       for (let i = b.length - 1; i > 0; i--) {
         if (b[i - 1].t <= rt) {

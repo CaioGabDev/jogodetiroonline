@@ -177,13 +177,13 @@ export class Viewmodel {
     // Bob
     const moving = s.onGround && s.speed > 0.5;
     if (moving) this.bobPhase += dt * (5 + s.speed * 0.9);
-    const bobAmt = moving ? Math.min(1, s.speed / 6) * (1 - s.aim * 0.85) : 0;
+    const bobAmt = moving ? Math.min(1, s.speed / 6) * (1 - s.aim * 0.95) : 0;
     const bobX = Math.sin(this.bobPhase) * 0.012 * bobAmt;
     const bobY = -Math.abs(Math.cos(this.bobPhase)) * 0.012 * bobAmt;
 
     // Sway lags behind mouse movement
-    this.swayX += (-s.lookDX * 0.0004 * (1 - s.aim * 0.8) - this.swayX) * k;
-    this.swayY += (s.lookDY * 0.0004 * (1 - s.aim * 0.8) - this.swayY) * k;
+    this.swayX += (-s.lookDX * 0.0004 * (1 - s.aim * 0.95) - this.swayX) * k;
+    this.swayY += (s.lookDY * 0.0004 * (1 - s.aim * 0.95) - this.swayY) * k;
     this.swayX = Math.max(-0.04, Math.min(0.04, this.swayX));
     this.swayY = Math.max(-0.04, Math.min(0.04, this.swayY));
 

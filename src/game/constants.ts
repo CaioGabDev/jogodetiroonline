@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 /** Prefix added to the room code to form the host's PeerJS id (avoids collisions on the public server). */
 export const PEER_PREFIX = 'arenafps-v1-';
 
@@ -6,6 +6,9 @@ export const MAX_PLAYERS = 10;
 export const INPUT_RATE = 30;
 export const SNAPSHOT_RATE = 20;
 export const INTERP_DELAY = 100;
+export const MAX_INTERP_DELAY = 350;
+/** Snapshots sample every player's position history this long in the past, so all positions are time-aligned. */
+export const SNAP_SAMPLE_DELAY = 60;
 export const HISTORY_MS = 1000;
 export const RESPAWN_MS = 3000;
 export const SPAWN_PROTECT_MS = 2000;

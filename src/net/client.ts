@@ -1,8 +1,8 @@
 import type { Peer } from 'peerjs';
-import { now } from '../core/util';
-import { INTERP_DELAY, PROTOCOL_VERSION } from '../game/constants';
+import { clamp, now } from '../core/util';
+import { INTERP_DELAY, MAX_INTERP_DELAY, PROTOCOL_VERSION, SNAPSHOT_RATE } from '../game/constants';
 import type { ClientMsg, HostMsg, WelcomeMsg } from './protocol';
-import { connectToHost, openPeer, type Conn } from './peer';
+import { connectToHost, openPeer, PeerConn, type Conn } from './peer';
 
 export type DisconnectReason = 'host-left' | 'timeout' | 'closed';
 
@@ -15,6 +15,10 @@ export class NetClient {
   ping = 0;
   private offset = 0;
   private offsetInit = false;
+  private lastSnapAt = 0;
+  private jitter = 0;
+  /** Interpolation buffer (ms). Grows on jittery links so remote players don't freeze. */
+  interpDelay = INTERP_DELAY;
   private lastRecv = now();
   private watchdog = 0;
   private closed = false;
@@ -97,7 +101,15 @@ export class NetClient {
 
   /** Smoothed estimate of host clock = local clock + offset. */
   private updateClock(hostT: number): void {
-    const sample = hostT - now();
+    const t = now();
+    if (this.lastSnapAt > 0) {
+      const dev = Math.abs(t - this.lastSnapAt - 1000 / SNAPSHOT_RATE);
+      this.jitter += (Math.min(dev, 1000) - this.jitter) * 0.1;
+      const target = clamp(60 + this.jitter * 2.5, INTERP_DELAY, MAX_INTERP_DELAY);
+      this.interpDelay += (target - this.interpDelay) * 0.05;
+    }
+    this.lastSnapAt = t;
+    const sample = hostT - t;
     if (!this.offsetInit) {
       this.offset = sample;
       this.offsetInit = true;
@@ -112,13 +124,44 @@ export class NetClient {
     return now() + this.offset;
   }
 
-  /** Host-clock time at which remote players are rendered. */
+  private rtClock = 0;
+  private rtAt = 0;
+  private rtInit = false;
+
+  /**
+   * Advances the clock remote players are rendered at. It runs at real-time speed and
+   * eases toward (host clock - interpolation delay) instead of jumping whenever the
+   * clock estimate changes, which keeps other players' motion smooth. Call once per frame.
+   */
+  tickRenderClock(): number {
+    const t = now();
+    const target = this.hostNow() - this.interpDelay;
+    if (!this.rtInit || Math.abs(target - this.rtClock) > 300) {
+      this.rtClock = target;
+      this.rtInit = true;
+    } else {
+      const dt = t - this.rtAt;
+      this.rtClock += dt + (target - this.rtClock) * Math.min(1, dt / 500);
+    }
+    this.rtAt = t;
+    return this.rtClock;
+  }
+
+  /** Host-clock time at which remote players are currently rendered. */
   renderTime(): number {
-    return this.hostNow() - INTERP_DELAY;
+    return this.rtInit ? this.rtClock + (now() - this.rtAt) : this.hostNow() - this.interpDelay;
   }
 
   send(msg: ClientMsg): void {
-    if (!this.closed) this.conn.send(msg);
+    if (this.closed) return;
+    // Position updates are superseded by the next one; don't pile them up on a slow link.
+    if (msg.type === 'input' && this.conn.congested()) return;
+    this.conn.send(msg);
+  }
+
+  /** 'relay' when traffic goes through a TURN server, 'direct' for P2P, null if unknown/local. */
+  route(): Promise<'relay' | 'direct' | null> {
+    return this.conn instanceof PeerConn ? this.conn.route() : Promise.resolve(null);
   }
 
   private fail(r: DisconnectReason): void {
