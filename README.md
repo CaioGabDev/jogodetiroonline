@@ -30,12 +30,12 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 | Atirar | Botão esquerdo |
 | Mirar / luneta | Botão direito (segurar ou alternar) |
 | Recarregar | R |
-| Trocar arma | 1 – 4 ou roda do mouse |
+| Trocar arma | 1 – 5 ou roda do mouse |
 | Placar | Tab (segurar) |
 | Chat (todos) / chat do time | Enter / Y |
 | Pausa | Esc |
 
-> Dica: no navegador, **Ctrl+W fecha a aba**. Se costuma agachar com Ctrl, prefira o `C`.
+> No Chrome e no Edge o jogo abre em tela cheia para que **Ctrl+W não feche a aba** (dá para agachar com Ctrl e andar normalmente). Nos outros navegadores isso não é possível: aparece um aviso antes de sair, e o `C` é mais seguro para agachar.
 
 ### Armas
 
@@ -44,14 +44,25 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 | 1 | Rifle automático | 20 | 600 RPM | 30 | recoil com padrão fixo |
 | 2 | Pistola | 25 | semi-auto | 12 | reserva infinita |
 | 3 | Escopeta | 8 × 12 | semi-auto | 6 | dano cai com a distância |
-| 4 | Sniper | 90 | semi-auto | 5 | luneta com zoom; headshot mata |
+| 4 | Sniper | 90 | semi-auto | 5 | luneta limpa com zoom, sem recuo; headshot mata |
+| 5 | Faca | 70 | 120 golpes/min | ∞ | alcance curto; com ela o boneco corre bem mais rápido e para na hora |
+
+**Pular enquanto corre** dá um impulso de velocidade (+25%) e mais controle no ar, com qualquer arma.
 
 Headshot causa dano dobrado em todas as armas. Kits de vida (+50) e caixas de munição reaparecem 20 s após serem pegos.
 
 ### Modos
 
 - **Mata-mata (FFA):** todos contra todos. Vence quem atingir o limite de kills ou tiver mais kills no fim do tempo.
-- **Mata-mata em equipe (TDM):** Vermelho × Azul, escolha de time no lobby, auto-balanceamento e fogo amigo configurável.
+- **Mata-mata em equipe (TDM):** Vermelho × Azul, escolha de time no lobby, auto-balanceamento e fogo amigo configurável. Dá para trocar de time durante a partida pelo menu de pausa (`Esc`), uma vez a cada 10 s.
+
+O host também escolhe as **Armas** da partida:
+
+- **Todas as armas:** cada jogador usa o que marcou em Configurações → Armas.
+- **Só sniper / Só doze:** só essa arma e a faca, em FFA ou TDM.
+- **Gun Game:** sempre FFA. Cada kill troca a sua arma (rifle, doze, sniper, pistola, faca; 2 kills em cada, 1 na faca). Vence quem fizer a kill com a faca.
+
+Quem abrir o link no meio da partida entra direto no jogo. Durante a tela de resultados, espera no lobby.
 
 No fim da partida aparece o placar com MVP; o host pode pedir **Revanche** ou **Voltar ao lobby**.
 

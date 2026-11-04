@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 /** Prefix added to the room code to form the host's PeerJS id (avoids collisions on the public server). */
 export const PEER_PREFIX = 'arenafps-v1-';
 
@@ -11,6 +11,8 @@ export const MAX_INTERP_DELAY = 350;
 export const SNAP_SAMPLE_DELAY = 60;
 export const HISTORY_MS = 1000;
 export const RESPAWN_MS = 3000;
+/** Minimum time between team changes during a match. */
+export const TEAM_SWITCH_COOLDOWN_MS = 10000;
 export const SPAWN_PROTECT_MS = 2000;
 export const PICKUP_RESPAWN_MS = 20000;
 export const MAX_HP = 100;
@@ -39,10 +41,20 @@ export const HITBOX = {
 export const MOVE = {
   walk: 6,
   sprint: 8.5,
+  knifeWalk: 10,
+  knifeSprint: 14.5,
+  knifeAirAccel: 7,
+  /** High accel and friction: with the knife, starts, stops and turns are near-instant. */
+  knifeAccel: 30,
+  knifeFriction: 14,
   crouch: 3,
   ads: 3.6,
   accel: 12,
   airAccel: 2.5,
+  /** Air control while sprinting. */
+  sprintAirAccel: 6,
+  /** Speed multiplier for jumping out of a sprint. Based on the run speed, so hops don't stack. */
+  sprintJump: 1.25,
   friction: 7,
   stopSpeed: 1.5,
   gravity: 20,
@@ -70,8 +82,19 @@ export const FFA_COLORS = [
 
 export type GameMode = 'ffa' | 'tdm';
 
+/** Which weapons a match allows. Independent from the mode, except Gun Game, which is always FFA. */
+export type Arsenal = 'all' | 'sniper' | 'shotgun' | 'gungame';
+
+export const ARSENAL_NAMES: Record<Arsenal, string> = {
+  all: 'Todas as armas',
+  sniper: 'Só sniper',
+  shotgun: 'Só doze',
+  gungame: 'Gun Game',
+};
+
 export interface MatchConfig {
   mode: GameMode;
+  arsenal: Arsenal;
   /** 0 = no limit (practice). */
   killLimit: number;
   /** Minutes; 0 = no limit. */
@@ -82,4 +105,4 @@ export interface MatchConfig {
 export const KILL_LIMITS = [10, 20, 30, 50];
 export const TIME_LIMITS = [5, 10, 15, 20];
 
-export const DEFAULT_CONFIG: MatchConfig = { mode: 'ffa', killLimit: 20, timeLimit: 10, friendlyFire: false };
+export const DEFAULT_CONFIG: MatchConfig = { mode: 'ffa', arsenal: 'all', killLimit: 20, timeLimit: 10, friendlyFire: false };

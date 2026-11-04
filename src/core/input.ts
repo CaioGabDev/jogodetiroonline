@@ -2,6 +2,19 @@ import { settings, type Action } from './settings';
 
 type KeyHook = (code: string, e: KeyboardEvent) => boolean;
 
+/** Keyboard Lock API. Chromium only, needs HTTPS or localhost, and only takes effect in fullscreen. */
+type KeyboardLock = { lock(codes: string[]): Promise<void>; unlock(): void };
+
+/**
+ * Keys of the browser's reserved shortcuts (Ctrl+W/T/N), which a page can't cancel otherwise.
+ * Tab stays out so Alt+Tab keeps working, and Escape so it still pauses.
+ */
+const RESERVED_KEYS = ['KeyW', 'KeyT', 'KeyN'];
+
+function keyboardLock(): KeyboardLock | undefined {
+  return (navigator as Navigator & { keyboard?: KeyboardLock }).keyboard;
+}
+
 /**
  * Tracks keyboard/mouse state using physical key codes. Mouse buttons are
  * represented as "Mouse0".."Mouse4" so they can be bound like keys.
@@ -77,6 +90,8 @@ class Input {
   }
 
   private onKeyDown(e: KeyboardEvent): void {
+    // Ctrl+W with the keyboard lock active: comes before the hooks so it can't close the tab from the chat box.
+    if (e.ctrlKey && e.code === 'KeyW') e.preventDefault();
     for (let i = this.keyHooks.length - 1; i >= 0; i--) {
       if (this.keyHooks[i](e.code, e)) return;
     }
@@ -112,10 +127,27 @@ class Input {
         }
       });
     }
+    this.captureShortcuts();
+  }
+
+  /** Fullscreen + keyboard lock, the only way to stop Ctrl+W from closing the tab. Must run inside a click. */
+  private captureShortcuts(): void {
+    const kb = keyboardLock();
+    if (!kb) return;
+    kb.lock(RESERVED_KEYS).catch(() => {
+      /* unavailable: the "leave site?" prompt still covers it */
+    });
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {
+        /* no user gesture (match started by the host): retried on the next click */
+      });
+    }
   }
 
   exitLock(): void {
     if (document.pointerLockElement) document.exitPointerLock();
+    keyboardLock()?.unlock();
+    if (document.fullscreenElement) void document.exitFullscreen();
   }
 
   clear(): void {

@@ -171,14 +171,19 @@ export class Hud {
 
   setAmmo(weapon: number, mag: number, reserve: number, reload: number): void {
     const def = WEAPONS[weapon];
-    this.text(this.ammoMag, String(mag));
-    this.ammoMag.classList.toggle('empty', mag === 0);
+    this.text(this.ammoMag, def.melee ? '∞' : String(mag));
+    this.ammoMag.classList.toggle('empty', !def.melee && mag === 0);
     this.ammoMag.classList.toggle('low', mag > 0 && mag <= Math.ceil(def.mag * 0.25));
-    this.text(this.ammoRes, def.infiniteReserve ? '/ ∞' : `/ ${reserve}`);
+    this.text(this.ammoRes, def.melee ? '' : def.infiniteReserve ? '/ ∞' : `/ ${reserve}`);
     this.text(this.weaponName, def.name.toUpperCase());
     this.slots.forEach((s, i) => s.classList.toggle('active', i === weapon));
     show(this.reloadBar, reload >= 0);
     if (reload >= 0) this.width(this.reloadFill, Math.round(reload * 100));
+  }
+
+  /** Shows only the weapons the player can use right now. */
+  setSlots(allowed: number[]): void {
+    this.slots.forEach((s, i) => show(s, allowed.includes(i)));
   }
 
   setTimer(ms: number): void {

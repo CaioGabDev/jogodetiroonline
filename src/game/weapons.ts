@@ -1,3 +1,5 @@
+import type { Arsenal } from './constants';
+
 export interface WeaponDef {
   id: number;
   name: string;
@@ -27,6 +29,7 @@ export interface WeaponDef {
   falloff: { start: number; end: number; min: number } | null;
   tracer: number;
   ammoPickup: number;
+  melee?: boolean;
 }
 
 export const WEAPONS: WeaponDef[] = [
@@ -127,8 +130,9 @@ export const WEAPONS: WeaponDef[] = [
     spreadAds: 0.0,
     spreadMove: 0.05,
     spreadAir: 0.12,
-    kick: 0.07,
-    kickYaw: 0.01,
+    // No camera recoil: at 4.2x zoom any kick throws the aim off, and recovering it drags the scope down.
+    kick: 0,
+    kickYaw: 0,
     recover: 4,
     reloadTime: 3.0,
     zoom: 4.2,
@@ -138,9 +142,54 @@ export const WEAPONS: WeaponDef[] = [
     tracer: 0xbfe6ff,
     ammoPickup: 10,
   },
+  {
+    id: 4,
+    name: 'Faca',
+    short: 'FACA',
+    damage: 70,
+    interval: 500,
+    auto: false,
+    mag: 0,
+    reserve: 0,
+    maxReserve: 0,
+    infiniteReserve: true,
+    pellets: 1,
+    spreadHip: 0,
+    spreadAds: 0,
+    spreadMove: 0,
+    spreadAir: 0.015,
+    kick: 0.015,
+    kickYaw: 0,
+    recover: 12,
+    reloadTime: 0,
+    zoom: 1,
+    adsTime: 0.1,
+    range: 2.4,
+    falloff: null,
+    tracer: 0xcdd4dc,
+    ammoPickup: 0,
+    melee: true,
+  },
 ];
 
 export const WEAPON_COUNT = WEAPONS.length;
+
+/** Gun Game: the weapon for each kill count (rifle, doze, sniper, pistol, knife). Getting past the end wins. */
+export const GUN_GAME_LADDER = [0, 0, 2, 2, 3, 3, 1, 1, 4];
+
+/** Weapons a player with this many kills may use. The single-weapon modes keep the knife for movement. */
+export function allowedWeapons(arsenal: Arsenal, kills: number): number[] {
+  switch (arsenal) {
+    case 'sniper':
+      return [3, 4];
+    case 'shotgun':
+      return [2, 4];
+    case 'gungame':
+      return [GUN_GAME_LADDER[Math.min(Math.max(kills, 0), GUN_GAME_LADDER.length - 1)]];
+    default:
+      return WEAPONS.map((w) => w.id);
+  }
+}
 export const HEADSHOT_MULT = 2;
 
 /** Rifle horizontal recoil pattern (multiplied by kickYaw), cycles after the end. */

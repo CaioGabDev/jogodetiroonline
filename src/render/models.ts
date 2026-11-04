@@ -21,6 +21,7 @@ const GUN_SHAPES: Array<{ len: number; h: number }> = [
   { len: 0.35, h: 0.12 },
   { len: 0.85, h: 0.14 },
   { len: 1.1, h: 0.11 },
+  { len: 0.3, h: 0.05 },
 ];
 
 export interface ModelState {

@@ -8,6 +8,10 @@ const accent = new THREE.MeshStandardMaterial({ color: 0x5c6b3a, roughness: 0.7 
 const skin = new THREE.MeshStandardMaterial({ color: 0xc99a74, roughness: 0.8 });
 const glove = new THREE.MeshStandardMaterial({ color: 0x24272b, roughness: 0.9 });
 const lens = new THREE.MeshStandardMaterial({ color: 0x113355, emissive: 0x0a2244, roughness: 0.2, metalness: 0.8 });
+const steel = new THREE.MeshStandardMaterial({ color: 0xe4e8ee, roughness: 0.35, metalness: 0.2 });
+
+/** Duration of a knife swing, in seconds. */
+const SWING_TIME = 0.28;
 
 function box(mat: THREE.Material, w: number, h: number, d: number, x: number, y: number, z: number): THREE.Mesh {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -96,6 +100,20 @@ function buildSniper(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.78), hipPos: new THREE.Vector3(0.2, -0.2, -0.62), adsPos: new THREE.Vector3(0, -0.085, -0.4), mag };
 }
 
+function buildKnife(): GunModel {
+  const g = new THREE.Group();
+  g.add(box(steel, 0.014, 0.04, 0.2, 0, 0.012, -0.16));
+  const tip = box(steel, 0.014, 0.028, 0.028, 0, 0.018, -0.265);
+  tip.rotation.x = Math.PI / 4;
+  g.add(tip);
+  g.add(box(dark, 0.03, 0.06, 0.012, 0, 0.01, -0.055));
+  g.add(box(dark, 0.028, 0.035, 0.11, 0, 0.006, 0.005));
+  g.add(box(glove, 0.06, 0.07, 0.08, 0, -0.01, 0.01));
+  g.add(box(skin, 0.055, 0.05, 0.16, 0, -0.02, 0.12));
+  const pos = new THREE.Vector3(0.2, -0.17, -0.48);
+  return { group: g, muzzle: new THREE.Vector3(0, 0.015, -0.27), hipPos: pos, adsPos: pos, mag: null };
+}
+
 export interface ViewmodelState {
   aim: number;
   speed: number;
@@ -123,9 +141,10 @@ export class Viewmodel {
   private flash: THREE.Sprite;
   private flashLife = 0;
   private landDip = 0;
+  private swingT = 0;
 
   constructor(scene: THREE.Scene) {
-    this.guns = [buildRifle(), buildPistol(), buildShotgun(), buildSniper()];
+    this.guns = [buildRifle(), buildPistol(), buildShotgun(), buildSniper(), buildKnife()];
     this.guns.forEach((g, i) => {
       g.group.visible = i === 0;
       this.root.add(g.group);
@@ -145,7 +164,12 @@ export class Viewmodel {
 
   setWeapon(w: number): void {
     this.current = w;
+    this.swingT = 0;
     this.guns.forEach((g, i) => (g.group.visible = i === w));
+  }
+
+  swing(): void {
+    this.swingT = SWING_TIME;
   }
 
   fire(strength: number): void {
@@ -216,10 +240,23 @@ export class Viewmodel {
     pos.y -= lower * 0.3;
     rotX -= lower * 0.6;
 
-    g.group.position.lerp(pos, Math.min(1, dt * 25));
-    g.group.rotation.x += (rotX - g.group.rotation.x) * Math.min(1, dt * 18);
-    g.group.rotation.y += (rotY - g.group.rotation.y) * Math.min(1, dt * 10);
-    g.group.rotation.z += (rotZ - g.group.rotation.z) * Math.min(1, dt * 10);
+    // Knife slash: right to left across the screen, applied directly so the smoothing below doesn't mute it.
+    this.swingT = Math.max(0, this.swingT - dt);
+    const swinging = this.swingT > 0;
+    if (swinging) {
+      const a = Math.sin((1 - this.swingT / SWING_TIME) * Math.PI);
+      pos.x -= a * 0.2;
+      pos.y += a * 0.06;
+      pos.z -= a * 0.16;
+      rotX -= a * 0.3;
+      rotY += a * 0.9;
+      rotZ += a * 0.5;
+    }
+
+    g.group.position.lerp(pos, swinging ? 1 : Math.min(1, dt * 25));
+    g.group.rotation.x += (rotX - g.group.rotation.x) * (swinging ? 1 : Math.min(1, dt * 18));
+    g.group.rotation.y += (rotY - g.group.rotation.y) * (swinging ? 1 : Math.min(1, dt * 10));
+    g.group.rotation.z += (rotZ - g.group.rotation.z) * (swinging ? 1 : Math.min(1, dt * 10));
     g.group.updateMatrix();
 
     if (this.flashLife > 0) {

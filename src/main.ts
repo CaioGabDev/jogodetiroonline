@@ -86,6 +86,10 @@ class App {
         });
       },
       onLeave: () => this.leave(),
+      onTeam: (team) => {
+        this.net?.send({ type: 'setTeam', team });
+        input.requestLock();
+      },
     });
     this.settingsUI = new SettingsUI(ui);
 
@@ -97,7 +101,11 @@ class App {
       if (this.screen === 'game' && !this.results.visible) input.requestLock();
     });
     document.addEventListener('pointerdown', () => audio.unlock(), { once: true });
-    window.addEventListener('beforeunload', () => {
+    // Asks before closing mid-match. Cleanup waits for pagehide so that cancelling keeps the room alive.
+    window.addEventListener('beforeunload', (e) => {
+      if (this.screen === 'game' && !this.results.visible) e.preventDefault();
+    });
+    window.addEventListener('pagehide', () => {
       this.host?.destroy();
       this.net?.close();
     });
@@ -298,6 +306,7 @@ class App {
         }
         if (this.screen === 'lobby') this.lobby.update(m.lobby, net.localId);
         this.game?.onMessage(m);
+        this.syncTeamButton();
         break;
       }
       case 'start':
@@ -336,7 +345,14 @@ class App {
       match,
     );
     this.showScreen('game');
+    this.syncTeamButton();
     if (!input.locked) this.pause.show(true, true);
+  }
+
+  private syncTeamButton(): void {
+    const lobby = this.lobbyState;
+    const me = lobby?.players.find((p) => p.id === this.net?.localId);
+    this.pause.setOtherTeam(lobby?.config.mode === 'tdm' && me ? (me.team === 'red' ? 'blue' : 'red') : null);
   }
 
   private stopGame(): void {

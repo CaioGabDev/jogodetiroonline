@@ -1,3 +1,4 @@
+import { WEAPONS } from '../game/weapons';
 import { clamp } from './util';
 
 export type Action =
@@ -15,6 +16,7 @@ export type Action =
   | 'weapon2'
   | 'weapon3'
   | 'weapon4'
+  | 'weapon5'
   | 'scoreboard'
   | 'chat'
   | 'teamChat';
@@ -34,6 +36,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   weapon2: 'Pistola',
   weapon3: 'Escopeta',
   weapon4: 'Sniper',
+  weapon5: 'Faca',
   scoreboard: 'Placar',
   chat: 'Chat (todos)',
   teamChat: 'Chat (time)',
@@ -72,6 +75,8 @@ export interface Settings {
   showFps: boolean;
   showPing: boolean;
   killfeedSize: number;
+  /** Weapons this player chose to carry (ids). The first one is the starting weapon. */
+  loadout: number[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -95,6 +100,7 @@ export const DEFAULT_SETTINGS: Settings = {
     weapon2: ['Digit2', ''],
     weapon3: ['Digit3', ''],
     weapon4: ['Digit4', ''],
+    weapon5: ['Digit5', ''],
     scoreboard: ['Tab', ''],
     chat: ['Enter', ''],
     teamChat: ['KeyY', ''],
@@ -119,6 +125,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showFps: false,
   showPing: true,
   killfeedSize: 5,
+  loadout: WEAPONS.map((w) => w.id),
 };
 
 export const FPS_LIMITS = [0, 30, 60, 90, 120, 144, 165, 240];
@@ -155,6 +162,10 @@ function sanitize(raw: unknown): Settings {
   s.showFps = bool('showFps', s.showFps);
   s.showPing = bool('showPing', s.showPing);
   s.killfeedSize = Math.round(num('killfeedSize', 2, 10, s.killfeedSize));
+  if (Array.isArray(r.loadout)) {
+    const chosen = s.loadout.filter((w) => (r.loadout as unknown[]).includes(w));
+    if (chosen.length > 0) s.loadout = chosen;
+  }
   if (r.binds && typeof r.binds === 'object') {
     const b = r.binds as Record<string, unknown>;
     for (const a of Object.keys(s.binds) as Action[]) {

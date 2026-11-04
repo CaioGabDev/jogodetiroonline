@@ -3,12 +3,12 @@ import { audio } from '../core/audio';
 import { input } from '../core/input';
 import { settings } from '../core/settings';
 import { clamp, damp, now, r2, r3 } from '../core/util';
-import { INPUT_RATE, MAX_HP, RESPAWN_MS, TEAM_COLORS, type MatchConfig } from './constants';
+import { ARSENAL_NAMES, INPUT_RATE, MAX_HP, MOVE, RESPAWN_MS, TEAM_COLORS, type MatchConfig } from './constants';
 import { rayPlayer } from './hitbox';
 import { MAP } from './mapData';
 import { CollisionWorld, eyeHeight, type PState } from './physics';
 import { RemotePlayer } from './player';
-import { RECOIL_PATTERN, WEAPONS, WEAPON_COUNT, fullAmmo } from './weapons';
+import { GUN_GAME_LADDER, RECOIL_PATTERN, WEAPONS, WEAPON_COUNT, allowedWeapons, fullAmmo } from './weapons';
 import type { NetClient } from '../net/client';
 import { F_PROTECTED, type HostMsg, type LobbyState, type MatchInfo, type PlayerInfo } from '../net/protocol';
 import type { SceneManager } from '../render/scene';
@@ -28,6 +28,8 @@ export interface GameDeps {
 
 const LOOK_SCALE = 0.0005;
 const SWITCH_MS = 380;
+/** Longest wait after a shot before recoil starts to recover, whatever the weapon's fire rate. */
+const RECOVER_DELAY_MS = 300;
 
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -283,7 +285,7 @@ export class Game {
     this.reserve = ammo.reserve;
     this.reloadW = -1;
     this.pendingShots = [];
-    this.setWeapon(0, true);
+    this.setWeapon(this.allowed()[0], true);
     this.killerId = -1;
     this.aimT = 0;
     this.viewmodel.visible = true;
@@ -326,10 +328,11 @@ export class Game {
     const muzzle = new THREE.Vector3(o[0], o[1], o[2]);
     if (r && r.model.root.visible) r.model.muzzle.getWorldPosition(muzzle);
     const def = WEAPONS[w];
+    const melee = def?.melee === true;
     const pellets = h.length;
     for (let i = 0; i < pellets; i++) {
       const end = new THREE.Vector3(e[i * 3], e[i * 3 + 1], e[i * 3 + 2]);
-      if (pellets === 1 || i % 3 === 0) this.effects.tracer(muzzle, end, def?.tracer ?? 0xffd27a);
+      if (!melee && (pellets === 1 || i % 3 === 0)) this.effects.tracer(muzzle, end, def?.tracer ?? 0xffd27a);
       if (h[i] === 1) {
         const normal = new THREE.Vector3(n[i * 3], n[i * 3 + 1], n[i * 3 + 2]);
         this.effects.decal(end, normal);
@@ -338,7 +341,7 @@ export class Game {
         this.effects.impact(end, null, 'player', 6);
       }
     }
-    this.effects.muzzleFlash(muzzle, 0.55, true);
+    if (!melee) this.effects.muzzleFlash(muzzle, 0.55, true);
     audio.shot(w, muzzle);
   }
 
@@ -346,6 +349,14 @@ export class Game {
 
   private get canAct(): boolean {
     return this.alive && !this.ended && input.gameEnabled;
+  }
+
+  /** What the match allows (the host enforces this) narrowed to the player's own choice in the settings. */
+  private allowed(): number[] {
+    const kills = this.scores.get(this.localId)?.k ?? 0;
+    const inMatch = allowedWeapons(this.config.arsenal, kills);
+    const mine = inMatch.filter((w) => settings.get().loadout.includes(w));
+    return mine.length > 0 ? mine : inMatch;
   }
 
   private setWeapon(w: number, instant = false): void {
@@ -360,6 +371,7 @@ export class Game {
   }
 
   private startReload(): void {
+    if (WEAPONS[this.weapon].melee) return;
     const w = this.weapon;
     const def = WEAPONS[w];
     const t = this.simT;
@@ -403,7 +415,7 @@ export class Game {
     const def = WEAPONS[w];
     const t = this.simT;
     this.lastShot = t;
-    this.mag[w]--;
+    if (!def.melee) this.mag[w]--;
     this.sprinting = false;
 
     const eye = this.me.y + this.eyeH;
@@ -441,7 +453,7 @@ export class Game {
         }
       }
       const end = origin.clone().addScaledVector(d, dist);
-      if (def.pellets === 1 || i % 3 === 0) this.effects.tracer(muzzleWorld, end, def.tracer);
+      if (!def.melee && (def.pellets === 1 || i % 3 === 0)) this.effects.tracer(muzzleWorld, end, def.tracer);
       if (playerHit) {
         this.effects.impact(end, null, 'player', 6);
       } else if (wh) {
@@ -462,8 +474,13 @@ export class Game {
     this.burst++;
     this.bloom = Math.min(0.03, this.bloom + def.kick * 0.25);
 
-    this.viewmodel.fire(w === 3 || w === 2 ? 1.6 : 1);
-    this.effects.muzzleFlash(muzzleWorld, 0.35, true);
+    if (def.melee) {
+      this.viewmodel.swing();
+    } else {
+      this.viewmodel.fire(w === 3 || w === 2 ? 1.6 : 1);
+      const scoped = w === 3 && this.aimT > 0.85;
+      if (!scoped) this.effects.muzzleFlash(muzzleWorld, 0.35, true);
+    }
     audio.shot(w);
     this.protected = false;
 
@@ -476,13 +493,17 @@ export class Game {
     if (this.reloadW >= 0 && t >= this.reloadUntil) this.finishReload();
 
     // Recoil recovery after the weapon stops firing.
-    if (t - this.lastShot > def.interval * 1.4) {
+    if (t - this.lastShot > Math.min(def.interval * 1.4, RECOVER_DELAY_MS)) {
       const k = damp(def.recover, dt);
       this.recoilP -= this.recoilP * k;
       this.recoilY -= this.recoilY * k;
       this.burst = 0;
     }
     this.bloom -= this.bloom * damp(5, dt);
+
+    // Covers Gun Game level-ups and settings changed mid-match.
+    const allowed = this.allowed();
+    if (!allowed.includes(this.weapon)) this.setWeapon(allowed[0]);
 
     if (!this.canAct) {
       input.consume('fire');
@@ -491,10 +512,13 @@ export class Game {
 
     // Weapon switching
     for (let i = 0; i < WEAPON_COUNT; i++) {
-      if (input.consume(`weapon${i + 1}` as 'weapon1')) this.setWeapon(i);
+      if (input.consume(`weapon${i + 1}` as 'weapon1') && allowed.includes(i)) this.setWeapon(i);
     }
     const wheel = input.takeWheel();
-    if (wheel !== 0) this.setWeapon((this.weapon + (wheel > 0 ? 1 : -1) + WEAPON_COUNT) % WEAPON_COUNT);
+    if (wheel !== 0) {
+      const next = allowed.indexOf(this.weapon) + (wheel > 0 ? 1 : -1) + allowed.length;
+      this.setWeapon(allowed[next % allowed.length]);
+    }
     if (input.consume('reload')) this.startReload();
 
     const wd = WEAPONS[this.weapon];
@@ -503,7 +527,7 @@ export class Game {
     if (!want) return;
     if (t < this.switchUntil || this.reloadW >= 0) return;
     if (t - this.lastShot < wd.interval - 1) return;
-    if (this.mag[this.weapon] <= 0) {
+    if (!wd.melee && this.mag[this.weapon] <= 0) {
       if (t - this.lastDry > 300) {
         audio.dryFire();
         this.lastDry = t;
@@ -551,11 +575,12 @@ export class Game {
       } else ads = input.isDown('aim');
     }
     const t = this.simT;
-    const busy = this.reloadW >= 0 || t < this.switchUntil;
-    if (busy) ads = false;
-    this.sprinting = act && input.isDown('sprint') && fwd > 0 && !ads && !wantCrouch && t - this.lastShot > 300;
-
     const def = WEAPONS[this.weapon];
+    const busy = this.reloadW >= 0 || t < this.switchUntil;
+    if (busy || def.melee) ads = false;
+    const shotPause = !def.melee && t - this.lastShot <= 300;
+    this.sprinting = act && input.isDown('sprint') && fwd > 0 && !ads && !wantCrouch && !shotPause;
+
     const aimTarget = ads && this.alive ? 1 : 0;
     const aStep = dt / def.adsTime;
     if (aimTarget > this.aimT) this.aimT = Math.min(1, this.aimT + aStep);
@@ -567,7 +592,7 @@ export class Game {
       this.prev.z = this.me.z;
       const res = this.world.step(
         this.me,
-        { fwd, side, jump, crouch: wantCrouch, sprint: this.sprinting, ads: this.aimT > 0.3, yaw: this.yaw },
+        { fwd, side, jump, crouch: wantCrouch, sprint: this.sprinting, knife: def.melee === true, ads: this.aimT > 0.3, yaw: this.yaw },
         dt,
       );
       if (res.jumped) audio.jump();
@@ -680,14 +705,17 @@ export class Game {
       const pz = this.prev.z + (this.me.z - this.prev.z) * alpha;
       const speed = Math.hypot(this.me.vx, this.me.vz);
       const bobOn = this.me.onGround && speed > 1;
-      if (bobOn) this.bobPhase += dt * speed * 1.45;
+      // Capped so the knife's speed doesn't turn the head bob into a shake.
+      if (bobOn) this.bobPhase += dt * Math.min(speed, MOVE.sprint) * 1.45;
       const bobAmt = bobOn ? Math.min(1, speed / 6) * (1 - this.aimT) : 0;
       const bobY = Math.sin(this.bobPhase * 2) * 0.035 * bobAmt;
       const bobX = Math.cos(this.bobPhase) * 0.025 * bobAmt;
       this.landDip -= this.landDip * damp(9, dt);
-      cam.position.set(px + Math.cos(this.yaw) * bobX, py + this.eyeH + bobY - this.landDip, pz - Math.sin(this.yaw) * bobX);
+      // Looking through the scope the view holds still: no landing dip or flinch.
+      const steady = this.weapon === 3 ? 1 - aimT : 1;
+      cam.position.set(px + Math.cos(this.yaw) * bobX, py + this.eyeH + bobY - this.landDip * steady, pz - Math.sin(this.yaw) * bobX);
       this.shake -= this.shake * damp(8, dt);
-      const sh = this.shake * 0.02;
+      const sh = this.shake * 0.02 * steady;
       cam.rotation.set(
         this.pitch + recoilP + (Math.random() - 0.5) * sh,
         this.yaw + recoilY + (Math.random() - 0.5) * sh,
@@ -708,7 +736,7 @@ export class Game {
     const t = this.simT;
     this.viewmodel.update(dt, {
       aim: aimT,
-      speed: Math.hypot(this.me.vx, this.me.vz),
+      speed: Math.min(Math.hypot(this.me.vx, this.me.vz), MOVE.sprint),
       onGround: this.me.onGround,
       sprint: this.sprinting,
       reload: this.reloadW >= 0 ? (t - this.reloadStart) / (this.reloadUntil - this.reloadStart) : -1,
@@ -771,11 +799,20 @@ export class Game {
     this.hud.setHealth(this.alive ? this.hp : 0);
     const reload = this.reloadW >= 0 ? (this.simT - this.reloadStart) / (this.reloadUntil - this.reloadStart) : -1;
     this.hud.setAmmo(this.weapon, this.mag[this.weapon], this.reserve[this.weapon], reload);
+    this.hud.setSlots(this.allowed());
     this.hud.setProtected(this.alive && this.protected);
     const tl = this.timeLeft < 0 ? -1 : Math.max(0, this.timeLeft - (t - this.timeRecvAt));
     this.hud.setTimer(tl);
 
-    const limit = this.config.killLimit > 0 ? `Limite: ${this.config.killLimit} kills` : 'Treino livre';
+    const { arsenal, killLimit } = this.config;
+    const killsText = killLimit > 0 ? `Limite: ${killLimit} kills` : 'Treino livre';
+    const level = Math.min((this.scores.get(this.localId)?.k ?? 0) + 1, GUN_GAME_LADDER.length);
+    const limit =
+      arsenal === 'gungame'
+        ? `Gun Game: nível ${level} de ${GUN_GAME_LADDER.length}`
+        : arsenal === 'all'
+          ? killsText
+          : `${ARSENAL_NAMES[arsenal]} · ${killsText}`;
     if (this.config.mode === 'tdm') {
       this.hud.setScore(
         { text: `VERMELHO ${this.teams[0]}`, color: TEAM_COLORS.red },

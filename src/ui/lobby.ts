@@ -1,10 +1,12 @@
 import {
+  ARSENAL_NAMES,
   FFA_COLORS,
   KILL_LIMITS,
   MAX_PLAYERS,
   TEAM_COLORS,
   TEAM_NAMES,
   TIME_LIMITS,
+  type Arsenal,
   type MatchConfig,
   type Team,
 } from '../game/constants';
@@ -176,19 +178,31 @@ export class Lobby {
       });
       return el('div', { class: 'cfg-row' }, [el('span', { text: label }), s]);
     };
+    const gunGame = c.arsenal === 'gungame';
     this.config.append(
-      sel<'ffa' | 'tdm'>(
-        'Modo',
-        [
-          ['ffa', 'Mata-mata (FFA)'],
-          ['tdm', 'Mata-mata em equipe (TDM)'],
-        ],
-        c.mode,
-        (v) => ({ mode: v }),
-      ),
-      sel<number>('Limite de kills', KILL_LIMITS.map((k) => [k, `${k} kills`] as [number, string]), c.killLimit, (v) => ({ killLimit: v })),
-      sel<number>('Tempo', TIME_LIMITS.map((t) => [t, `${t} min`] as [number, string]), c.timeLimit, (v) => ({ timeLimit: v })),
+      sel<Arsenal>('Armas', Object.entries(ARSENAL_NAMES) as Array<[Arsenal, string]>, c.arsenal, (v) => ({ arsenal: v })),
     );
+    if (gunGame) {
+      // Fixed by the rules: everyone for themselves, and the match ends at the last weapon.
+      this.config.append(
+        el('div', { class: 'cfg-row' }, [el('span', { text: 'Modo' }), el('b', { text: 'Mata-mata (FFA)' })]),
+        el('div', { class: 'cfg-row' }, [el('span', { text: 'Vitória' }), el('b', { text: 'Passar pela última arma' })]),
+      );
+    } else {
+      this.config.append(
+        sel<'ffa' | 'tdm'>(
+          'Modo',
+          [
+            ['ffa', 'Mata-mata (FFA)'],
+            ['tdm', 'Mata-mata em equipe (TDM)'],
+          ],
+          c.mode,
+          (v) => ({ mode: v }),
+        ),
+        sel<number>('Limite de kills', KILL_LIMITS.map((k) => [k, `${k} kills`] as [number, string]), c.killLimit, (v) => ({ killLimit: v })),
+      );
+    }
+    this.config.append(sel<number>('Tempo', TIME_LIMITS.map((t) => [t, `${t} min`] as [number, string]), c.timeLimit, (v) => ({ timeLimit: v })));
     if (c.mode === 'tdm') {
       this.config.append(
         sel<string>(

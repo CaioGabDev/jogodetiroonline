@@ -159,6 +159,7 @@ export interface PInput {
   jump: boolean;
   crouch: boolean;
   sprint: boolean;
+  knife: boolean;
   ads: boolean;
   yaw: number;
 }
@@ -323,30 +324,53 @@ export class CollisionWorld {
     }
     const maxSpeed = s.crouch
       ? MOVE.crouch
+      : inp.knife
+        ? inp.sprint && inp.fwd > 0
+          ? MOVE.knifeSprint
+          : MOVE.knifeWalk
       : inp.ads
         ? MOVE.ads
         : inp.sprint && inp.fwd > 0
           ? MOVE.sprint
           : MOVE.walk;
     const wishSpeed = wl > 1e-4 ? maxSpeed : 0;
+    const accel = inp.knife ? MOVE.knifeAccel : MOVE.accel;
+    const friction = inp.knife ? MOVE.knifeFriction : MOVE.friction;
+    const airAccel = inp.knife ? MOVE.knifeAirAccel : inp.sprint ? MOVE.sprintAirAccel : MOVE.airAccel;
 
     const wasOnGround = s.onGround;
     if (s.onGround) {
       const sp = Math.hypot(s.vx, s.vz);
       if (sp > 0) {
         const control = Math.max(sp, MOVE.stopSpeed);
-        const ns = Math.max(sp - control * MOVE.friction * dt, 0) / sp;
+        const ns = Math.max(sp - control * friction * dt, 0) / sp;
         s.vx *= ns;
         s.vz *= ns;
       }
-      accelerate(s, wx, wz, wishSpeed, MOVE.accel, dt);
+      accelerate(s, wx, wz, wishSpeed, accel, dt);
       if (inp.jump) {
         s.vy = MOVE.jump;
         s.onGround = false;
         res.jumped = true;
+        if (inp.sprint) {
+          const run = Math.hypot(s.vx, s.vz);
+          if (run > 0) {
+            const k = Math.max(1, (Math.min(run, maxSpeed) * MOVE.sprintJump) / run);
+            s.vx *= k;
+            s.vz *= k;
+          }
+        }
       }
     } else {
-      accelerate(s, wx, wz, wishSpeed, MOVE.airAccel, dt);
+      const before = Math.hypot(s.vx, s.vz);
+      accelerate(s, wx, wz, wishSpeed, airAccel, dt);
+      // Air control steers but never adds speed, so strafing can't build past the run speed.
+      const after = Math.hypot(s.vx, s.vz);
+      const limit = Math.max(before, maxSpeed);
+      if (after > limit) {
+        s.vx *= limit / after;
+        s.vz *= limit / after;
+      }
     }
     s.vy = Math.max(s.vy - MOVE.gravity * dt, -40);
 

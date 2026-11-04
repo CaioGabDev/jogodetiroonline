@@ -121,7 +121,7 @@ export class MainMenu {
         ['Mouse Esq.', 'atirar'],
         ['Mouse Dir.', 'mirar / luneta'],
         ['R', 'recarregar'],
-        ['1-4 / Roda', 'trocar arma'],
+        ['1-5 / Roda', 'trocar arma'],
         ['Tab', 'placar'],
         ['Enter / Y', 'chat / chat do time'],
         ['Esc', 'pausa'],

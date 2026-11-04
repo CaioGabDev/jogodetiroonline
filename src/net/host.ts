@@ -1,5 +1,6 @@
 import type { DataConnection, Peer } from 'peerjs';
 import {
+  ARSENAL_NAMES,
   DEFAULT_CONFIG,
   FFA_COLORS,
   HEALTH_PICKUP,
@@ -17,6 +18,8 @@ import {
   RESPAWN_MS,
   SNAPSHOT_RATE,
   SPAWN_PROTECT_MS,
+  TEAM_NAMES,
+  TEAM_SWITCH_COOLDOWN_MS,
   type MatchConfig,
   type Team,
   KILL_LIMITS,
@@ -25,7 +28,7 @@ import {
 import { MAP, type SpawnDef } from '../game/mapData';
 import { CollisionWorld, eyeHeight } from '../game/physics';
 import { PositionHistory, rayPlayer } from '../game/hitbox';
-import { WEAPONS, damageAt, fullAmmo } from '../game/weapons';
+import { GUN_GAME_LADDER, WEAPONS, allowedWeapons, damageAt, fullAmmo } from '../game/weapons';
 import { clamp, now, r2, r3, randomCode, sanitizeText } from '../core/util';
 import {
   F_ADS,
@@ -107,6 +110,8 @@ interface SPlayer {
   /** Maps client clock to host clock (host ms = ct + ctOff), estimated from the least-delayed inputs. */
   ctOff: number | null;
   lastHistT: number;
+  /** Host time until this player may change teams again. */
+  teamLockUntil: number;
 }
 
 interface PickupState {
@@ -179,7 +184,7 @@ export class HostServer {
     private cb: HostCallbacks = {},
   ) {
     this.offline = offline;
-    this.config = offline ? { mode: 'ffa', killLimit: 0, timeLimit: 0, friendlyFire: false } : { ...DEFAULT_CONFIG };
+    this.config = offline ? { ...DEFAULT_CONFIG, killLimit: 0, timeLimit: 0 } : { ...DEFAULT_CONFIG };
   }
 
   /** Registers the room with PeerJS (retrying on code collisions). Returns the room code. */
@@ -317,7 +322,8 @@ export class HostServer {
     };
     conn.onClose = () => this.removePlayer(id);
 
-    const match = this.phase === 'lobby' ? null : this.matchInfo();
+    // Joining during the results screen waits in the lobby: there's no match left to spawn into.
+    const match = this.phase === 'playing' ? this.matchInfo() : null;
     this.send(p, { type: 'welcome', id, lobby: this.lobbyState(), match });
     this.broadcastLobby();
     if (!local) this.broadcast({ type: 'sys', text: `${name} entrou na sala` }, id);
@@ -361,6 +367,7 @@ export class HostServer {
       ctOff: null,
       lastHistT: 0,
       clockAhead: 0,
+      teamLockUntil: 0,
     };
   }
 
@@ -450,10 +457,7 @@ export class HostServer {
         this.onChat(p, m.text, m.team);
         break;
       case 'setTeam':
-        if (this.phase !== 'playing' && this.config.mode === 'tdm' && !p.bot) {
-          p.info.team = m.team;
-          this.broadcastLobby();
-        }
+        this.onSetTeam(p, m.team);
         break;
       case 'setColor':
         if (this.phase !== 'playing') {
@@ -467,6 +471,25 @@ export class HostServer {
       case 'hello':
         break;
     }
+  }
+
+  private onSetTeam(p: SPlayer, team: Team): void {
+    if (this.config.mode !== 'tdm' || p.bot || p.info.team === team) return;
+    const playing = this.phase === 'playing';
+    if (playing) {
+      const t = now();
+      if (t < p.teamLockUntil) {
+        this.send(p, { type: 'sys', text: 'Espere um pouco para trocar de time de novo.' });
+        return;
+      }
+      p.teamLockUntil = t + TEAM_SWITCH_COOLDOWN_MS;
+    }
+    p.info.team = team;
+    this.broadcastLobby();
+    if (!playing) return;
+    this.broadcast({ type: 'sys', text: `${p.info.name} foi para o time ${TEAM_NAMES[team]}` });
+    // Alive players move to the new team's spawn right away, without a death. The dead just wait for the respawn.
+    if (p.alive) this.spawnPlayer(p);
   }
 
   private onChat(p: SPlayer, raw: string, teamOnly: boolean): void {
@@ -497,6 +520,8 @@ export class HostServer {
     if (this.phase === 'playing' || this.offline) return;
     const c = { ...this.config, ...patch };
     if (c.mode !== 'ffa' && c.mode !== 'tdm') c.mode = 'ffa';
+    if (!(c.arsenal in ARSENAL_NAMES)) c.arsenal = 'all';
+    if (c.arsenal === 'gungame') c.mode = 'ffa';
     if (!KILL_LIMITS.includes(c.killLimit)) c.killLimit = DEFAULT_CONFIG.killLimit;
     if (!TIME_LIMITS.includes(c.timeLimit)) c.timeLimit = DEFAULT_CONFIG.timeLimit;
     c.friendlyFire = !!c.friendlyFire;
@@ -547,6 +572,10 @@ export class HostServer {
 
   // ---------------------------------------------------------------- simulation
 
+  private allowed(p: SPlayer): number[] {
+    return allowedWeapons(this.config.arsenal, p.kills);
+  }
+
   private isEnemy(a: SPlayer, b: SPlayer): boolean {
     if (a === b) return false;
     if (this.config.mode === 'ffa') return true;
@@ -586,7 +615,7 @@ export class HostServer {
     p.mag = ammo.mag;
     p.reserve = ammo.reserve;
     p.reloadW = -1;
-    p.weapon = 0;
+    p.weapon = this.allowed(p)[0];
     p.tp++;
     p.lastCt = -1;
     p.clockAhead = 0;
@@ -614,7 +643,7 @@ export class HostServer {
     p.yaw = m.yw;
     p.pitch = clamp(m.pt, -1.6, 1.6);
     p.ads = m.a;
-    if (m.w !== p.weapon) {
+    if (m.w !== p.weapon && this.allowed(p).includes(m.w)) {
       p.weapon = m.w;
       p.reloadW = -1;
     }
@@ -641,7 +670,8 @@ export class HostServer {
     const up = Math.max(0, ny - p.y);
     const h = m.c ? PLAYER.crouchHeight : PLAYER.height;
     const half = MAP.size / 2;
-    const maxHoriz = (MOVE.sprint * 1.25 * dct) / 1000 + 0.3;
+    // Not per weapon: speed carries over for a moment after switching away from the knife.
+    const maxHoriz = (MOVE.knifeSprint * MOVE.sprintJump * 1.25 * dct) / 1000 + 0.3;
     const maxUp = (9 * dct) / 1000 + 0.35;
     const invalid =
       p.clockAhead > 1500 ||
@@ -700,6 +730,7 @@ export class HostServer {
   private onReload(p: SPlayer, w: number): void {
     if (!p.alive) return;
     const def = WEAPONS[w];
+    if (def.melee || !this.allowed(p).includes(w)) return;
     if (p.reloadW === w || p.mag[w] >= def.mag) return;
     if (!def.infiniteReserve && p.reserve[w] <= 0) return;
     p.weapon = w;
@@ -729,6 +760,7 @@ export class HostServer {
       p.lastShotSeq = Math.max(p.lastShotSeq, m.s);
       this.sendAmmo(p);
     };
+    if (!this.allowed(p).includes(w)) return reject();
     if (w !== p.weapon) {
       p.weapon = w;
       if (p.reloadW !== w) p.reloadW = -1;
@@ -737,7 +769,7 @@ export class HostServer {
       if (t >= p.reloadUntil - 350) this.finishReload(p);
       else return reject();
     }
-    if (p.mag[w] <= 0) return reject();
+    if (!def.melee && p.mag[w] <= 0) return reject();
 
     // Fire-rate token bucket (tolerates network jitter, caps sustained rate).
     p.credits = Math.min(2, p.credits + (t - p.creditT) / (def.interval * 0.92));
@@ -750,7 +782,7 @@ export class HostServer {
     const pellets = m.d.length / 3;
     if (pellets > def.pellets) return reject();
 
-    p.mag[w]--;
+    if (!def.melee) p.mag[w]--;
     p.lastShotSeq = m.s;
     p.protectedUntil = 0;
 
@@ -844,8 +876,13 @@ export class HostServer {
   }
 
   private checkWin(): void {
+    if (this.phase !== 'playing') return;
+    if (this.config.arsenal === 'gungame') {
+      if ([...this.players.values()].some((p) => !p.bot && p.kills >= GUN_GAME_LADDER.length)) this.endMatch('kills');
+      return;
+    }
     const lim = this.config.killLimit;
-    if (lim <= 0 || this.phase !== 'playing') return;
+    if (lim <= 0) return;
     if (this.config.mode === 'ffa') {
       if ([...this.players.values()].some((p) => !p.bot && p.kills >= lim)) this.endMatch('kills');
     } else if (this.teamScore[0] >= lim || this.teamScore[1] >= lim) {

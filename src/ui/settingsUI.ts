@@ -9,14 +9,16 @@ import {
 } from '../core/settings';
 import { input } from '../core/input';
 import { clamp } from '../core/util';
+import { WEAPONS } from '../game/weapons';
 import { clear, el, show } from './dom';
 import { drawCrosshair } from './crosshair';
 import { toast } from './toast';
 
-type Tab = 'controls' | 'video' | 'audio' | 'crosshair' | 'hud';
+type Tab = 'controls' | 'weapons' | 'video' | 'audio' | 'crosshair' | 'hud';
 
 const TABS: Array<[Tab, string]> = [
   ['controls', 'Controles'],
+  ['weapons', 'Armas'],
   ['video', 'Vídeo'],
   ['audio', 'Áudio'],
   ['crosshair', 'Mira'],
@@ -112,6 +114,9 @@ export class SettingsUI {
     switch (this.tab) {
       case 'controls':
         this.renderControls(s);
+        break;
+      case 'weapons':
+        this.renderWeapons(s);
         break;
       case 'video':
         this.renderVideo(s);
@@ -268,7 +273,7 @@ export class SettingsUI {
       table.append(el('div', { class: 'bind-row' }, [el('span', { text: ACTION_LABELS[a] }), ...btns]));
     });
     c.append(table);
-    c.append(el('p', { class: 'hint', text: 'Esc (pausa) e roda do mouse (trocar arma) são fixos. Atenção: Ctrl+W fecha a aba no navegador.' }));
+    c.append(el('p', { class: 'hint', text: 'Esc (pausa) e roda do mouse (trocar arma) são fixos. Ctrl+W só é bloqueado em tela cheia no Chrome e no Edge; nos outros navegadores aparece um aviso antes de fechar.' }));
   }
 
   private startListening(action: Action, slot: 0 | 1, btn: HTMLElement): void {
@@ -430,6 +435,26 @@ export class SettingsUI {
       this.row('Ponto central', this.toggle(c.centerDot, (v) => upd((d) => (d.crosshair.centerDot = v)))),
     );
     redraw();
+  }
+
+  private renderWeapons(s: Settings): void {
+    this.content.append(
+      el('p', {
+        class: 'hint',
+        text: 'Escolha as armas que você leva para a partida. A primeira marcada é a arma inicial. Em Só sniper e Só doze valem só as armas do modo, e no Gun Game a arma depende das suas kills.',
+      }),
+    );
+    WEAPONS.forEach((w) => {
+      const control = this.toggle(s.loadout.includes(w.id), (on) => {
+        if (!on && settings.get().loadout.length === 1) {
+          toast('Escolha pelo menos uma arma.', 'warn');
+          this.render();
+          return;
+        }
+        settings.update((d) => (d.loadout = on ? [...d.loadout, w.id] : d.loadout.filter((x) => x !== w.id)));
+      });
+      this.content.append(this.row(w.name, control));
+    });
   }
 
   private renderHud(s: Settings): void {

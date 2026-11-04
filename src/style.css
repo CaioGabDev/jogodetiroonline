@@ -1342,15 +1342,21 @@ kbd {
 .scope {
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at center, transparent 0, transparent 34vh, #000 34.3vh);
 }
 
+/* Clean reticle: four thin ticks around a small dot, nothing covering the view. */
 .scope-lines {
   position: absolute;
-  inset: 0;
+  left: 50%;
+  top: 50%;
+  width: 121px;
+  height: 121px;
+  margin: -60px 0 0 -60px;
   background:
-    linear-gradient(#000, #000) center / 1px 68vh no-repeat,
-    linear-gradient(#000, #000) center / 68vh 1px no-repeat;
+    linear-gradient(#000, #000) top center / 1px 46px no-repeat,
+    linear-gradient(#000, #000) bottom center / 1px 46px no-repeat,
+    linear-gradient(#000, #000) left center / 46px 1px no-repeat,
+    linear-gradient(#000, #000) right center / 46px 1px no-repeat;
 }
 
 .scope-lines::after {
@@ -1358,9 +1364,9 @@ kbd {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 4px;
-  height: 4px;
-  margin: -2px 0 0 -2px;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
   background: #ff3b3b;
   border-radius: 50%;
 }

@@ -137,7 +137,7 @@ class AudioEngine {
     o.stop(t + opts.dur + 0.05);
   }
 
-  /** Gunshot per weapon (0 rifle, 1 pistol, 2 shotgun, 3 sniper). */
+  /** Attack sound per weapon (0 rifle, 1 pistol, 2 shotgun, 3 sniper, 4 knife). */
   shot(weapon: number, pos?: Vec3Like): void {
     const d = this.out('sfx', pos, 6);
     if (!d) return;
@@ -155,6 +155,9 @@ class AudioEngine {
         this.noiseBurst(d, { type: 'lowpass', freq: 1400, freqEnd: 200, q: 0.5, dur: 0.38, gain: 0.9 * v });
         this.tone(d, { type: 'sine', freq: 95, freqEnd: 35, dur: 0.25, gain: 0.8 * v });
         this.noiseBurst(d, { type: 'highpass', freq: 3000, dur: 0.06, gain: 0.25 * v });
+        break;
+      case 4:
+        this.noiseBurst(d, { type: 'bandpass', freq: 700, freqEnd: 2600, q: 1.2, dur: 0.16, gain: 0.3 * v });
         break;
       default:
         this.noiseBurst(d, { type: 'highpass', freq: 2000, dur: 0.08, gain: 0.6 * v });
