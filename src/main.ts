@@ -5,6 +5,7 @@ import { GameLoop } from './core/loop';
 import { normalizeCode } from './core/util';
 import { Game } from './game/game';
 import { HostServer } from './net/host';
+import { RoomBrowser } from './net/directory';
 import { NetClient, joinRemote, type DisconnectReason } from './net/client';
 import { describeError } from './net/peer';
 import type { HostMsg, LobbyState, MatchInfo, WelcomeMsg } from './net/protocol';
@@ -92,6 +93,7 @@ class App {
       },
     });
     this.settingsUI = new SettingsUI(ui);
+    this.roomBrowser = new RoomBrowser((rooms) => this.menu.setRooms(rooms));
 
     this.chat.onClose = () => this.updateGameInput();
     input.onLockChange((locked) => this.onLockChange(locked));
@@ -162,6 +164,8 @@ class App {
   private showScreen(s: Screen): void {
     this.screen = s;
     this.menu.show(s === 'menu');
+    if (s === 'menu') this.roomBrowser.start();
+    else this.roomBrowser.stop();
     this.lobby.show(s === 'lobby');
     if (s !== 'game') {
       this.pause.show(false);

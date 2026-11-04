@@ -65,6 +65,9 @@ export class Game {
   private crouchToggled = false;
   private adsToggled = false;
   private sprinting = false;
+  /** Sprint key was tapped; stays on until forward is released. */
+  private sprintLatched = false;
+  private wasForward = false;
   private stepAcc = 0;
   private bobPhase = 0;
   private landDip = 0;
@@ -275,6 +278,7 @@ export class Game {
     this.me.crouch = false;
     this.crouchToggled = false;
     this.adsToggled = false;
+    this.sprintLatched = false;
     this.alive = true;
     this.hp = MAX_HP;
     this.yaw = yaw;
@@ -579,7 +583,13 @@ export class Game {
     const busy = this.reloadW >= 0 || t < this.switchUntil;
     if (busy || def.melee) ads = false;
     const shotPause = !def.melee && t - this.lastShot <= 300;
-    this.sprinting = act && input.isDown('sprint') && fwd > 0 && !ads && !wantCrouch && !shotPause;
+    // One tap is enough: many keyboards drop Space while Shift and W are both held,
+    // so jumping out of a run can't depend on holding all three keys.
+    if (input.consume('sprint')) this.sprintLatched = true;
+    if (this.wasForward && fwd <= 0) this.sprintLatched = false;
+    this.wasForward = fwd > 0;
+    const wantSprint = input.isDown('sprint') || this.sprintLatched;
+    this.sprinting = act && wantSprint && fwd > 0 && !ads && !wantCrouch && !shotPause;
 
     const aimTarget = ads && this.alive ? 1 : 0;
     const aStep = dt / def.adsTime;

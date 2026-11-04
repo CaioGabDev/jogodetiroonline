@@ -1,7 +1,8 @@
 import { loadColor, loadNick, saveColor, saveNick } from '../core/settings';
 import { normalizeCode, sanitizeText } from '../core/util';
-import { FFA_COLORS, NAME_MAX } from '../game/constants';
-import { el, show } from './dom';
+import { ARSENAL_NAMES, FFA_COLORS, MAX_PLAYERS, NAME_MAX } from '../game/constants';
+import type { RoomInfo } from '../net/directory';
+import { clear, el, show } from './dom';
 
 export interface MenuCallbacks {
   onCreate(nick: string, color: string): void;
@@ -19,6 +20,11 @@ export class MainMenu {
   private buttons: HTMLButtonElement[] = [];
   private color: string;
   private swatches: HTMLElement;
+  private roomList: HTMLElement;
+  private rooms: RoomInfo[] = [];
+  private roomsKey = '';
+  private joinRoom: (code: string) => void;
+  private busy = false;
 
   constructor(parent: HTMLElement, cb: MenuCallbacks) {
     this.nick = el('input', {
@@ -56,6 +62,11 @@ export class MainMenu {
       this.nick.value = n;
       saveNick(n);
       return n;
+    };
+
+    this.joinRoom = (code) => {
+      const n = validNick();
+      if (n) cb.onJoin(n, this.color, code);
     };
 
     const create = el('button', {
@@ -111,12 +122,15 @@ export class MainMenu {
       this.status,
       this.error,
     ]);
+    this.roomList = el('div', { class: 'room-list' });
+    const roomsPanel = el('div', { class: 'panel rooms-panel' }, [el('h3', { text: 'Salas abertas' }), this.roomList]);
+    this.renderRooms();
     const help = el('div', { class: 'panel help-panel' }, [
       el('h3', { text: 'Como jogar' }),
       ...[
         ['WASD', 'mover'],
         ['Espaço', 'pular'],
-        ['Shift', 'correr'],
+        ['Shift', 'correr (um toque basta)'],
         ['C / Ctrl', 'agachar'],
         ['Mouse Esq.', 'atirar'],
         ['Mouse Dir.', 'mirar / luneta'],
@@ -128,8 +142,45 @@ export class MainMenu {
       ].map(([k, d]) => el('div', { class: 'help-row' }, [el('kbd', { text: k }), el('span', { text: d })])),
       el('p', { class: 'hint', text: 'Crie uma sala e mande o link para seus amigos. As teclas podem ser alteradas em Configurações.' }),
     ]);
-    this.root = el('div', { class: 'screen menu hidden' }, [el('div', { class: 'menu-layout' }, [card, help])]);
+    this.root = el('div', { class: 'screen menu hidden' }, [el('div', { class: 'menu-layout' }, [card, roomsPanel, help])]);
     parent.append(this.root);
+  }
+
+  /** Redraws only when something changed, so a refresh can't swallow a click on a row. */
+  setRooms(rooms: RoomInfo[]): void {
+    const key = JSON.stringify(rooms);
+    if (key === this.roomsKey) return;
+    this.roomsKey = key;
+    this.rooms = rooms;
+    this.renderRooms();
+  }
+
+  private renderRooms(): void {
+    clear(this.roomList);
+    if (this.rooms.length === 0) {
+      this.roomList.append(el('p', { class: 'hint', text: 'Nenhuma sala aberta agora. Crie uma e ela aparece aqui para todo mundo.' }));
+      return;
+    }
+    const status = { lobby: 'No lobby', playing: 'Em partida', ended: 'Resultados' };
+    for (const r of this.rooms) {
+      const full = r.players >= MAX_PLAYERS;
+      const join = el('button', {
+        class: 'btn small',
+        text: full ? 'Cheia' : 'Entrar',
+        onClick: () => this.joinRoom(r.code),
+      });
+      join.disabled = full || this.busy;
+      this.roomList.append(
+        el('div', { class: 'room-row' }, [
+          el('div', { class: 'room-info' }, [
+            el('b', { text: `Sala de ${r.host}` }),
+            el('small', { text: `${ARSENAL_NAMES[r.arsenal]} · ${r.mode === 'tdm' ? 'Times' : 'FFA'}` }),
+            el('small', { text: `${r.players}/${MAX_PLAYERS} · ${status[r.phase]}` }),
+          ]),
+          join,
+        ]),
+      );
+    }
   }
 
   private renderSwatches(): void {
@@ -169,6 +220,8 @@ export class MainMenu {
   /** Disables the buttons and shows a status line while connecting. */
   setBusy(text: string | null): void {
     this.buttons.forEach((b) => (b.disabled = text !== null));
+    this.busy = text !== null;
+    this.renderRooms();
     this.status.textContent = text ?? '';
     show(this.status, text !== null);
     if (text) this.setError('');

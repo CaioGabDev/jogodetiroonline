@@ -13,7 +13,7 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 
 1. Abra o site, digite seu **nickname** e clique em **Criar Sala**.
 2. Clique em **Copiar link** no lobby e mande para seus amigos (ou passe o código de 6 letras).
-3. Os amigos abrem o link (`?sala=CODIGO`) ou digitam o código e clicam em **Entrar na Sala**.
+3. Os amigos escolhem a sala em **Salas abertas** no menu, abrem o link (`?sala=CODIGO`) ou digitam o código e clicam em **Entrar na Sala**.
 4. O host escolhe o modo, limite de kills, tempo e fogo amigo e clica em **Iniciar partida**.
 5. Clique na tela para capturar o mouse. `Esc` abre o menu de pausa (o jogo continua rodando).
 
@@ -25,7 +25,7 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 | --- | --- |
 | Mover | W A S D |
 | Pular | Espaço |
-| Correr | Shift |
+| Correr | Shift (um toque basta: continua correndo até soltar o W) |
 | Agachar | C ou Ctrl (segurar ou alternar) |
 | Atirar | Botão esquerdo |
 | Mirar / luneta | Botão direito (segurar ou alternar) |
@@ -47,7 +47,7 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 | 4 | Sniper | 90 | semi-auto | 5 | luneta limpa com zoom, sem recuo; headshot mata |
 | 5 | Faca | 70 | 120 golpes/min | ∞ | alcance curto; com ela o boneco corre bem mais rápido e para na hora |
 
-**Pular enquanto corre** dá um impulso de velocidade (+25%) e mais controle no ar, com qualquer arma.
+**Pular enquanto corre** (toque no Shift, depois W + Espaço) dá um impulso de velocidade (+25%) e mais controle no ar, com qualquer arma.
 
 Headshot causa dano dobrado em todas as armas. Kits de vida (+50) e caixas de munição reaparecem 20 s após serem pegos.
 

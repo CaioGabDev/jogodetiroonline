@@ -51,6 +51,7 @@ import {
   type ShootMsg,
   type SnapPlayer,
 } from './protocol';
+import { RoomAnnouncer, type RoomInfo } from './directory';
 import { createLoopback, errorType, openPeer, PeerConn, peerIdForCode, type Conn } from './peer';
 
 interface Slot {
@@ -175,6 +176,7 @@ export class HostServer {
   private teamScore: [number, number] = [0, 0];
   private endsAt = 0;
   private ticker: Ticker | null = null;
+  private announcer: RoomAnnouncer | null = null;
   private tickCount = 0;
   private destroyed = false;
   private pending = new Set<Conn>();
@@ -223,6 +225,7 @@ export class HostServer {
         /* errors after open are non-fatal for the host: existing connections keep working */
       });
     }
+    if (this.peer) this.announcer = new RoomAnnouncer(this.peer, () => this.roomInfo());
     this.ticker = new Ticker(1000 / SNAPSHOT_RATE, () => this.tick());
     return this.code;
   }
@@ -238,6 +241,7 @@ export class HostServer {
     if (this.destroyed) return;
     this.destroyed = true;
     this.ticker?.stop();
+    this.announcer?.stop();
     for (const p of this.players.values()) {
       if (p.slot && !p.slot.local) {
         p.slot.conn.send({ type: 'reject', reason: 'closed' } satisfies HostMsg);
@@ -430,6 +434,17 @@ export class HostServer {
 
   private broadcastLobby(): void {
     this.broadcast({ type: 'lobby', lobby: this.lobbyState() });
+  }
+
+  private roomInfo(): RoomInfo {
+    return {
+      code: this.code,
+      host: this.players.get(this.hostId)?.info.name ?? 'Sala',
+      mode: this.config.mode,
+      arsenal: this.config.arsenal,
+      players: this.humanCount(),
+      phase: this.phase,
+    };
   }
 
   private matchInfo(): MatchInfo {
@@ -973,6 +988,8 @@ export class HostServer {
     if (this.destroyed) return;
     const t = now();
     this.tickCount++;
+    // Runs from here because this tick keeps going when the tab is in the background.
+    if (this.tickCount % (SNAPSHOT_RATE * 3) === 1) this.announcer?.tick();
 
     if (this.phase === 'playing') {
       for (const p of this.players.values()) {
