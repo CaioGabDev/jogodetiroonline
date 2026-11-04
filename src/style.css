@@ -1390,9 +1390,10 @@ kbd {
 .scope {
   position: absolute;
   inset: 0;
+  background: radial-gradient(circle at center, transparent 0, transparent 34vh, #000 34.3vh);
 }
 
-/* Clean reticle: four thin ticks around a small dot, nothing covering the view. */
+/* Clean reticle: four thin ticks around a small dot. */
 .scope-lines {
   position: absolute;
   left: 50%;

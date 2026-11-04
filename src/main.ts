@@ -32,6 +32,7 @@ class App {
   private pause: PauseMenu;
   private results: Results;
   private settingsUI: SettingsUI;
+  private roomBrowser: RoomBrowser;
   private loop: GameLoop;
 
   private screen: Screen = 'menu';

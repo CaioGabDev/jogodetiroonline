@@ -142,6 +142,11 @@ export class RoomAnnouncer {
   }
 
   private report(): void {
+    // connect() returns nothing while the signaling server is unreachable.
+    if (this.peer.disconnected) {
+      this.state = 'idle';
+      return;
+    }
     this.state = 'connecting';
     const dc = connectDirectory(this.peer);
     this.dc = dc;
@@ -197,6 +202,10 @@ export class RoomBrowser {
   }
 
   private async connect(): Promise<void> {
+    if (this.peer?.disconnected) {
+      this.peer.destroy();
+      this.peer = null;
+    }
     if (!this.peer) {
       try {
         const peer = await openPeer(undefined, CONNECT_TIMEOUT_MS);
