@@ -89,7 +89,7 @@ O host também escolhe as **Armas** da partida:
 
 - **Todas as armas:** cada jogador escolhe as armas na tela de spawn. Em Configurações → Armas dá para mudar a ordem da roda: a primeira é a arma inicial, e a roda do mouse e o HUD seguem essa ordem.
 - **Só sniper / Só doze:** só essa arma e a faca, em FFA ou TDM.
-- **Gun Game:** sempre FFA. Cada kill troca a sua arma (rifle, doze, sniper, pistola, faca; 2 kills em cada, 1 na faca). Vence quem fizer a kill com a faca.
+- **Gun Game:** sempre FFA. Cada kill troca a sua arma e passa por todas as 13, terminando na faca. Vence quem fizer a kill com a faca.
 
 Quem abrir o link no meio da partida entra direto no jogo. Durante a tela de resultados, espera no lobby.
 

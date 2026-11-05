@@ -552,8 +552,22 @@ export function fillLoadout(primaries: number[], pistol: number | null): number[
   return [...chosen, pistol ?? DEFAULT_LOADOUT[2]];
 }
 
-/** Gun Game: the weapon for each kill count (rifle, doze, sniper, pistol, knife). Getting past the end wins. */
-export const GUN_GAME_LADDER: number[] = [W.RIFLE, W.RIFLE, W.SHOTGUN, W.SHOTGUN, W.SNIPER, W.SNIPER, W.PISTOL, W.PISTOL, W.KNIFE];
+/** Gun Game: every weapon, one kill each, from the easiest to the hardest. Getting past the end wins. */
+export const GUN_GAME_LADDER: number[] = [
+  W.RIFLE,
+  W.SMG,
+  W.LMG,
+  W.SHOTGUN,
+  W.DMR,
+  W.SNIPER,
+  W.LAUNCHER,
+  W.CROSSBOW,
+  W.DEAGLE,
+  W.REVOLVER,
+  W.AUTO_PISTOL,
+  W.PISTOL,
+  W.KNIFE,
+];
 
 /** Weapons a player may use. The single-weapon modes keep the knife for movement. */
 export function allowedWeapons(arsenal: Arsenal, kills: number, loadout: number[]): number[] {
