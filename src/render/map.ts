@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { MAP, type MatKind, type RampDef } from '../game/mapData';
+import type { MapDef, MatKind, RampDef } from '../game/mapData';
 import { TEAM_COLORS } from '../game/constants';
 import { getTexture, makeGlowTexture, TEX_SCALE } from './textures';
 
@@ -75,7 +75,7 @@ function rampGeometry(r: RampDef, scale: number): THREE.BufferGeometry {
   return g;
 }
 
-export function buildMap(anisotropy: number): { group: THREE.Group; materials: THREE.Material[] } {
+export function buildMap(def: MapDef, anisotropy: number): { group: THREE.Group; materials: THREE.Material[] } {
   const group = new THREE.Group();
   group.name = 'map';
   const byMat = new Map<MatKind, THREE.BufferGeometry[]>();
@@ -83,7 +83,7 @@ export function buildMap(anisotropy: number): { group: THREE.Group; materials: T
     if (!byMat.has(k)) byMat.set(k, []);
     byMat.get(k)!.push(g);
   };
-  for (const b of MAP.boxes) {
+  for (const b of def.boxes) {
     const w = b.max[0] - b.min[0];
     const h = b.max[1] - b.min[1];
     const d = b.max[2] - b.min[2];
@@ -91,7 +91,7 @@ export function buildMap(anisotropy: number): { group: THREE.Group; materials: T
     g.translate((b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2);
     add(b.mat, g);
   }
-  for (const r of MAP.ramps) add(r.mat, rampGeometry(r, TEX_SCALE[r.mat]));
+  for (const r of def.ramps) add(r.mat, rampGeometry(r, TEX_SCALE[r.mat]));
 
   const materials: THREE.Material[] = [];
   for (const [kind, geoms] of byMat) {
@@ -112,16 +112,13 @@ export function buildMap(anisotropy: number): { group: THREE.Group; materials: T
   }
 
   // Team base floor markings
-  for (const [team, x] of [
-    ['red', -34.5],
-    ['blue', 34.5],
-  ] as const) {
+  for (const mark of def.baseMarks) {
     const m = new THREE.Mesh(
-      new THREE.PlaneGeometry(10, 18),
-      new THREE.MeshBasicMaterial({ color: TEAM_COLORS[team], transparent: true, opacity: 0.18, depthWrite: false }),
+      new THREE.PlaneGeometry(mark.w, mark.d),
+      new THREE.MeshBasicMaterial({ color: TEAM_COLORS[mark.team], transparent: true, opacity: 0.18, depthWrite: false }),
     );
     m.rotation.x = -Math.PI / 2;
-    m.position.set(x, 0.02, 0);
+    m.position.set(mark.x, 0.02, mark.z);
     group.add(m);
   }
   return { group, materials };
@@ -160,7 +157,7 @@ export class PickupView {
   readonly group = new THREE.Group();
   private items: THREE.Group[] = [];
 
-  constructor() {
+  constructor(map: MapDef) {
     const glowHealth = makeGlowTexture('rgba(255,255,255,0.9)', 'rgba(80,255,120,0.35)');
     const glowAmmo = makeGlowTexture('rgba(255,255,255,0.9)', 'rgba(255,200,60,0.35)');
     const white = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.4 });
@@ -168,7 +165,7 @@ export class PickupView {
     const olive = new THREE.MeshStandardMaterial({ color: 0x4b5a2a, roughness: 0.6 });
     const yellow = new THREE.MeshStandardMaterial({ color: 0xe8b923, emissive: 0x332200, roughness: 0.5 });
     const padMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.7 });
-    for (const def of MAP.pickups) {
+    for (const def of map.pickups) {
       const g = new THREE.Group();
       g.position.set(def.pos[0], def.pos[1], def.pos[2]);
       const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.9, 0.08, 20), padMat);
@@ -206,6 +203,19 @@ export class PickupView {
       this.items.push(g);
       this.group.add(g);
     }
+  }
+
+  dispose(): void {
+    this.group.removeFromParent();
+    this.group.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.geometry.dispose();
+        (o.material as THREE.Material).dispose();
+      } else if (o instanceof THREE.Sprite) {
+        o.material.map?.dispose();
+        o.material.dispose();
+      }
+    });
   }
 
   setActive(idx: number, on: boolean): void {

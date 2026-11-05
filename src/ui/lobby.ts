@@ -2,11 +2,14 @@ import {
   ARSENAL_NAMES,
   FFA_COLORS,
   KILL_LIMITS,
+  MAP_HINTS,
+  MAP_NAMES,
   MAX_PLAYERS,
   TEAM_COLORS,
   TEAM_NAMES,
   TIME_LIMITS,
   type Arsenal,
+  type MapId,
   type MatchConfig,
   type Team,
 } from '../game/constants';
@@ -179,7 +182,9 @@ export class Lobby {
       return el('div', { class: 'cfg-row' }, [el('span', { text: label }), s]);
     };
     const gunGame = c.arsenal === 'gungame';
+    const mapOptions = (Object.keys(MAP_NAMES) as MapId[]).map((id): [MapId, string] => [id, `${MAP_NAMES[id]} (${MAP_HINTS[id]})`]);
     this.config.append(
+      sel<MapId>('Mapa', mapOptions, c.map, (v) => ({ map: v })),
       sel<Arsenal>('Armas', Object.entries(ARSENAL_NAMES) as Array<[Arsenal, string]>, c.arsenal, (v) => ({ arsenal: v })),
     );
     if (gunGame) {

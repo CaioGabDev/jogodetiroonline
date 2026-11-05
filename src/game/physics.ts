@@ -29,6 +29,11 @@ export interface RayHit {
 }
 
 const EPS = 1e-4;
+/**
+ * Feet this close below the top of a box walk onto it instead of being stopped. Ramps need this: the player
+ * ends up a hair under the platform they lead to. Covers the height lag at top speed on the steepest ramp.
+ */
+const LEDGE_SKIN = 0.15;
 
 /** Ray vs AABB (slab method). Returns entry distance and face normal. */
 export function rayBox(
@@ -274,10 +279,12 @@ export class CollisionWorld {
     if (axis === 'x') s.x += d;
     else s.z += d;
     for (const b of this.boxes) {
+      // Only when not rising: the vertical step would push a rising player out through the bottom of the box.
+      const top = s.vy <= 0 ? b.maxY - LEDGE_SKIN : b.maxY;
       if (
         s.x - r < b.maxX &&
         s.x + r > b.minX &&
-        s.y < b.maxY &&
+        s.y < top &&
         s.y + h > b.minY &&
         s.z - r < b.maxZ &&
         s.z + r > b.minZ

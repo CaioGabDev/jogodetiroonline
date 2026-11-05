@@ -2,6 +2,7 @@ import type { DataConnection, Peer } from 'peerjs';
 import {
   ARSENAL_NAMES,
   DEFAULT_CONFIG,
+  MAP_NAMES,
   FFA_COLORS,
   HEALTH_PICKUP,
   HISTORY_MS,
@@ -25,7 +26,7 @@ import {
   KILL_LIMITS,
   TIME_LIMITS,
 } from '../game/constants';
-import { MAP, type SpawnDef } from '../game/mapData';
+import { MAPS, type MapDef, type SpawnDef } from '../game/mapData';
 import { CollisionWorld, eyeHeight } from '../game/physics';
 import { PositionHistory, rayPlayer } from '../game/hitbox';
 import { GUN_GAME_LADDER, WEAPONS, allowedWeapons, damageAt, fullAmmo } from '../game/weapons';
@@ -166,13 +167,14 @@ export class HostServer {
   code = '';
   readonly offline: boolean;
   private peer: Peer | null = null;
-  private world = new CollisionWorld(MAP);
+  private map: MapDef = MAPS.arena;
+  private world = new CollisionWorld(this.map);
   private players = new Map<number, SPlayer>();
   private nextId = 1;
   private hostId = 0;
   private phase: Phase = 'lobby';
   private config: MatchConfig;
-  private pickups: PickupState[] = MAP.pickups.map(() => ({ active: true, respawnAt: 0 }));
+  private pickups: PickupState[] = this.map.pickups.map(() => ({ active: true, respawnAt: 0 }));
   private teamScore: [number, number] = [0, 0];
   private endsAt = 0;
   private ticker: Ticker | null = null;
@@ -440,6 +442,7 @@ export class HostServer {
     return {
       code: this.code,
       host: this.players.get(this.hostId)?.info.name ?? 'Sala',
+      map: this.config.map,
       mode: this.config.mode,
       arsenal: this.config.arsenal,
       players: this.humanCount(),
@@ -536,6 +539,7 @@ export class HostServer {
     const c = { ...this.config, ...patch };
     if (c.mode !== 'ffa' && c.mode !== 'tdm') c.mode = 'ffa';
     if (!(c.arsenal in ARSENAL_NAMES)) c.arsenal = 'all';
+    if (!Object.hasOwn(MAP_NAMES, c.map)) c.map = 'arena';
     if (c.arsenal === 'gungame') c.mode = 'ffa';
     if (!KILL_LIMITS.includes(c.killLimit)) c.killLimit = DEFAULT_CONFIG.killLimit;
     if (!TIME_LIMITS.includes(c.timeLimit)) c.timeLimit = DEFAULT_CONFIG.timeLimit;
@@ -558,10 +562,9 @@ export class HostServer {
     this.phase = 'playing';
     this.teamScore = [0, 0];
     this.endsAt = this.config.timeLimit > 0 ? now() + this.config.timeLimit * 60000 : 0;
-    this.pickups.forEach((pk) => {
-      pk.active = true;
-      pk.respawnAt = 0;
-    });
+    this.map = MAPS[this.config.map];
+    this.world = new CollisionWorld(this.map);
+    this.pickups = this.map.pickups.map(() => ({ active: true, respawnAt: 0 }));
     for (const p of this.players.values()) {
       p.kills = 0;
       p.deaths = 0;
@@ -601,7 +604,7 @@ export class HostServer {
     if (p.bot) {
       return { pos: [p.bot.ax, p.bot.y, p.bot.az], yaw: Math.atan2(p.bot.ax, p.bot.az) };
     }
-    const list = this.config.mode === 'tdm' ? MAP.teamSpawns[p.info.team] : MAP.ffaSpawns;
+    const list = this.config.mode === 'tdm' ? this.map.teamSpawns[p.info.team] : this.map.ffaSpawns;
     const enemies = [...this.players.values()].filter((o) => o.alive && this.isEnemy(p, o));
     const others = [...this.players.values()].filter((o) => o.alive && o !== p);
     const scored = list.map((s) => {
@@ -684,7 +687,7 @@ export class HostServer {
     const horiz = Math.hypot(nx - p.x, nz - p.z);
     const up = Math.max(0, ny - p.y);
     const h = m.c ? PLAYER.crouchHeight : PLAYER.height;
-    const half = MAP.size / 2;
+    const half = this.map.size / 2;
     // Not per weapon: speed carries over for a moment after switching away from the knife.
     const maxHoriz = (MOVE.knifeSprint * MOVE.sprintJump * 1.25 * dct) / 1000 + 0.3;
     const maxUp = (9 * dct) / 1000 + 0.35;
@@ -719,7 +722,7 @@ export class HostServer {
   }
 
   private checkPickups(p: SPlayer): void {
-    MAP.pickups.forEach((def, i) => {
+    this.map.pickups.forEach((def, i) => {
       const st = this.pickups[i];
       if (!st.active) return;
       if (Math.abs(p.x - def.pos[0]) > 1.1 || Math.abs(p.z - def.pos[2]) > 1.1 || Math.abs(p.y - def.pos[1]) > 1.2) return;

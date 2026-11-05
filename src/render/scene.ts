@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { settings, type Settings } from '../core/settings';
+import type { MapId } from '../game/constants';
+import { MAPS } from '../game/mapData';
 import { buildMap, buildSky, PickupView } from './map';
 
 const QUALITY = {
@@ -16,8 +18,11 @@ export class SceneManager {
   readonly vmScene = new THREE.Scene();
   readonly vmCamera: THREE.PerspectiveCamera;
   readonly sun: THREE.DirectionalLight;
-  readonly pickups: PickupView;
+  pickups!: PickupView;
   private mapMaterials: THREE.Material[] = [];
+  private mapGroup: THREE.Group | null = null;
+  private mapId: MapId | null = null;
+  private fog = new THREE.Fog(0xbcd3e6, 70, 260);
   private antialias: boolean | null = null;
   private appliedKey = '';
   /** Extra FOV multiplier applied for ADS zoom (1 = none). */
@@ -29,22 +34,14 @@ export class SceneManager {
     this.camera.rotation.order = 'YXZ';
     this.vmCamera = new THREE.PerspectiveCamera(70, 16 / 9, 0.01, 10);
 
-    this.scene.fog = new THREE.Fog(0xbcd3e6, 70, 260);
+    this.scene.fog = this.fog;
     this.scene.background = new THREE.Color(0xbcd3e6);
     this.scene.add(buildSky());
 
     const hemi = new THREE.HemisphereLight(0xdce8ff, 0x5a5048, 1.1);
     this.scene.add(hemi);
     this.sun = new THREE.DirectionalLight(0xfff1dc, 2.4);
-    this.sun.position.set(36, 60, 28);
     this.sun.target.position.set(0, 0, 0);
-    const sc = this.sun.shadow.camera;
-    sc.left = -52;
-    sc.right = 52;
-    sc.top = 52;
-    sc.bottom = -52;
-    sc.near = 10;
-    sc.far = 160;
     this.sun.shadow.bias = -0.0005;
     this.sun.shadow.normalBias = 0.04;
     this.scene.add(this.sun, this.sun.target);
@@ -56,11 +53,7 @@ export class SceneManager {
     this.vmScene.add(vmSun);
 
     this.createRenderer();
-    const map = buildMap(QUALITY[settings.get().quality].anisotropy);
-    this.mapMaterials = map.materials;
-    this.scene.add(map.group);
-    this.pickups = new PickupView();
-    this.scene.add(this.pickups.group);
+    this.setMap('arena');
 
     this.applySettings(settings.get());
     settings.onChange((s) => this.applySettings(s));
@@ -70,6 +63,43 @@ export class SceneManager {
 
   get canvas(): HTMLCanvasElement {
     return this.renderer.domElement;
+  }
+
+  /** Swaps the world to another map. Fog and the sun's shadow area follow its size. */
+  setMap(id: MapId): void {
+    if (id === this.mapId) return;
+    this.mapId = id;
+    const def = MAPS[id];
+
+    // Textures are shared between maps, so only geometry and materials go away.
+    this.mapGroup?.removeFromParent();
+    this.mapGroup?.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.geometry.dispose();
+        (o.material as THREE.Material).dispose();
+      }
+    });
+    this.pickups?.dispose();
+
+    const map = buildMap(def, QUALITY[settings.get().quality].anisotropy);
+    this.mapGroup = map.group;
+    this.mapMaterials = map.materials;
+    this.scene.add(map.group);
+    this.pickups = new PickupView(def);
+    this.scene.add(this.pickups.group);
+
+    [this.fog.near, this.fog.far] = def.fog;
+    // Values are tuned for an 80 m map and scale with its size.
+    const k = def.size / 80;
+    this.sun.position.set(36 * k, 60 * k, 28 * k);
+    const sc = this.sun.shadow.camera;
+    sc.left = -52 * k;
+    sc.right = 52 * k;
+    sc.top = 52 * k;
+    sc.bottom = -52 * k;
+    sc.near = 10 * k;
+    sc.far = 160 * k;
+    sc.updateProjectionMatrix();
   }
 
   private createRenderer(): void {

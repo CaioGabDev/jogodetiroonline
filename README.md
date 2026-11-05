@@ -51,6 +51,14 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 
 Headshot causa dano dobrado em todas as armas. Kits de vida (+50) e caixas de munição reaparecem 20 s após serem pegos.
 
+### Mapas
+
+O host escolhe o mapa no lobby:
+
+- **Arena:** equilibrado, com corredores e combate em média distância.
+- **Mirante:** grande (160 m). Dois fortes frente a frente, uma mesa elevada no centro e torres de sniper nos flancos. Feito para troca de tiro a distância.
+- **Galpão:** pequeno (48 m). Corredores apertados entre contêineres, passarela em volta e uma ponte no meio. Combate frenético o tempo todo.
+
 ### Modos
 
 - **Mata-mata (FFA):** todos contra todos. Vence quem atingir o limite de kills ou tiver mais kills no fim do tempo.
@@ -58,7 +66,7 @@ Headshot causa dano dobrado em todas as armas. Kits de vida (+50) e caixas de mu
 
 O host também escolhe as **Armas** da partida:
 
-- **Todas as armas:** cada jogador usa o que marcou em Configurações → Armas.
+- **Todas as armas:** cada jogador monta a própria roda em Configurações → Armas: escolhe as armas e a ordem. A primeira é a arma inicial, e a roda do mouse e o HUD seguem essa ordem.
 - **Só sniper / Só doze:** só essa arma e a faca, em FFA ou TDM.
 - **Gun Game:** sempre FFA. Cada kill troca a sua arma (rifle, doze, sniper, pistola, faca; 2 kills em cada, 1 na faca). Vence quem fizer a kill com a faca.
 

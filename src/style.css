@@ -365,6 +365,13 @@ kbd {
   width: 300px;
 }
 
+.wheel-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .rooms-panel {
   width: 320px;
   max-width: 100%;

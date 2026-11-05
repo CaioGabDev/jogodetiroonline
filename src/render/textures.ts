@@ -130,6 +130,17 @@ const painters: Record<MatKind, Painter> = {
       ctx.fill();
     }
   },
+  sand: (ctx, s, rnd) => {
+    ctx.fillStyle = '#a8895c';
+    ctx.fillRect(0, 0, s, s);
+    noise(ctx, s, rnd, 0.1, 7000);
+    for (let i = 0; i < 26; i++) {
+      ctx.fillStyle = `rgba(70,48,24,${0.04 + rnd() * 0.07})`;
+      ctx.beginPath();
+      ctx.ellipse(rnd() * s, rnd() * s, 12 + rnd() * 34, 5 + rnd() * 12, rnd() * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  },
   red: (ctx, s, rnd) => {
     ctx.fillStyle = '#8c2a26';
     ctx.fillRect(0, 0, s, s);
@@ -149,6 +160,7 @@ const painters: Record<MatKind, Painter> = {
 /** Meters covered by one texture repeat per material. */
 export const TEX_SCALE: Record<MatKind, number> = {
   floor: 4,
+  sand: 6,
   wall: 4,
   concrete: 2,
   crate: 2,

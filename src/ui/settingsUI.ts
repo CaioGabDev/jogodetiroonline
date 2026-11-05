@@ -441,20 +441,36 @@ export class SettingsUI {
     this.content.append(
       el('p', {
         class: 'hint',
-        text: 'Escolha as armas que você leva para a partida. A primeira marcada é a arma inicial. Em Só sniper e Só doze valem só as armas do modo, e no Gun Game a arma depende das suas kills.',
+        text: 'Monte sua roda de armas: marque o que você leva e use as setas para mudar a ordem. A primeira é a arma inicial, e a roda do mouse segue essa ordem. Em Só sniper e Só doze valem só as armas do modo, sem a sua ordem, e no Gun Game a arma depende das suas kills.',
       }),
     );
-    WEAPONS.forEach((w) => {
-      const control = this.toggle(s.loadout.includes(w.id), (on) => {
-        if (!on && settings.get().loadout.length === 1) {
-          toast('Escolha pelo menos uma arma.', 'warn');
-          this.render();
-          return;
-        }
-        settings.update((d) => (d.loadout = on ? [...d.loadout, w.id] : d.loadout.filter((x) => x !== w.id)));
+    const unused = WEAPONS.filter((w) => !s.loadout.includes(w.id)).map((w) => w.id);
+    [...s.loadout, ...unused].forEach((id) => {
+      const pos = s.loadout.indexOf(id);
+      const toggle = this.toggle(pos >= 0, (on) => {
+        if (!on && settings.get().loadout.length === 1) toast('Escolha pelo menos uma arma.', 'warn');
+        else settings.update((d) => (d.loadout = on ? [...d.loadout, id] : d.loadout.filter((x) => x !== id)));
+        this.render();
       });
-      this.content.append(this.row(w.name, control));
+      const arrow = (text: string, title: string, to: number): HTMLElement => {
+        const b = el('button', { class: 'btn small ghost', text, title, onClick: () => this.moveWeapon(pos, to) });
+        b.disabled = to < 0 || to >= s.loadout.length;
+        return b;
+      };
+      const control = el('div', { class: 'wheel-control' }, [
+        pos >= 0 ? arrow('▲', 'Subir', pos - 1) : null,
+        pos >= 0 ? arrow('▼', 'Descer', pos + 1) : null,
+        toggle,
+      ]);
+      this.content.append(this.row(pos >= 0 ? `${pos + 1}. ${WEAPONS[id].name}` : WEAPONS[id].name, control));
     });
+  }
+
+  private moveWeapon(from: number, to: number): void {
+    settings.update((d) => {
+      [d.loadout[from], d.loadout[to]] = [d.loadout[to], d.loadout[from]];
+    });
+    this.render();
   }
 
   private renderHud(s: Settings): void {

@@ -1,6 +1,6 @@
 import { loadColor, loadNick, saveColor, saveNick } from '../core/settings';
 import { normalizeCode, sanitizeText } from '../core/util';
-import { ARSENAL_NAMES, FFA_COLORS, MAX_PLAYERS, NAME_MAX } from '../game/constants';
+import { ARSENAL_NAMES, FFA_COLORS, MAP_NAMES, MAX_PLAYERS, NAME_MAX } from '../game/constants';
 import type { RoomInfo } from '../net/directory';
 import { clear, el, show } from './dom';
 
@@ -174,7 +174,7 @@ export class MainMenu {
         el('div', { class: 'room-row' }, [
           el('div', { class: 'room-info' }, [
             el('b', { text: `Sala de ${r.host}` }),
-            el('small', { text: `${ARSENAL_NAMES[r.arsenal]} · ${r.mode === 'tdm' ? 'Times' : 'FFA'}` }),
+            el('small', { text: `${MAP_NAMES[r.map]} · ${ARSENAL_NAMES[r.arsenal]} · ${r.mode === 'tdm' ? 'Times' : 'FFA'}` }),
             el('small', { text: `${r.players}/${MAX_PLAYERS} · ${status[r.phase]}` }),
           ]),
           join,

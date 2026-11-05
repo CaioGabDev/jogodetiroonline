@@ -1,6 +1,6 @@
 import type { DataConnection, Peer } from 'peerjs';
 import { sanitizeText } from '../core/util';
-import { ARSENAL_NAMES, MAX_PLAYERS, NAME_MAX, PEER_PREFIX, PROTOCOL_VERSION, type Arsenal, type GameMode } from '../game/constants';
+import { ARSENAL_NAMES, MAP_NAMES, MAX_PLAYERS, NAME_MAX, PEER_PREFIX, PROTOCOL_VERSION, type Arsenal, type GameMode, type MapId } from '../game/constants';
 import { errorType, openPeer } from './peer';
 import type { Phase } from './protocol';
 
@@ -20,6 +20,7 @@ const RETRY_MS = 4000;
 export interface RoomInfo {
   code: string;
   host: string;
+  map: MapId;
   mode: GameMode;
   arsenal: Arsenal;
   players: number;
@@ -39,7 +40,9 @@ function parseRoom(raw: unknown): RoomInfo | null {
     host !== '' &&
     (r.mode === 'ffa' || r.mode === 'tdm') &&
     typeof r.arsenal === 'string' &&
-    r.arsenal in ARSENAL_NAMES &&
+    Object.hasOwn(ARSENAL_NAMES, r.arsenal) &&
+    typeof r.map === 'string' &&
+    Object.hasOwn(MAP_NAMES, r.map) &&
     Number.isInteger(r.players) &&
     (r.players as number) >= 0 &&
     (r.players as number) <= MAX_PLAYERS &&

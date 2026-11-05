@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 /** Prefix added to the room code to form the host's PeerJS id (avoids collisions on the public server). */
 export const PEER_PREFIX = 'arenafps-v1-';
 
@@ -92,7 +92,18 @@ export const ARSENAL_NAMES: Record<Arsenal, string> = {
   gungame: 'Gun Game',
 };
 
+export type MapId = 'arena' | 'mirante' | 'galpao';
+
+export const MAP_NAMES: Record<MapId, string> = { arena: 'Arena', mirante: 'Mirante', galpao: 'Galpão' };
+
+export const MAP_HINTS: Record<MapId, string> = {
+  arena: 'equilibrado',
+  mirante: 'grande, tiro a distância',
+  galpao: 'pequeno e frenético',
+};
+
 export interface MatchConfig {
+  map: MapId;
   mode: GameMode;
   arsenal: Arsenal;
   /** 0 = no limit (practice). */
@@ -105,4 +116,4 @@ export interface MatchConfig {
 export const KILL_LIMITS = [10, 20, 30, 50];
 export const TIME_LIMITS = [5, 10, 15, 20];
 
-export const DEFAULT_CONFIG: MatchConfig = { mode: 'ffa', arsenal: 'all', killLimit: 20, timeLimit: 10, friendlyFire: false };
+export const DEFAULT_CONFIG: MatchConfig = { map: 'arena', mode: 'ffa', arsenal: 'all', killLimit: 20, timeLimit: 10, friendlyFire: false };

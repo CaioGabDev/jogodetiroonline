@@ -75,7 +75,7 @@ export interface Settings {
   showFps: boolean;
   showPing: boolean;
   killfeedSize: number;
-  /** Weapons this player chose to carry (ids). The first one is the starting weapon. */
+  /** Weapons this player carries (ids), in weapon wheel order. The first one is the starting weapon. */
   loadout: number[];
 }
 
@@ -163,7 +163,8 @@ function sanitize(raw: unknown): Settings {
   s.showPing = bool('showPing', s.showPing);
   s.killfeedSize = Math.round(num('killfeedSize', 2, 10, s.killfeedSize));
   if (Array.isArray(r.loadout)) {
-    const chosen = s.loadout.filter((w) => (r.loadout as unknown[]).includes(w));
+    // Keeps the stored order: it is the player's weapon wheel.
+    const chosen = [...new Set(r.loadout as unknown[])].filter((w): w is number => s.loadout.includes(w as number));
     if (chosen.length > 0) s.loadout = chosen;
   }
   if (r.binds && typeof r.binds === 'object') {

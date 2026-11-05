@@ -5,7 +5,7 @@ import { settings } from '../core/settings';
 import { clamp, damp, now, r2, r3 } from '../core/util';
 import { ARSENAL_NAMES, INPUT_RATE, MAX_HP, MOVE, RESPAWN_MS, TEAM_COLORS, type MatchConfig } from './constants';
 import { rayPlayer } from './hitbox';
-import { MAP } from './mapData';
+import { MAPS, type MapDef } from './mapData';
 import { CollisionWorld, eyeHeight, type PState } from './physics';
 import { RemotePlayer } from './player';
 import { GUN_GAME_LADDER, RECOIL_PATTERN, WEAPONS, WEAPON_COUNT, allowedWeapons, fullAmmo } from './weapons';
@@ -45,7 +45,8 @@ export class Game {
   private hud: Hud;
   private chat: Chat;
   private scoreboard: Scoreboard;
-  private world = new CollisionWorld(MAP);
+  private map: MapDef;
+  private world: CollisionWorld;
   private effects = new Effects();
   private viewmodel: Viewmodel;
   private remotes = new Map<number, RemotePlayer>();
@@ -125,6 +126,9 @@ export class Game {
     this.scoreboard = deps.scoreboard;
     this.localId = deps.net.localId;
     this.config = match.config;
+    this.map = MAPS[match.config.map];
+    this.world = new CollisionWorld(this.map);
+    this.sm.setMap(match.config.map);
     const ammo = fullAmmo();
     this.mag = ammo.mag;
     this.reserve = ammo.reserve;
@@ -238,7 +242,7 @@ export class Game {
       case 'pickup':
         this.sm.pickups.setActive(m.idx, m.on);
         if (!m.on && m.by === this.localId) {
-          const kind = MAP.pickups[m.idx]?.kind ?? 'health';
+          const kind = this.map.pickups[m.idx]?.kind ?? 'health';
           audio.pickup(kind);
           this.hud.notify(kind === 'health' ? '+50 VIDA' : '+MUNIÇÃO');
         }
@@ -359,7 +363,9 @@ export class Game {
   private allowed(): number[] {
     const kills = this.scores.get(this.localId)?.k ?? 0;
     const inMatch = allowedWeapons(this.config.arsenal, kills);
-    const mine = inMatch.filter((w) => settings.get().loadout.includes(w));
+    const { loadout } = settings.get();
+    // With every weapon enabled the player's own wheel order applies; other modes keep theirs.
+    const mine = this.config.arsenal === 'all' ? loadout : inMatch.filter((w) => loadout.includes(w));
     return mine.length > 0 ? mine : inMatch;
   }
 
