@@ -181,11 +181,12 @@ export class Hud {
     if (reload >= 0) this.width(this.reloadFill, Math.round(reload * 100));
   }
 
-  /** Shows only the weapons the player can use right now, in their order. */
-  setSlots(allowed: number[]): void {
+  /** Shows the weapons the player has, in wheel order, each with the number key that selects it. */
+  setSlots(allowed: number[], keys: number[]): void {
     this.slots.forEach((s, i) => {
       show(s, allowed.includes(i));
       s.style.order = String(allowed.indexOf(i));
+      this.text(s.firstElementChild as HTMLElement, String(keys.indexOf(i) + 1));
     });
   }
 

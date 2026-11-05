@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 /** Prefix added to the room code to form the host's PeerJS id (avoids collisions on the public server). */
 export const PEER_PREFIX = 'arenafps-v1-';
 
@@ -11,12 +11,13 @@ export const MAX_INTERP_DELAY = 350;
 export const SNAP_SAMPLE_DELAY = 60;
 export const HISTORY_MS = 1000;
 export const RESPAWN_MS = 3000;
+/** Time to choose weapons on the spawn screen. */
+export const LOADOUT_PICK_MS = 5000;
 /** Minimum time between team changes during a match. */
 export const TEAM_SWITCH_COOLDOWN_MS = 10000;
 export const SPAWN_PROTECT_MS = 2000;
 export const PICKUP_RESPAWN_MS = 20000;
 export const MAX_HP = 100;
-export const HEALTH_PICKUP = 50;
 
 export const NAME_MAX = 16;
 export const CHAT_MAX = 120;

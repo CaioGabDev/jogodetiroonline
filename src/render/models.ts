@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { WEAPONS } from '../game/weapons';
 import { makeLabelTexture } from './textures';
 
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -14,15 +15,6 @@ function part(mat: THREE.Material, sx: number, sy: number, sz: number, x = 0, y 
   m.castShadow = true;
   return m;
 }
-
-/** Gun lengths per weapon for the third-person model. */
-const GUN_SHAPES: Array<{ len: number; h: number }> = [
-  { len: 0.75, h: 0.12 },
-  { len: 0.35, h: 0.12 },
-  { len: 0.85, h: 0.14 },
-  { len: 1.1, h: 0.11 },
-  { len: 0.3, h: 0.05 },
-];
 
 export interface ModelState {
   x: number;
@@ -121,7 +113,7 @@ export class PlayerModel {
   }
 
   setWeapon(w: number): void {
-    const s = GUN_SHAPES[w] ?? GUN_SHAPES[0];
+    const s = (WEAPONS[w] ?? WEAPONS[0]).shape;
     this.gun.scale.set(0.09, s.h, s.len);
     this.gun.position.z = -0.2 - s.len / 2;
     this.muzzle.position.z = -0.2 - s.len;

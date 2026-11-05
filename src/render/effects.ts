@@ -16,6 +16,14 @@ interface Flash {
   life: number;
 }
 
+/** Drawn only: the host decides where a projectile ends. */
+interface Projectile {
+  mesh: THREE.Mesh;
+  vel: THREE.Vector3;
+  gravity: number;
+  life: number;
+}
+
 /** Pooled world-space effects. Everything is preallocated to avoid GC hitches and shader recompiles. */
 export class Effects {
   readonly group = new THREE.Group();
@@ -34,6 +42,11 @@ export class Effects {
   private flashIdx = 0;
   private light: THREE.PointLight;
   private lightLife = 0;
+  private projectiles = new Map<number, Projectile>();
+  private boltGeo = new THREE.BoxGeometry(0.03, 0.03, 0.55);
+  private grenadeGeo = new THREE.SphereGeometry(0.11, 10, 8);
+  private boltMat = new THREE.MeshBasicMaterial({ color: 0xc9b98a });
+  private grenadeMat = new THREE.MeshBasicMaterial({ color: 0x3a4030 });
 
   constructor() {
     const tracerGeo = new THREE.BoxGeometry(0.025, 0.025, 1);
@@ -109,14 +122,34 @@ export class Effects {
     t.max = t.life = 0.07;
   }
 
-  muzzleFlash(pos: THREE.Vector3, scale = 0.6, light = true): void {
+  addProjectile(id: number, pos: THREE.Vector3, vel: THREE.Vector3, gravity: number, kind: 'bolt' | 'grenade'): void {
+    const mesh = new THREE.Mesh(kind === 'bolt' ? this.boltGeo : this.grenadeGeo, kind === 'bolt' ? this.boltMat : this.grenadeMat);
+    mesh.position.copy(pos);
+    this.group.add(mesh);
+    this.projectiles.set(id, { mesh, vel, gravity, life: 9 });
+  }
+
+  removeProjectile(id: number): void {
+    const p = this.projectiles.get(id);
+    if (!p) return;
+    p.mesh.removeFromParent();
+    this.projectiles.delete(id);
+  }
+
+  explosion(pos: THREE.Vector3, radius: number): void {
+    this.muzzleFlash(pos, radius * 1.3, true, 0.18);
+    this.muzzleFlash(pos, radius * 0.8, false, 0.28);
+    this.impact(pos, null, 'world', 45);
+  }
+
+  muzzleFlash(pos: THREE.Vector3, scale = 0.6, light = true, life = 0.05): void {
     const f = this.flashes[this.flashIdx];
     this.flashIdx = (this.flashIdx + 1) % this.flashes.length;
     f.sprite.position.copy(pos);
     f.sprite.scale.setScalar(scale * (0.8 + Math.random() * 0.4));
     f.sprite.material.rotation = Math.random() * Math.PI;
     f.sprite.visible = true;
-    f.life = 0.05;
+    f.life = life;
     if (light) {
       this.light.position.copy(pos);
       this.light.intensity = 6;
@@ -181,6 +214,16 @@ export class Effects {
   }
 
   update(dt: number): void {
+    for (const [id, p] of this.projectiles) {
+      p.life -= dt;
+      if (p.life <= 0) {
+        this.removeProjectile(id);
+        continue;
+      }
+      p.vel.y -= p.gravity * dt;
+      p.mesh.position.addScaledVector(p.vel, dt);
+      p.mesh.lookAt(Effects.tmpN.copy(p.mesh.position).add(p.vel));
+    }
     for (const t of this.tracers) {
       if (!t.mesh.visible) continue;
       t.life -= dt;

@@ -4,8 +4,8 @@ import {
   DEFAULT_CONFIG,
   MAP_NAMES,
   FFA_COLORS,
-  HEALTH_PICKUP,
   HISTORY_MS,
+  LOADOUT_PICK_MS,
   MAX_INTERP_DELAY,
   SNAP_SAMPLE_DELAY,
   MAX_HP,
@@ -29,7 +29,7 @@ import {
 import { MAPS, type MapDef, type SpawnDef } from '../game/mapData';
 import { CollisionWorld, eyeHeight } from '../game/physics';
 import { PositionHistory, rayPlayer } from '../game/hitbox';
-import { GUN_GAME_LADDER, WEAPONS, allowedWeapons, damageAt, fullAmmo } from '../game/weapons';
+import { DEFAULT_LOADOUT, GUN_GAME_LADDER, WEAPONS, allowedWeapons, damageAt, fullAmmo, validLoadout } from '../game/weapons';
 import { clamp, now, r2, r3, randomCode, sanitizeText } from '../core/util';
 import {
   F_ADS,
@@ -44,6 +44,7 @@ import {
   type HelloMsg,
   type HostMsg,
   type InputMsg,
+  type LoadoutMsg,
   type LobbyState,
   type MatchInfo,
   type Phase,
@@ -114,7 +115,31 @@ interface SPlayer {
   lastHistT: number;
   /** Host time until this player may change teams again. */
   teamLockUntil: number;
+  /** Two primaries and a pistol. */
+  loadout: number[];
+  /** On the spawn screen, waiting for the timer or a confirmation. */
+  picking: boolean;
 }
+
+/** A bolt or grenade in flight. */
+interface Projectile {
+  id: number;
+  owner: SPlayer;
+  w: number;
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  bornAt: number;
+  lastT: number;
+}
+
+type DamageMap = Map<SPlayer, { dmg: number; hs: boolean }>;
+
+/** Projectiles that hit nothing are dropped after this long. */
+const PROJECTILE_MAX_MS = 8000;
 
 interface PickupState {
   active: boolean;
@@ -182,6 +207,8 @@ export class HostServer {
   private tickCount = 0;
   private destroyed = false;
   private pending = new Set<Conn>();
+  private projectiles: Projectile[] = [];
+  private nextProjectile = 1;
 
   constructor(
     offline: boolean,
@@ -333,7 +360,7 @@ export class HostServer {
     this.send(p, { type: 'welcome', id, lobby: this.lobbyState(), match });
     this.broadcastLobby();
     if (!local) this.broadcast({ type: 'sys', text: `${name} entrou na sala` }, id);
-    if (this.phase === 'playing') this.spawnPlayer(p);
+    if (this.phase === 'playing') this.beginSpawn(p);
   }
 
   private createPlayer(id: number, name: string, slot: Slot | null, bot: Bot | null): SPlayer {
@@ -374,6 +401,8 @@ export class HostServer {
       lastHistT: 0,
       clockAhead: 0,
       teamLockUntil: 0,
+      loadout: [...DEFAULT_LOADOUT],
+      picking: false,
     };
   }
 
@@ -409,6 +438,7 @@ export class HostServer {
     const p = this.players.get(id);
     if (!p) return;
     this.players.delete(id);
+    this.projectiles = this.projectiles.filter((pr) => pr.owner !== p);
     this.broadcast({ type: 'sys', text: `${p.info.name} saiu da partida` });
     this.broadcastLobby();
   }
@@ -477,6 +507,9 @@ export class HostServer {
       case 'setTeam':
         this.onSetTeam(p, m.team);
         break;
+      case 'loadout':
+        this.onLoadout(p, m);
+        break;
       case 'setColor':
         if (this.phase !== 'playing') {
           const used = [...this.players.values()].some((o) => o !== p && o.info.color === m.color);
@@ -508,6 +541,12 @@ export class HostServer {
     this.broadcast({ type: 'sys', text: `${p.info.name} foi para o time ${TEAM_NAMES[team]}` });
     // Alive players move to the new team's spawn right away, without a death. The dead just wait for the respawn.
     if (p.alive) this.spawnPlayer(p);
+  }
+
+  private onLoadout(p: SPlayer, m: LoadoutMsg): void {
+    if (!p.picking || !validLoadout(m.w)) return;
+    p.loadout = [...m.w];
+    if (m.go) p.respawnAt = now();
   }
 
   private onChat(p: SPlayer, raw: string, teamOnly: boolean): void {
@@ -565,6 +604,7 @@ export class HostServer {
     this.map = MAPS[this.config.map];
     this.world = new CollisionWorld(this.map);
     this.pickups = this.map.pickups.map(() => ({ active: true, respawnAt: 0 }));
+    this.projectiles = [];
     for (const p of this.players.values()) {
       p.kills = 0;
       p.deaths = 0;
@@ -577,7 +617,7 @@ export class HostServer {
     this.broadcast({ type: 'start', match: this.matchInfo() });
     // Spawn humans first (bots have fixed spots).
     const order = [...this.players.values()].sort(() => Math.random() - 0.5);
-    for (const p of order) this.spawnPlayer(p);
+    for (const p of order) this.beginSpawn(p);
     this.sendScores();
   }
 
@@ -591,7 +631,7 @@ export class HostServer {
   // ---------------------------------------------------------------- simulation
 
   private allowed(p: SPlayer): number[] {
-    return allowedWeapons(this.config.arsenal, p.kills);
+    return allowedWeapons(this.config.arsenal, p.kills, p.loadout);
   }
 
   private isEnemy(a: SPlayer, b: SPlayer): boolean {
@@ -617,8 +657,21 @@ export class HostServer {
     return scored[0].s;
   }
 
+  /** First spawn of a match: players choose weapons first when the mode lets them. */
+  private beginSpawn(p: SPlayer): void {
+    if (p.bot || this.config.arsenal !== 'all') {
+      this.spawnPlayer(p);
+      return;
+    }
+    p.loadout = [...DEFAULT_LOADOUT];
+    p.picking = true;
+    p.respawnAt = now() + LOADOUT_PICK_MS;
+    this.send(p, { type: 'pick', ms: LOADOUT_PICK_MS });
+  }
+
   private spawnPlayer(p: SPlayer): void {
     const t = now();
+    p.picking = false;
     const s = this.chooseSpawn(p);
     p.x = s.pos[0];
     p.y = s.pos[1];
@@ -642,7 +695,7 @@ export class HostServer {
     p.history.clear();
     p.history.push({ t, x: p.x, y: p.y, z: p.z, crouch: p.crouch });
     p.lastHistT = t;
-    this.send(p, { type: 'spawn', p: [p.x, p.y, p.z], yw: p.yaw, tp: p.tp, full: true });
+    this.send(p, { type: 'spawn', p: [p.x, p.y, p.z], yw: p.yaw, tp: p.tp, full: true, ld: p.loadout });
     this.sendAmmo(p);
   }
 
@@ -728,21 +781,27 @@ export class HostServer {
       if (Math.abs(p.x - def.pos[0]) > 1.1 || Math.abs(p.z - def.pos[2]) > 1.1 || Math.abs(p.y - def.pos[1]) > 1.2) return;
       if (def.kind === 'health') {
         if (p.hp >= MAX_HP) return;
-        p.hp = Math.min(MAX_HP, p.hp + HEALTH_PICKUP);
-      } else {
-        let gained = false;
-        WEAPONS.forEach((w, wi) => {
-          if (w.infiniteReserve || p.reserve[wi] >= w.maxReserve) return;
-          p.reserve[wi] = Math.min(w.maxReserve, p.reserve[wi] + w.ammoPickup);
-          gained = true;
-        });
-        if (!gained) return;
-        this.sendAmmo(p);
+        p.hp = MAX_HP;
+      } else if (!this.refillEquipped(p)) {
+        return;
       }
       st.active = false;
       st.respawnAt = now() + PICKUP_RESPAWN_MS;
+      // Before the ammo update: the client cancels a running reload on this message.
       this.broadcast({ type: 'pickup', idx: i, on: false, by: p.info.id });
+      if (def.kind === 'ammo') this.sendAmmo(p);
     });
+  }
+
+  /** Fills the magazine and reserve of the weapon in hand. Returns false when there was nothing to fill. */
+  private refillEquipped(p: SPlayer): boolean {
+    const w = p.weapon;
+    const def = WEAPONS[w];
+    if (def.melee || (p.mag[w] >= def.mag && (def.infiniteReserve || p.reserve[w] >= def.reserve))) return false;
+    p.mag[w] = def.mag;
+    if (!def.infiniteReserve) p.reserve[w] = Math.max(p.reserve[w], def.reserve);
+    if (p.reloadW === w) p.reloadW = -1;
+    return true;
   }
 
   private onReload(p: SPlayer, w: number): void {
@@ -804,6 +863,11 @@ export class HostServer {
     p.lastShotSeq = m.s;
     p.protectedUntil = 0;
 
+    if (def.projectile) {
+      this.launch(p, w, m);
+      return;
+    }
+
     const rtt = p.slot?.rtt ?? 0;
     // Clients see positions sampled SNAP_SAMPLE_DELAY in the past (see tick()).
     const minT = t - Math.min(HISTORY_MS, rtt + MAX_INTERP_DELAY + SNAP_SAMPLE_DELAY + 200);
@@ -821,7 +885,7 @@ export class HostServer {
     const e: number[] = [];
     const hk: number[] = [];
     const n: number[] = [];
-    const dmgMap = new Map<SPlayer, { dmg: number; hs: boolean }>();
+    const dmgMap: DamageMap = new Map();
     for (let i = 0; i < pellets; i++) {
       let dx = m.d[i * 3];
       let dy = m.d[i * 3 + 1];
@@ -859,6 +923,11 @@ export class HostServer {
     }
     this.broadcast({ type: 'shot', i: p.info.id, w, o: [r2(ox), r2(oy), r2(oz)], e, h: hk, n }, p.info.id);
 
+    this.dealDamage(p, dmgMap, w);
+  }
+
+  private dealDamage(p: SPlayer, dmgMap: DamageMap, w: number): void {
+    const t = now();
     for (const [target, { dmg, hs }] of dmgMap) {
       if (!target.alive || t < target.protectedUntil) continue;
       const amount = Math.round(dmg);
@@ -871,6 +940,92 @@ export class HostServer {
       if (killed) this.kill(p, target, w, hs);
       this.send(p, { type: 'hit', dmg: amount, hs, kill: killed });
     }
+  }
+
+  private launch(p: SPlayer, w: number, m: ShootMsg): void {
+    const speed = WEAPONS[w].projectile?.speed ?? 0;
+    const [dx, dy, dz] = m.d;
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 0.5 || len > 1.5) return;
+    const t = now();
+    const pr: Projectile = {
+      id: this.nextProjectile++,
+      owner: p,
+      w,
+      x: m.o[0],
+      y: m.o[1],
+      z: m.o[2],
+      vx: (dx / len) * speed,
+      vy: (dy / len) * speed,
+      vz: (dz / len) * speed,
+      bornAt: t,
+      lastT: t,
+    };
+    this.projectiles.push(pr);
+    this.broadcast({ type: 'proj', id: pr.id, i: p.info.id, w, o: [r2(pr.x), r2(pr.y), r2(pr.z)], v: [r2(pr.vx), r2(pr.vy), r2(pr.vz)] });
+  }
+
+  /** Moves projectiles along their arc, checking the path they cover this tick. */
+  private updateProjectiles(t: number): void {
+    this.projectiles = this.projectiles.filter((pr) => {
+      const def = WEAPONS[pr.w];
+      const dt = Math.min(0.1, (t - pr.lastT) / 1000);
+      pr.lastT = t;
+      pr.vy -= (def.projectile?.gravity ?? 0) * dt;
+      const sx = pr.vx * dt;
+      const sy = pr.vy * dt;
+      const sz = pr.vz * dt;
+      const len = Math.hypot(sx, sy, sz);
+      if (len < 1e-6) return true;
+      const [dx, dy, dz] = [sx / len, sy / len, sz / len];
+      const wh = this.world.raycast(pr.x, pr.y, pr.z, dx, dy, dz, len);
+      let dist = wh ? wh.dist : len;
+      let hit: { pl: SPlayer; head: boolean } | null = null;
+      for (const o of this.players.values()) {
+        if (o === pr.owner || !o.alive) continue;
+        if (!this.isEnemy(pr.owner, o) && !this.config.friendlyFire) continue;
+        const h = rayPlayer(pr.x, pr.y, pr.z, dx, dy, dz, o, dist);
+        if (h && h.dist < dist) {
+          dist = h.dist;
+          hit = { pl: o, head: h.head };
+        }
+      }
+      pr.x += dx * dist;
+      pr.y += dy * dist;
+      pr.z += dz * dist;
+      if (hit || wh) {
+        this.projectileHit(pr, hit, wh ? [wh.nx, wh.ny, wh.nz] : [0, 0, 0]);
+        return false;
+      }
+      if (t - pr.bornAt > PROJECTILE_MAX_MS) {
+        this.broadcast({ type: 'pimp', id: pr.id, w: pr.w, p: [r2(pr.x), r2(pr.y), r2(pr.z)], h: 0, n: [0, 0, 0] });
+        return false;
+      }
+      return true;
+    });
+  }
+
+  private projectileHit(pr: Projectile, hit: { pl: SPlayer; head: boolean } | null, n: [number, number, number]): void {
+    const def = WEAPONS[pr.w];
+    this.broadcast({ type: 'pimp', id: pr.id, w: pr.w, p: [r2(pr.x), r2(pr.y), r2(pr.z)], h: hit ? 2 : 1, n: [r3(n[0]), r3(n[1]), r3(n[2])] });
+    const dmgMap: DamageMap = new Map();
+    if (def.splash) {
+      // Walls block the blast, and the shooter takes no damage from their own explosion.
+      const { radius, min } = def.splash;
+      const cy = pr.y + n[1] * 0.2;
+      const cx = pr.x + n[0] * 0.2;
+      const cz = pr.z + n[2] * 0.2;
+      for (const o of this.players.values()) {
+        if (o === pr.owner || !o.alive) continue;
+        if (!this.isEnemy(pr.owner, o) && !this.config.friendlyFire) continue;
+        const d = Math.hypot(o.x - cx, o.y + 1 - cy, o.z - cz);
+        if (d > radius || !this.world.lineOfSight(cx, cy, cz, o.x, o.y + 1, o.z)) continue;
+        dmgMap.set(o, { dmg: def.damage * (1 - (d / radius) * (1 - min)), hs: false });
+      }
+    } else if (hit) {
+      dmgMap.set(hit.pl, { dmg: damageAt(def, 0, hit.head), hs: hit.head });
+    }
+    this.dealDamage(pr.owner, dmgMap, pr.w);
   }
 
   private kill(killer: SPlayer, victim: SPlayer, w: number, hs: boolean): void {
@@ -889,6 +1044,16 @@ export class HostServer {
       this.teamScore[killer.info.team === 'red' ? 0 : 1]++;
     }
     this.broadcast({ type: 'kill', k: killer.info.id, v: victim.info.id, w, hs });
+    if (!teamKill && killer.alive) {
+      // Reward: full health and a full magazine in the weapon in hand.
+      killer.hp = MAX_HP;
+      const def = WEAPONS[killer.weapon];
+      if (!def.melee) {
+        killer.mag[killer.weapon] = def.mag;
+        if (killer.reloadW === killer.weapon) killer.reloadW = -1;
+        this.sendAmmo(killer);
+      }
+    }
     this.sendScores();
     this.checkWin();
   }
@@ -1009,6 +1174,7 @@ export class HostServer {
         }
       });
       this.updateBots(t);
+      this.updateProjectiles(t);
       if (this.endsAt > 0 && t >= this.endsAt) this.endMatch('time');
     }
 

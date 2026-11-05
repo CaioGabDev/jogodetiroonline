@@ -114,6 +114,109 @@ function buildKnife(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.015, -0.27), hipPos: pos, adsPos: pos, mag: null };
 }
 
+function buildSmg(): GunModel {
+  const g = new THREE.Group();
+  g.add(box(metal, 0.05, 0.07, 0.3, 0, 0, -0.06));
+  g.add(cyl(dark, 0.012, 0.14, 0, 0.012, -0.27));
+  g.add(box(dark, 0.03, 0.03, 0.14, 0, -0.01, 0.16));
+  const mag = box(dark, 0.03, 0.17, 0.045, 0, -0.11, -0.1);
+  g.add(mag);
+  g.add(box(dark, 0.015, 0.025, 0.02, 0, 0.045, -0.14));
+  hands(g, 0.04, -0.17);
+  return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.35), hipPos: new THREE.Vector3(0.19, -0.19, -0.55), adsPos: new THREE.Vector3(0, -0.06, -0.38), mag };
+}
+
+function buildLmg(): GunModel {
+  const g = new THREE.Group();
+  g.add(box(metal, 0.08, 0.1, 0.5, 0, 0, -0.08));
+  g.add(cyl(dark, 0.018, 0.5, 0, 0.012, -0.56));
+  g.add(box(accent, 0.075, 0.07, 0.16, 0, -0.005, -0.4));
+  g.add(box(dark, 0.06, 0.09, 0.2, 0, -0.01, 0.26));
+  const mag = box(accent, 0.11, 0.13, 0.15, 0, -0.1, -0.1);
+  g.add(mag);
+  g.add(box(dark, 0.012, 0.13, 0.012, -0.03, -0.07, -0.62));
+  g.add(box(dark, 0.012, 0.13, 0.012, 0.03, -0.07, -0.62));
+  g.add(box(dark, 0.02, 0.03, 0.03, 0, 0.065, -0.26));
+  hands(g, 0.08, -0.36);
+  return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.82), hipPos: new THREE.Vector3(0.21, -0.23, -0.62), adsPos: new THREE.Vector3(0, -0.095, -0.44), mag };
+}
+
+function buildCrossbow(): GunModel {
+  const g = new THREE.Group();
+  g.add(box(wood, 0.05, 0.05, 0.6, 0, 0, -0.05));
+  g.add(box(wood, 0.045, 0.1, 0.16, 0, -0.04, 0.2));
+  g.add(box(metal, 0.46, 0.022, 0.03, 0, 0.012, -0.32));
+  g.add(box(dark, 0.45, 0.005, 0.005, 0, 0.018, -0.14));
+  g.add(box(steel, 0.008, 0.008, 0.36, 0, 0.034, -0.2));
+  g.add(box(dark, 0.012, 0.03, 0.02, 0, 0.05, -0.02));
+  hands(g, 0.09, -0.22);
+  return { group: g, muzzle: new THREE.Vector3(0, 0.03, -0.4), hipPos: new THREE.Vector3(0.2, -0.2, -0.6), adsPos: new THREE.Vector3(0, -0.062, -0.42), mag: null };
+}
+
+function buildDmr(): GunModel {
+  const g = new THREE.Group();
+  g.add(box(wood, 0.055, 0.075, 0.5, 0, 0, -0.06));
+  g.add(cyl(dark, 0.012, 0.4, 0, 0.012, -0.5));
+  g.add(cyl(dark, 0.022, 0.18, 0, 0.075, -0.1));
+  g.add(box(dark, 0.018, 0.04, 0.018, 0, 0.045, -0.1));
+  const mag = box(dark, 0.035, 0.1, 0.06, 0, -0.08, -0.1);
+  g.add(mag);
+  g.add(box(wood, 0.05, 0.09, 0.2, 0, -0.03, 0.24));
+  hands(g, 0.06, -0.28);
+  return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.7), hipPos: new THREE.Vector3(0.2, -0.2, -0.62), adsPos: new THREE.Vector3(0, -0.075, -0.4), mag };
+}
+
+function buildLauncher(): GunModel {
+  const g = new THREE.Group();
+  g.add(cyl(metal, 0.05, 0.42, 0, 0.012, -0.24));
+  g.add(cyl(dark, 0.056, 0.05, 0, 0.012, -0.46));
+  g.add(box(dark, 0.06, 0.09, 0.2, 0, -0.01, 0.06));
+  g.add(box(accent, 0.05, 0.09, 0.2, 0, -0.03, 0.26));
+  g.add(box(dark, 0.015, 0.04, 0.02, 0, 0.08, -0.2));
+  hands(g, 0.08, -0.26, -0.03);
+  return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.49), hipPos: new THREE.Vector3(0.21, -0.2, -0.58), adsPos: new THREE.Vector3(0, -0.1, -0.44), mag: null };
+}
+
+/** Pistol hand and grip, shared by the bigger handguns. */
+function pistolGrip(g: THREE.Group): THREE.Mesh {
+  const grip = box(dark, 0.04, 0.11, 0.055, 0, -0.09, 0.02);
+  grip.rotation.x = 0.25;
+  g.add(grip);
+  g.add(box(glove, 0.06, 0.07, 0.08, 0, -0.1, 0.03));
+  g.add(box(skin, 0.055, 0.05, 0.16, 0, -0.12, 0.14));
+  g.add(box(glove, 0.06, 0.06, 0.07, -0.035, -0.1, 0.02));
+  return grip;
+}
+
+function buildDeagle(): GunModel {
+  const g = new THREE.Group();
+  g.add(box(steel, 0.055, 0.065, 0.26, 0, 0, -0.08));
+  g.add(box(dark, 0.05, 0.03, 0.2, 0, -0.045, -0.05));
+  g.add(box(dark, 0.012, 0.018, 0.012, 0, 0.04, -0.19));
+  const grip = pistolGrip(g);
+  return { group: g, muzzle: new THREE.Vector3(0, 0.005, -0.22), hipPos: new THREE.Vector3(0.17, -0.17, -0.45), adsPos: new THREE.Vector3(0, -0.05, -0.36), mag: grip };
+}
+
+function buildRevolver(): GunModel {
+  const g = new THREE.Group();
+  g.add(cyl(steel, 0.016, 0.2, 0, 0.012, -0.14));
+  g.add(cyl(metal, 0.036, 0.075, 0, -0.008, -0.01));
+  g.add(box(metal, 0.04, 0.045, 0.1, 0, 0.01, 0.03));
+  g.add(box(dark, 0.01, 0.018, 0.012, 0, 0.038, -0.22));
+  const grip = pistolGrip(g);
+  return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.25), hipPos: new THREE.Vector3(0.17, -0.17, -0.45), adsPos: new THREE.Vector3(0, -0.048, -0.36), mag: grip };
+}
+
+function buildAutoPistol(): GunModel {
+  const g = new THREE.Group();
+  g.add(box(metal, 0.045, 0.05, 0.22, 0, 0, -0.06));
+  g.add(box(dark, 0.04, 0.03, 0.2, 0, -0.035, -0.05));
+  g.add(box(dark, 0.01, 0.015, 0.01, 0, 0.032, -0.15));
+  const grip = pistolGrip(g);
+  g.add(box(dark, 0.034, 0.1, 0.045, 0, -0.19, 0.045));
+  return { group: g, muzzle: new THREE.Vector3(0, 0, -0.18), hipPos: new THREE.Vector3(0.17, -0.15, -0.45), adsPos: new THREE.Vector3(0, -0.04, -0.36), mag: grip };
+}
+
 export interface ViewmodelState {
   aim: number;
   speed: number;
@@ -144,7 +247,21 @@ export class Viewmodel {
   private swingT = 0;
 
   constructor(scene: THREE.Scene) {
-    this.guns = [buildRifle(), buildPistol(), buildShotgun(), buildSniper(), buildKnife()];
+    this.guns = [
+      buildRifle(),
+      buildPistol(),
+      buildShotgun(),
+      buildSniper(),
+      buildKnife(),
+      buildSmg(),
+      buildLmg(),
+      buildCrossbow(),
+      buildDmr(),
+      buildLauncher(),
+      buildDeagle(),
+      buildRevolver(),
+      buildAutoPistol(),
+    ];
     this.guns.forEach((g, i) => {
       g.group.visible = i === 0;
       this.root.add(g.group);

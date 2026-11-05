@@ -135,7 +135,15 @@ export interface SetColorMsg {
   color: string;
 }
 
-export type ClientMsg = HelloMsg | InputMsg | ShootMsg | ReloadMsg | ChatSendMsg | PongMsg | SetTeamMsg | SetColorMsg;
+export interface LoadoutMsg {
+  type: 'loadout';
+  /** Two primaries and a pistol. */
+  w: number[];
+  /** Player confirmed: spawn now instead of waiting for the timer. */
+  go: boolean;
+}
+
+export type ClientMsg = HelloMsg | InputMsg | ShootMsg | ReloadMsg | ChatSendMsg | PongMsg | SetTeamMsg | SetColorMsg | LoadoutMsg;
 
 // ---------------------------------------------------------------------------
 // Host -> Client
@@ -184,6 +192,34 @@ export interface SpawnMsg {
   tp: number;
   /** true = full respawn (reset hp/ammo); false = position correction only. */
   full: boolean;
+  /** Weapons the player spawned with (full respawns). */
+  ld?: number[];
+}
+
+/** Opens the spawn screen. */
+export interface PickMsg {
+  type: 'pick';
+  ms: number;
+}
+
+/** A physical projectile left the weapon. Clients only draw it; the host decides what it hits. */
+export interface ProjMsg {
+  type: 'proj';
+  id: number;
+  i: number;
+  w: number;
+  o: Vec3;
+  v: Vec3;
+}
+
+export interface ProjEndMsg {
+  type: 'pimp';
+  id: number;
+  w: number;
+  p: Vec3;
+  /** 0 nothing, 1 world, 2 player. */
+  h: number;
+  n: Vec3;
 }
 
 export interface AmmoMsg {
@@ -277,6 +313,9 @@ export type HostMsg =
   | DamageMsg
   | KillMsg
   | ShotMsg
+  | PickMsg
+  | ProjMsg
+  | ProjEndMsg
   | PickupMsg
   | ChatMsg
   | SysMsg
@@ -323,6 +362,8 @@ export function parseClientMsg(raw: unknown): ClientMsg | null {
         : null;
     case 'reload':
       return isWeapon(m.w) ? (m as unknown as ReloadMsg) : null;
+    case 'loadout':
+      return Array.isArray(m.w) && m.w.length === 3 && m.w.every(isWeapon) && typeof m.go === 'boolean' ? (m as unknown as LoadoutMsg) : null;
     case 'chat':
       return isStr(m.text, CHAT_MAX) && typeof m.team === 'boolean' ? (m as unknown as ChatSendMsg) : null;
     case 'pong':

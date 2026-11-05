@@ -1,4 +1,3 @@
-import { WEAPONS } from '../game/weapons';
 import { clamp } from './util';
 
 export type Action =
@@ -16,7 +15,6 @@ export type Action =
   | 'weapon2'
   | 'weapon3'
   | 'weapon4'
-  | 'weapon5'
   | 'scoreboard'
   | 'chat'
   | 'teamChat';
@@ -32,11 +30,10 @@ export const ACTION_LABELS: Record<Action, string> = {
   reload: 'Recarregar',
   fire: 'Atirar',
   aim: 'Mirar (ADS)',
-  weapon1: 'Rifle',
-  weapon2: 'Pistola',
-  weapon3: 'Escopeta',
-  weapon4: 'Sniper',
-  weapon5: 'Faca',
+  weapon1: 'Primária 1',
+  weapon2: 'Primária 2',
+  weapon3: 'Pistola',
+  weapon4: 'Faca',
   scoreboard: 'Placar',
   chat: 'Chat (todos)',
   teamChat: 'Chat (time)',
@@ -75,8 +72,8 @@ export interface Settings {
   showFps: boolean;
   showPing: boolean;
   killfeedSize: number;
-  /** Weapons this player carries (ids), in weapon wheel order. The first one is the starting weapon. */
-  loadout: number[];
+  /** Mouse wheel order of the slots (0-1 primaries, 2 pistol, 3 knife). The first one is the starting weapon. */
+  wheel: number[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -100,7 +97,6 @@ export const DEFAULT_SETTINGS: Settings = {
     weapon2: ['Digit2', ''],
     weapon3: ['Digit3', ''],
     weapon4: ['Digit4', ''],
-    weapon5: ['Digit5', ''],
     scoreboard: ['Tab', ''],
     chat: ['Enter', ''],
     teamChat: ['KeyY', ''],
@@ -125,7 +121,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showFps: false,
   showPing: true,
   killfeedSize: 5,
-  loadout: WEAPONS.map((w) => w.id),
+  wheel: [0, 1, 2, 3],
 };
 
 export const FPS_LIMITS = [0, 30, 60, 90, 120, 144, 165, 240];
@@ -162,10 +158,8 @@ function sanitize(raw: unknown): Settings {
   s.showFps = bool('showFps', s.showFps);
   s.showPing = bool('showPing', s.showPing);
   s.killfeedSize = Math.round(num('killfeedSize', 2, 10, s.killfeedSize));
-  if (Array.isArray(r.loadout)) {
-    // Keeps the stored order: it is the player's weapon wheel.
-    const chosen = [...new Set(r.loadout as unknown[])].filter((w): w is number => s.loadout.includes(w as number));
-    if (chosen.length > 0) s.loadout = chosen;
+  if (Array.isArray(r.wheel) && s.wheel.every((slot) => (r.wheel as unknown[]).includes(slot)) && r.wheel.length === s.wheel.length) {
+    s.wheel = r.wheel as number[];
   }
   if (r.binds && typeof r.binds === 'object') {
     const b = r.binds as Record<string, unknown>;

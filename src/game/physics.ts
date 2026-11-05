@@ -165,6 +165,8 @@ export interface PInput {
   crouch: boolean;
   sprint: boolean;
   knife: boolean;
+  /** Speed multiplier of the weapon in hand. */
+  speedMul: number;
   ads: boolean;
   yaw: number;
 }
@@ -340,7 +342,7 @@ export class CollisionWorld {
         : inp.sprint && inp.fwd > 0
           ? MOVE.sprint
           : MOVE.walk;
-    const wishSpeed = wl > 1e-4 ? maxSpeed : 0;
+    const wishSpeed = wl > 1e-4 ? maxSpeed * inp.speedMul : 0;
     const accel = inp.knife ? MOVE.knifeAccel : MOVE.accel;
     const friction = inp.knife ? MOVE.knifeFriction : MOVE.friction;
     const airAccel = inp.knife ? MOVE.knifeAirAccel : inp.sprint ? MOVE.sprintAirAccel : MOVE.airAccel;

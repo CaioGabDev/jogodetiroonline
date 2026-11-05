@@ -8,9 +8,9 @@ import { rayPlayer } from './hitbox';
 import { MAPS, type MapDef } from './mapData';
 import { CollisionWorld, eyeHeight, type PState } from './physics';
 import { RemotePlayer } from './player';
-import { GUN_GAME_LADDER, RECOIL_PATTERN, WEAPONS, WEAPON_COUNT, allowedWeapons, fullAmmo } from './weapons';
+import { DEFAULT_LOADOUT, GUN_GAME_LADDER, RECOIL_PATTERN, WEAPONS, WEAPON_COUNT, allowedWeapons, fullAmmo } from './weapons';
 import type { NetClient } from '../net/client';
-import { F_PROTECTED, type HostMsg, type LobbyState, type MatchInfo, type PlayerInfo } from '../net/protocol';
+import { F_PROTECTED, type HostMsg, type LobbyState, type MatchInfo, type PlayerInfo, type ProjEndMsg, type ProjMsg } from '../net/protocol';
 import type { SceneManager } from '../render/scene';
 import { Effects } from '../render/effects';
 import { Viewmodel } from '../render/viewmodel';
@@ -30,6 +30,7 @@ const LOOK_SCALE = 0.0005;
 const SWITCH_MS = 380;
 /** Longest wait after a shot before recoil starts to recover, whatever the weapon's fire rate. */
 const RECOVER_DELAY_MS = 300;
+const SLOT_ACTIONS = ['weapon1', 'weapon2', 'weapon3', 'weapon4'] as const;
 
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -91,6 +92,10 @@ export class Game {
   private recoilY = 0;
   private bloom = 0;
   private burst = 0;
+  /** Shots left in the current burst of a burst-fire weapon. */
+  private burstLeft = 0;
+  /** Primaries and pistol confirmed by the host. */
+  private ld: number[] = [...DEFAULT_LOADOUT];
   private shotSeq = 0;
   private pendingShots: Array<{ s: number; w: number }> = [];
   /** Simulation clock (ms) advanced by the fixed step; weapon timing uses it so fire rate is exact at any FPS. */
@@ -216,7 +221,7 @@ export class Game {
         }
         break;
       case 'spawn':
-        this.onSpawn(m.p, m.yw, m.tp, m.full);
+        this.onSpawn(m.p, m.yw, m.tp, m.full, m.ld);
         break;
       case 'ammo':
         this.onAmmo(m.mag, m.res, m.ack);
@@ -239,12 +244,19 @@ export class Game {
       case 'shot':
         this.onRemoteShot(m.i, m.w, m.o, m.e, m.h, m.n);
         break;
+      case 'proj':
+        this.onProjectile(m);
+        break;
+      case 'pimp':
+        this.onProjectileEnd(m);
+        break;
       case 'pickup':
         this.sm.pickups.setActive(m.idx, m.on);
         if (!m.on && m.by === this.localId) {
           const kind = this.map.pickups[m.idx]?.kind ?? 'health';
           audio.pickup(kind);
-          this.hud.notify(kind === 'health' ? '+50 VIDA' : '+MUNIÇÃO');
+          this.hud.notify(kind === 'health' ? 'VIDA CHEIA' : 'ARMA RECARREGADA');
+          if (kind === 'ammo' && this.reloadW === this.weapon) this.reloadW = -1;
         }
         break;
       case 'score':
@@ -271,13 +283,14 @@ export class Game {
     }
   }
 
-  private onSpawn(p: [number, number, number], yaw: number, tp: number, full: boolean): void {
+  private onSpawn(p: [number, number, number], yaw: number, tp: number, full: boolean, ld?: number[]): void {
     this.tp = tp;
     this.me.x = this.prev.x = p[0];
     this.me.y = this.prev.y = p[1];
     this.me.z = this.prev.z = p[2];
     this.me.vx = this.me.vy = this.me.vz = 0;
     if (!full) return;
+    if (ld) this.ld = ld;
     this.me.onGround = true;
     this.me.crouch = false;
     this.crouchToggled = false;
@@ -327,6 +340,8 @@ export class Game {
       this.viewmodel.visible = false;
       audio.death();
     } else if (k === this.localId) {
+      // The host just refilled the weapon in hand; a reload finishing now would add to it.
+      if (this.reloadW === this.weapon) this.reloadW = -1;
       this.hud.notify(`Você eliminou ${victim.name}${hs ? ' (HEADSHOT)' : ''}`);
     }
   }
@@ -350,7 +365,36 @@ export class Game {
       }
     }
     if (!melee) this.effects.muzzleFlash(muzzle, 0.55, true);
-    audio.shot(w, muzzle);
+    audio.shot(def?.sound ?? 'rifle', muzzle);
+  }
+
+  private onProjectile(m: ProjMsg): void {
+    const def = WEAPONS[m.w];
+    if (!def?.projectile) return;
+    const pos = new THREE.Vector3(m.o[0], m.o[1], m.o[2]);
+    this.effects.addProjectile(m.id, pos, new THREE.Vector3(m.v[0], m.v[1], m.v[2]), def.projectile.gravity, def.projectile.kind);
+    if (m.i === this.localId) return;
+    if (!def.silent) this.effects.muzzleFlash(pos, 0.55, true);
+    audio.shot(def.sound, pos);
+  }
+
+  private onProjectileEnd(m: ProjEndMsg): void {
+    this.effects.removeProjectile(m.id);
+    const def = WEAPONS[m.w];
+    if (!def || m.h === 0) return;
+    const pos = new THREE.Vector3(m.p[0], m.p[1], m.p[2]);
+    if (def.splash) {
+      this.effects.explosion(pos, def.splash.radius);
+      audio.explosion(pos);
+      const dist = Math.hypot(pos.x - this.me.x, pos.y - this.me.y, pos.z - this.me.z);
+      this.shake = Math.min(1, this.shake + Math.max(0, 1 - dist / (def.splash.radius * 3)));
+    } else if (m.h === 2) {
+      this.effects.impact(pos, null, 'player', 6);
+    } else {
+      const normal = new THREE.Vector3(m.n[0], m.n[1], m.n[2]);
+      this.effects.decal(pos, normal);
+      this.effects.impact(pos, normal, 'world', 7);
+    }
   }
 
   // ------------------------------------------------------------------ input / weapons
@@ -359,14 +403,15 @@ export class Game {
     return this.alive && !this.ended && input.gameEnabled;
   }
 
-  /** What the match allows (the host enforces this) narrowed to the player's own choice in the settings. */
+  /** Weapons in number key order: 1 and 2 primaries, 3 pistol, 4 knife. The host enforces the same list. */
+  private keySlots(): number[] {
+    return allowedWeapons(this.config.arsenal, this.scores.get(this.localId)?.k ?? 0, this.ld);
+  }
+
+  /** Same weapons in the order of the player's wheel, which only applies with every weapon enabled. */
   private allowed(): number[] {
-    const kills = this.scores.get(this.localId)?.k ?? 0;
-    const inMatch = allowedWeapons(this.config.arsenal, kills);
-    const { loadout } = settings.get();
-    // With every weapon enabled the player's own wheel order applies; other modes keep theirs.
-    const mine = this.config.arsenal === 'all' ? loadout : inMatch.filter((w) => loadout.includes(w));
-    return mine.length > 0 ? mine : inMatch;
+    const keys = this.keySlots();
+    return this.config.arsenal === 'all' ? settings.get().wheel.map((slot) => keys[slot]) : keys;
   }
 
   private setWeapon(w: number, instant = false): void {
@@ -375,6 +420,7 @@ export class Game {
     this.reloadW = -1;
     this.adsToggled = false;
     this.burst = 0;
+    this.burstLeft = 0;
     this.switchUntil = instant ? this.simT + 250 : this.simT + SWITCH_MS;
     this.viewmodel.setWeapon(w);
     if (!instant) audio.switchWeapon();
@@ -426,6 +472,7 @@ export class Game {
     const t = this.simT;
     this.lastShot = t;
     if (!def.melee) this.mag[w]--;
+    if (this.burstLeft > 0) this.burstLeft--;
     this.sprinting = false;
 
     const eye = this.me.y + this.eyeH;
@@ -449,6 +496,8 @@ export class Game {
         .addScaledVector(_up, Math.sin(a) * r)
         .normalize();
       dirs.push(r3(d.x), r3(d.y), r3(d.z));
+      // The host flies projectiles and tells everyone, the shooter included, what to draw.
+      if (def.projectile) continue;
 
       // Local prediction of the impact (visual only; the host decides damage).
       const wh = this.world.raycast(origin.x, origin.y, origin.z, d.x, d.y, d.z, def.range);
@@ -480,18 +529,18 @@ export class Game {
     const adsMul = 1 - this.aimT * 0.35;
     this.recoilP += def.kick * (0.85 + Math.random() * 0.3) * adsMul;
     const pat = RECOIL_PATTERN[this.burst % RECOIL_PATTERN.length];
-    this.recoilY += (w === 0 ? pat : (Math.random() - 0.5) * 2) * def.kickYaw * adsMul;
+    this.recoilY += (def.pattern ? pat : (Math.random() - 0.5) * 2) * def.kickYaw * adsMul;
     this.burst++;
     this.bloom = Math.min(0.03, this.bloom + def.kick * 0.25);
 
     if (def.melee) {
       this.viewmodel.swing();
     } else {
-      this.viewmodel.fire(w === 3 || w === 2 ? 1.6 : 1);
-      const scoped = w === 3 && this.aimT > 0.85;
-      if (!scoped) this.effects.muzzleFlash(muzzleWorld, 0.35, true);
+      this.viewmodel.fire(def.fireKick);
+      const scoped = def.scoped && this.aimT > 0.85;
+      if (!scoped && !def.silent) this.effects.muzzleFlash(muzzleWorld, 0.35, true);
     }
-    audio.shot(w);
+    audio.shot(def.sound);
     this.protected = false;
 
     if (this.mag[w] === 0) window.setTimeout(() => this.alive && this.weapon === w && this.startReload(), 250);
@@ -521,9 +570,10 @@ export class Game {
     }
 
     // Weapon switching
-    for (let i = 0; i < WEAPON_COUNT; i++) {
-      if (input.consume(`weapon${i + 1}` as 'weapon1') && allowed.includes(i)) this.setWeapon(i);
-    }
+    const keys = this.keySlots();
+    SLOT_ACTIONS.forEach((action, i) => {
+      if (input.consume(action) && keys[i] !== undefined) this.setWeapon(keys[i]);
+    });
     const wheel = input.takeWheel();
     if (wheel !== 0) {
       const next = allowed.indexOf(this.weapon) + (wheel > 0 ? 1 : -1) + allowed.length;
@@ -533,11 +583,13 @@ export class Game {
 
     const wd = WEAPONS[this.weapon];
     const pressed = input.consume('fire');
-    const want = wd.auto ? input.isDown('fire') : pressed;
+    if (pressed && wd.burst && this.burstLeft === 0 && t - this.lastShot >= (wd.burstPause ?? 0)) this.burstLeft = wd.burst;
+    const want = wd.burst ? this.burstLeft > 0 : wd.auto ? input.isDown('fire') : pressed;
     if (!want) return;
     if (t < this.switchUntil || this.reloadW >= 0) return;
     if (t - this.lastShot < wd.interval - 1) return;
     if (!wd.melee && this.mag[this.weapon] <= 0) {
+      this.burstLeft = 0;
       if (t - this.lastDry > 300) {
         audio.dryFire();
         this.lastDry = t;
@@ -608,7 +660,7 @@ export class Game {
       this.prev.z = this.me.z;
       const res = this.world.step(
         this.me,
-        { fwd, side, jump, crouch: wantCrouch, sprint: this.sprinting, knife: def.melee === true, ads: this.aimT > 0.3, yaw: this.yaw },
+        { fwd, side, jump, crouch: wantCrouch, sprint: this.sprinting, knife: def.melee === true, speedMul: def.moveMul ?? 1, ads: this.aimT > 0.3, yaw: this.yaw },
         dt,
       );
       if (res.jumped) audio.jump();
@@ -728,7 +780,7 @@ export class Game {
       const bobX = Math.cos(this.bobPhase) * 0.025 * bobAmt;
       this.landDip -= this.landDip * damp(9, dt);
       // Looking through the scope the view holds still: no landing dip or flinch.
-      const steady = this.weapon === 3 ? 1 - aimT : 1;
+      const steady = def.scoped ? 1 - aimT : 1;
       cam.position.set(px + Math.cos(this.yaw) * bobX, py + this.eyeH + bobY - this.landDip * steady, pz - Math.sin(this.yaw) * bobX);
       this.shake -= this.shake * damp(8, dt);
       const sh = this.shake * 0.02 * steady;
@@ -743,7 +795,7 @@ export class Game {
 
     // Zoom & scope
     this.sm.zoom = 1 + (def.zoom - 1) * aimT;
-    const scoped = this.alive && this.weapon === 3 && aimT > 0.85;
+    const scoped = this.alive && def.scoped === true && aimT > 0.85;
     this.hud.setScope(scoped);
     this.sm.showViewmodel = this.alive && !scoped;
     this.hud.setCrosshairVisible(this.alive && !scoped && !this.ended);
@@ -815,7 +867,7 @@ export class Game {
     this.hud.setHealth(this.alive ? this.hp : 0);
     const reload = this.reloadW >= 0 ? (this.simT - this.reloadStart) / (this.reloadUntil - this.reloadStart) : -1;
     this.hud.setAmmo(this.weapon, this.mag[this.weapon], this.reserve[this.weapon], reload);
-    this.hud.setSlots(this.allowed());
+    this.hud.setSlots(this.allowed(), this.keySlots());
     this.hud.setProtected(this.alive && this.protected);
     const tl = this.timeLeft < 0 ? -1 : Math.max(0, this.timeLeft - (t - this.timeRecvAt));
     this.hud.setTimer(tl);

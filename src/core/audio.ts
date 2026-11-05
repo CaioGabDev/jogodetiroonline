@@ -1,3 +1,4 @@
+import type { WeaponSound } from '../game/weapons';
 import { settings } from './settings';
 
 export type HitKind = 'hit' | 'head' | 'kill';
@@ -137,33 +138,68 @@ class AudioEngine {
     o.stop(t + opts.dur + 0.05);
   }
 
-  /** Attack sound per weapon (0 rifle, 1 pistol, 2 shotgun, 3 sniper, 4 knife). */
-  shot(weapon: number, pos?: Vec3Like): void {
-    const d = this.out('sfx', pos, 6);
+  /** Attack sound of a weapon. Each one is synthesized, so tuning it here changes every gun that uses it. */
+  shot(sound: WeaponSound, pos?: Vec3Like): void {
+    const d = this.out('sfx', pos, sound === 'crossbow' ? 0.6 : 6);
     if (!d) return;
     const v = pos ? 1.4 : 1;
-    switch (weapon) {
-      case 0:
+    switch (sound) {
+      case 'rifle':
         this.noiseBurst(d, { type: 'bandpass', freq: 1800, freqEnd: 600, q: 0.7, dur: 0.14, gain: 0.55 * v });
         this.tone(d, { type: 'sine', freq: 140, freqEnd: 45, dur: 0.12, gain: 0.5 * v });
         break;
-      case 1:
+      case 'smg':
+        this.noiseBurst(d, { type: 'bandpass', freq: 2600, freqEnd: 1000, q: 0.8, dur: 0.08, gain: 0.42 * v });
+        this.tone(d, { type: 'triangle', freq: 190, freqEnd: 70, dur: 0.07, gain: 0.3 * v });
+        break;
+      case 'lmg':
+        this.noiseBurst(d, { type: 'bandpass', freq: 1200, freqEnd: 350, q: 0.6, dur: 0.17, gain: 0.7 * v });
+        this.tone(d, { type: 'sine', freq: 110, freqEnd: 38, dur: 0.16, gain: 0.7 * v });
+        break;
+      case 'dmr':
+        this.noiseBurst(d, { type: 'bandpass', freq: 1500, freqEnd: 400, q: 0.6, dur: 0.22, gain: 0.65 * v });
+        this.tone(d, { type: 'sine', freq: 120, freqEnd: 40, dur: 0.2, gain: 0.65 * v });
+        break;
+      case 'pistol':
         this.noiseBurst(d, { type: 'bandpass', freq: 2600, freqEnd: 900, q: 0.9, dur: 0.1, gain: 0.45 * v });
         this.tone(d, { type: 'triangle', freq: 220, freqEnd: 70, dur: 0.08, gain: 0.35 * v });
         break;
-      case 2:
+      case 'deagle':
+        this.noiseBurst(d, { type: 'bandpass', freq: 1700, freqEnd: 300, q: 0.6, dur: 0.24, gain: 0.8 * v });
+        this.tone(d, { type: 'sine', freq: 130, freqEnd: 40, dur: 0.2, gain: 0.8 * v });
+        break;
+      case 'revolver':
+        this.noiseBurst(d, { type: 'bandpass', freq: 2000, freqEnd: 450, q: 0.7, dur: 0.2, gain: 0.7 * v });
+        this.tone(d, { type: 'triangle', freq: 170, freqEnd: 55, dur: 0.16, gain: 0.6 * v });
+        break;
+      case 'shotgun':
         this.noiseBurst(d, { type: 'lowpass', freq: 1400, freqEnd: 200, q: 0.5, dur: 0.38, gain: 0.9 * v });
         this.tone(d, { type: 'sine', freq: 95, freqEnd: 35, dur: 0.25, gain: 0.8 * v });
         this.noiseBurst(d, { type: 'highpass', freq: 3000, dur: 0.06, gain: 0.25 * v });
         break;
-      case 4:
+      case 'knife':
         this.noiseBurst(d, { type: 'bandpass', freq: 700, freqEnd: 2600, q: 1.2, dur: 0.16, gain: 0.3 * v });
+        break;
+      case 'crossbow':
+        this.noiseBurst(d, { type: 'bandpass', freq: 900, freqEnd: 300, q: 1.5, dur: 0.1, gain: 0.25 });
+        this.tone(d, { type: 'triangle', freq: 300, freqEnd: 120, dur: 0.09, gain: 0.15 });
+        break;
+      case 'launcher':
+        this.noiseBurst(d, { type: 'lowpass', freq: 700, freqEnd: 150, q: 0.6, dur: 0.22, gain: 0.8 * v });
+        this.tone(d, { type: 'sine', freq: 170, freqEnd: 60, dur: 0.18, gain: 0.8 * v });
         break;
       default:
         this.noiseBurst(d, { type: 'highpass', freq: 2000, dur: 0.08, gain: 0.6 * v });
         this.noiseBurst(d, { type: 'lowpass', freq: 2200, freqEnd: 120, q: 0.4, dur: 0.75, gain: 0.8 * v });
         this.tone(d, { type: 'sine', freq: 80, freqEnd: 30, dur: 0.35, gain: 0.9 * v });
     }
+  }
+
+  explosion(pos: Vec3Like): void {
+    const d = this.out('sfx', pos, 10);
+    if (!d) return;
+    this.noiseBurst(d, { type: 'lowpass', freq: 1100, freqEnd: 90, q: 0.5, dur: 0.8, gain: 1.2 });
+    this.tone(d, { type: 'sine', freq: 70, freqEnd: 25, dur: 0.6, gain: 1 });
   }
 
   dryFire(): void {

@@ -30,7 +30,7 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 | Atirar | Botão esquerdo |
 | Mirar / luneta | Botão direito (segurar ou alternar) |
 | Recarregar | R |
-| Trocar arma | 1 – 5 ou roda do mouse |
+| Trocar arma | 1 e 2 primárias, 3 pistola, 4 faca, ou roda do mouse |
 | Placar | Tab (segurar) |
 | Chat (todos) / chat do time | Enter / Y |
 | Pausa | Esc |
@@ -39,17 +39,35 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 
 ### Armas
 
-| # | Arma | Dano | Cadência | Pente | Observações |
-| --- | --- | --- | --- | --- | --- |
-| 1 | Rifle automático | 20 | 600 RPM | 30 | recoil com padrão fixo |
-| 2 | Pistola | 25 | semi-auto | 12 | reserva infinita |
-| 3 | Escopeta | 8 × 12 | semi-auto | 6 | dano cai com a distância |
-| 4 | Sniper | 90 | semi-auto | 5 | luneta limpa com zoom, sem recuo; headshot mata |
-| 5 | Faca | 70 | 120 golpes/min | ∞ | alcance curto; com ela o boneco corre bem mais rápido e para na hora |
+No começo da partida, na tela de spawn, você tem **5 segundos** para escolher **2 armas primárias e 1 pistola**. Se o tempo acabar, o que faltar vira o padrão (Rifle de Assalto + SMG + Pistola). A faca vai sempre junto. Todos os atributos ficam em `src/game/weapons.ts`.
+
+| Primária | Pente | Características |
+| --- | --- | --- |
+| SMG | 30 | cadência alta, dano baixo, recuo leve |
+| Rifle de Assalto | 30 | equilibrado, recuo médio |
+| LMG | 100 | dano alto, recuo muito difícil, recarga lenta, anda mais devagar |
+| Escopeta | 8 | dano altíssimo de perto, fraca de longe |
+| Sniper | 5 | mata com 1 tiro na cabeça, luneta, tiro lento |
+| Besta | 1 | seta com queda, silenciosa, dano alto, recarga lenta |
+| DMR | 15 | tiro a tiro, boa em média distância |
+| Lança-granadas | 6 | dano em área, projétil em arco |
+
+| Pistola | Pente | Características |
+| --- | --- | --- |
+| Pistola | 12 | rápida, dano baixo |
+| Desert Eagle | 7 | dano muito alto, recuo forte, tiro lento |
+| Revólver | 6 | dano alto, preciso, recarga lenta |
+| Pistola Automática | 20 | dispara em rajada, recuo médio |
+
+**Faca:** alcance curto, e com ela o boneco corre bem mais rápido e para na hora.
 
 **Pular enquanto corre** (toque no Shift, depois W + Espaço) dá um impulso de velocidade (+25%) e mais controle no ar, com qualquer arma.
 
-Headshot causa dano dobrado em todas as armas. Kits de vida (+50) e caixas de munição reaparecem 20 s após serem pegos.
+**Abate:** a arma em mãos recarrega por completo e a vida volta a 100%.
+
+**Itens no chão** (reaparecem em 20 s): o kit médico enche a vida, e a munição recarrega por completo a arma em mãos.
+
+Headshot causa dano dobrado em todas as armas, exceto a explosão do lança-granadas. O lança-granadas não fere quem atirou.
 
 ### Mapas
 
@@ -66,7 +84,7 @@ O host escolhe o mapa no lobby:
 
 O host também escolhe as **Armas** da partida:
 
-- **Todas as armas:** cada jogador monta a própria roda em Configurações → Armas: escolhe as armas e a ordem. A primeira é a arma inicial, e a roda do mouse e o HUD seguem essa ordem.
+- **Todas as armas:** cada jogador escolhe as armas na tela de spawn. Em Configurações → Armas dá para mudar a ordem da roda: a primeira é a arma inicial, e a roda do mouse e o HUD seguem essa ordem.
 - **Só sniper / Só doze:** só essa arma e a faca, em FFA ou TDM.
 - **Gun Game:** sempre FFA. Cada kill troca a sua arma (rifle, doze, sniper, pistola, faca; 2 kills em cada, 1 na faca). Vence quem fizer a kill com a faca.
 

@@ -12,6 +12,7 @@ import type { HostMsg, LobbyState, MatchInfo, WelcomeMsg } from './net/protocol'
 import { SceneManager } from './render/scene';
 import { Chat } from './ui/chat';
 import { Hud } from './ui/hud';
+import { LoadoutPicker } from './ui/loadout';
 import { Lobby } from './ui/lobby';
 import { MainMenu } from './ui/menu';
 import { PauseMenu } from './ui/pause';
@@ -33,6 +34,7 @@ class App {
   private results: Results;
   private settingsUI: SettingsUI;
   private roomBrowser: RoomBrowser;
+  private loadout: LoadoutPicker;
   private loop: GameLoop;
 
   private screen: Screen = 'menu';
@@ -63,7 +65,7 @@ class App {
       onStart: () => {
         if (!this.host) return;
         this.host.startMatch();
-        input.requestLock();
+        this.lockForMatch();
       },
       onLeave: () => this.leave(),
       onTeam: (team) => this.net?.send({ type: 'setTeam', team }),
@@ -74,7 +76,7 @@ class App {
     this.results = new Results(ui, {
       onRematch: () => {
         this.host?.startMatch();
-        input.requestLock();
+        this.lockForMatch();
       },
       onLobby: () => this.host?.backToLobby(),
       onLeave: () => this.leave(),
@@ -95,6 +97,11 @@ class App {
     });
     this.settingsUI = new SettingsUI(ui);
     this.roomBrowser = new RoomBrowser((rooms) => this.menu.setRooms(rooms));
+    this.loadout = new LoadoutPicker(ui, (w, go) => {
+      this.net?.send({ type: 'loadout', w, go });
+      // The click on Confirmar is what lets the browser capture the mouse again.
+      if (go) input.requestLock();
+    });
 
     this.chat.onClose = () => this.updateGameInput();
     input.onLockChange((locked) => this.onLockChange(locked));
@@ -189,7 +196,7 @@ class App {
       } else {
         this.chat.close();
         this.game?.resetInputState();
-        if (!this.results.visible && !this.settingsUI.isOpen) this.pause.show(true);
+        if (!this.results.visible && !this.settingsUI.isOpen && !this.loadout.visible) this.pause.show(true);
       }
     }
     this.updateGameInput();
@@ -236,7 +243,7 @@ class App {
     this.busy = false;
     if (ok) {
       host.startMatch();
-      input.requestLock();
+      this.lockForMatch();
     }
   }
 
@@ -317,6 +324,19 @@ class App {
       case 'start':
         this.startGame(m.match);
         break;
+      case 'pick':
+        // Choosing needs the cursor.
+        input.exitLock();
+        this.pause.show(false);
+        this.loadout.open(m.ms);
+        break;
+      case 'spawn':
+        this.game?.onMessage(m);
+        if (m.full && this.loadout.visible) {
+          this.loadout.close();
+          if (!input.locked) this.pause.show(true, true);
+        }
+        break;
       case 'end': {
         if (!this.game) break;
         this.game.end();
@@ -360,7 +380,13 @@ class App {
     this.pause.setOtherTeam(lobby?.config.mode === 'tdm' && me ? (me.team === 'red' ? 'blue' : 'red') : null);
   }
 
+  /** With the spawn screen open the mouse stays free; confirming captures it. */
+  private lockForMatch(): void {
+    if (this.host?.lobbyState().config.arsenal !== 'all') input.requestLock();
+  }
+
   private stopGame(): void {
+    this.loadout.close();
     if (this.game) {
       this.game.dispose();
       this.game = null;
