@@ -12,7 +12,7 @@ export const SNAP_SAMPLE_DELAY = 60;
 export const HISTORY_MS = 1000;
 export const RESPAWN_MS = 3000;
 /** Time to choose weapons on the spawn screen. */
-export const LOADOUT_PICK_MS = 5000;
+export const LOADOUT_PICK_MS = 10000;
 /** Minimum time between team changes during a match. */
 export const TEAM_SWITCH_COOLDOWN_MS = 10000;
 export const SPAWN_PROTECT_MS = 2000;

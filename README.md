@@ -39,7 +39,7 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 
 ### Armas
 
-No começo da partida, na tela de spawn, você tem **5 segundos** para escolher **2 armas primárias e 1 pistola**. Se o tempo acabar, o que faltar vira o padrão (Rifle de Assalto + SMG + Pistola). A faca vai sempre junto. Todos os atributos ficam em `src/game/weapons.ts`.
+No começo da partida, na tela de spawn, você tem **10 segundos** para escolher **2 armas primárias e 1 pistola**. Se o tempo acabar, o que faltar vira o padrão (Rifle de Assalto + SMG + Pistola). A faca vai sempre junto. Todos os atributos ficam em `src/game/weapons.ts`.
 
 | Primária | Pente | Características |
 | --- | --- | --- |
