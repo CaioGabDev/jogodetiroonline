@@ -382,8 +382,8 @@ export const WEAPONS: WeaponDef[] = [
     spreadAds: 0.002,
     spreadMove: 0.03,
     spreadAir: 0.08,
-    kick: 0.024,
-    kickYaw: 0.006,
+    kick: 0.016,
+    kickYaw: 0.004,
     recover: 7,
     reloadTime: 2.2,
     zoom: 2,
@@ -395,6 +395,7 @@ export const WEAPONS: WeaponDef[] = [
     sound: 'dmr',
     fireKick: 1.2,
     shape: { len: 0.95, h: 0.11 },
+    scoped: true,
   },
   {
     id: W.LAUNCHER,
@@ -552,7 +553,7 @@ export function fillLoadout(primaries: number[], pistol: number | null): number[
   return [...chosen, pistol ?? DEFAULT_LOADOUT[2]];
 }
 
-/** Gun Game: every weapon, one kill each, from the easiest to the hardest. Getting past the end wins. */
+/** Gun Game levels: every weapon, one kill each, from the easiest to the hardest. A kill on the last one wins. */
 export const GUN_GAME_LADDER: number[] = [
   W.RIFLE,
   W.SMG,
@@ -569,15 +570,17 @@ export const GUN_GAME_LADDER: number[] = [
   W.KNIFE,
 ];
 
-/** Weapons a player may use. The single-weapon modes keep the knife for movement. */
-export function allowedWeapons(arsenal: Arsenal, kills: number, loadout: number[]): number[] {
+/** Weapons a player may use. `level` is the Gun Game level. Every mode keeps the knife for movement. */
+export function allowedWeapons(arsenal: Arsenal, level: number, loadout: number[]): number[] {
   switch (arsenal) {
     case 'sniper':
       return [W.SNIPER, W.KNIFE];
     case 'shotgun':
       return [W.SHOTGUN, W.KNIFE];
-    case 'gungame':
-      return [GUN_GAME_LADDER[Math.min(Math.max(kills, 0), GUN_GAME_LADDER.length - 1)]];
+    case 'gungame': {
+      const w = GUN_GAME_LADDER[Math.min(level, GUN_GAME_LADDER.length - 1)];
+      return w === W.KNIFE ? [w] : [w, W.KNIFE];
+    }
     default:
       return [...loadout, W.KNIFE];
   }

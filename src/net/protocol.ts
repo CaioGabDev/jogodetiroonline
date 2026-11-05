@@ -57,6 +57,8 @@ export interface ScoreRow {
   k: number;
   d: number;
   pg: number;
+  /** Gun Game level. */
+  lv: number;
 }
 
 export interface ResultRow {

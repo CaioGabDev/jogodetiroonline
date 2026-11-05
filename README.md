@@ -50,7 +50,7 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 | Escopeta | 8 | dano altíssimo de perto, fraca de longe |
 | Sniper | 5 | mata com 1 tiro na cabeça, luneta, tiro lento |
 | Besta | 1 | seta com queda, silenciosa, dano alto, recarga lenta |
-| DMR | 15 | tiro a tiro, boa em média distância |
+| DMR | 15 | tiro a tiro, luneta, boa em média distância |
 | Lança-granadas | 6 | dano em área, projétil em arco |
 
 | Pistola | Pente | Características |
@@ -89,7 +89,7 @@ O host também escolhe as **Armas** da partida:
 
 - **Todas as armas:** cada jogador escolhe as armas na tela de spawn. Em Configurações → Armas dá para mudar a ordem da roda: a primeira é a arma inicial, e a roda do mouse e o HUD seguem essa ordem.
 - **Só sniper / Só doze:** só essa arma e a faca, em FFA ou TDM.
-- **Gun Game:** sempre FFA. Cada kill troca a sua arma e passa por todas as 13, terminando na faca. Vence quem fizer a kill com a faca.
+- **Gun Game:** sempre FFA. Cada kill com a arma do seu nível troca para a próxima, passando por todas. Todo mundo também tem a faca para se mover: matar com ela não sobe de nível, mas faz a vítima voltar uma arma. No último nível só resta a faca, e quem mata com ela vence.
 
 Quem abrir o link no meio da partida entra direto no jogo. Durante a tela de resultados, espera no lobby.
 

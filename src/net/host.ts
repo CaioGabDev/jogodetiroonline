@@ -30,7 +30,7 @@ import {
 import { MAPS, type MapDef, type SpawnDef } from '../game/mapData';
 import { CollisionWorld, eyeHeight } from '../game/physics';
 import { PositionHistory, rayPlayer } from '../game/hitbox';
-import { DEFAULT_LOADOUT, GUN_GAME_LADDER, WEAPONS, allowedWeapons, damageAt, fullAmmo, validLoadout } from '../game/weapons';
+import { DEFAULT_LOADOUT, GUN_GAME_LADDER, W, WEAPONS, allowedWeapons, damageAt, fullAmmo, validLoadout } from '../game/weapons';
 import { clamp, now, r2, r3, randomCode, sanitizeText } from '../core/util';
 import {
   F_ADS,
@@ -95,6 +95,8 @@ interface SPlayer {
   respawnAt: number;
   tp: number;
   kills: number;
+  /** Gun Game level: index in GUN_GAME_LADDER. */
+  level: number;
   deaths: number;
   damage: number;
   headshots: number;
@@ -385,6 +387,7 @@ export class HostServer {
       respawnAt: 0,
       tp: 0,
       kills: 0,
+      level: 0,
       deaths: 0,
       damage: 0,
       headshots: 0,
@@ -610,6 +613,7 @@ export class HostServer {
     this.projectiles = [];
     for (const p of this.players.values()) {
       p.kills = 0;
+      p.level = 0;
       p.deaths = 0;
       p.damage = 0;
       p.headshots = 0;
@@ -634,7 +638,7 @@ export class HostServer {
   // ---------------------------------------------------------------- simulation
 
   private allowed(p: SPlayer): number[] {
-    return allowedWeapons(this.config.arsenal, p.kills, p.loadout);
+    return allowedWeapons(this.config.arsenal, p.level, p.loadout);
   }
 
   private isEnemy(a: SPlayer, b: SPlayer): boolean {
@@ -1045,6 +1049,7 @@ export class HostServer {
     } else {
       killer.kills++;
       if (hs) killer.headshots++;
+      if (this.config.arsenal === 'gungame') this.gunGameKill(killer, victim, w);
       this.teamScore[killer.info.team === 'red' ? 0 : 1]++;
     }
     this.broadcast({ type: 'kill', k: killer.info.id, v: victim.info.id, w, hs });
@@ -1062,10 +1067,20 @@ export class HostServer {
     this.checkWin();
   }
 
+  /** Only the weapon of the current level moves a player up. The knife sends the victim back one instead. */
+  private gunGameKill(killer: SPlayer, victim: SPlayer, w: number): void {
+    if (w === GUN_GAME_LADDER[killer.level]) {
+      killer.level++;
+      if (killer.level === GUN_GAME_LADDER.length - 1) this.broadcast({ type: 'sys', text: `${killer.info.name} chegou na faca!` });
+    } else if (w === W.KNIFE) {
+      victim.level = Math.max(0, victim.level - 1);
+    }
+  }
+
   private checkWin(): void {
     if (this.phase !== 'playing') return;
     if (this.config.arsenal === 'gungame') {
-      if ([...this.players.values()].some((p) => !p.bot && p.kills >= GUN_GAME_LADDER.length)) this.endMatch('kills');
+      if ([...this.players.values()].some((p) => !p.bot && p.level >= GUN_GAME_LADDER.length)) this.endMatch('kills');
       return;
     }
     const lim = this.config.killLimit;
@@ -1081,7 +1096,7 @@ export class HostServer {
     this.phase = 'ended';
     const humans = [...this.players.values()].filter((p) => !p.bot);
     const ranked = [...humans].sort(
-      (a, b) => b.kills - a.kills || a.deaths - b.deaths || b.damage - a.damage || a.info.id - b.info.id,
+      (a, b) => b.level - a.level || b.kills - a.kills || a.deaths - b.deaths || b.damage - a.damage || a.info.id - b.info.id,
     );
     const results: ResultRow[] = ranked.map((p) => ({
       id: p.info.id,
@@ -1099,7 +1114,7 @@ export class HostServer {
       else if (this.teamScore[1] > this.teamScore[0]) winnerTeam = 'blue';
     }
     const top = ranked[0];
-    const tie = this.config.mode === 'ffa' && ranked.length > 1 && ranked[1].kills === top.kills;
+    const tie = this.config.mode === 'ffa' && ranked.length > 1 && ranked[1].kills === top.kills && ranked[1].level === top.level;
     const msg: EndMsg = {
       type: 'end',
       winnerId: this.config.mode === 'ffa' && top && !tie ? top.info.id : -1,
@@ -1122,6 +1137,7 @@ export class HostServer {
         i: p.info.id,
         k: p.kills,
         d: p.deaths,
+        lv: p.level,
         pg: p.slot ? Math.round(p.slot.rtt) : 0,
       })),
       teams: [...this.teamScore] as [number, number],

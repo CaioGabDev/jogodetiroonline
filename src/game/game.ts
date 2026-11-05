@@ -110,7 +110,7 @@ export class Game {
 
   // Net / match
   private inputAcc = 0;
-  private scores = new Map<number, { k: number; d: number; pg: number }>();
+  private scores = new Map<number, { k: number; d: number; pg: number; lv: number }>();
   private teams: [number, number] = [0, 0];
   private timeLeft = -1;
   private timeRecvAt = 0;
@@ -263,8 +263,10 @@ export class Game {
         }
         break;
       case 'score':
+        const level = this.scores.get(this.localId)?.lv;
         this.scores.clear();
-        for (const r of m.ps) this.scores.set(r.i, { k: r.k, d: r.d, pg: r.pg });
+        for (const r of m.ps) this.scores.set(r.i, { k: r.k, d: r.d, pg: r.pg, lv: r.lv });
+        this.announceLevel(level);
         this.teams = m.teams;
         this.timeLeft = m.tl;
         this.timeRecvAt = now();
@@ -406,6 +408,14 @@ export class Game {
     return this.alive && !this.ended && input.gameEnabled;
   }
 
+  /** Tells the player when a Gun Game level changed. */
+  private announceLevel(before: number | undefined): void {
+    const now = this.scores.get(this.localId)?.lv;
+    if (this.config.arsenal !== 'gungame' || before === undefined || now === undefined || now === before) return;
+    const weapon = WEAPONS[GUN_GAME_LADDER[Math.min(now, GUN_GAME_LADDER.length - 1)]].name.toUpperCase();
+    this.hud.notify(now > before ? `SUBIU: ${weapon}` : `VOLTOU PARA: ${weapon}`);
+  }
+
   /** The weapon check in updateWeapons switches away if the one in hand left the loadout. */
   setLoadout(weapons: number[]): void {
     this.ld = weapons;
@@ -413,7 +423,7 @@ export class Game {
 
   /** Weapons in number key order: 1 and 2 primaries, 3 pistol, 4 knife. The host enforces the same list. */
   private keySlots(): number[] {
-    return allowedWeapons(this.config.arsenal, this.scores.get(this.localId)?.k ?? 0, this.ld);
+    return allowedWeapons(this.config.arsenal, this.scores.get(this.localId)?.lv ?? 0, this.ld);
   }
 
   /** Same weapons in the order of the player's wheel, which only applies with every weapon enabled. */
@@ -883,10 +893,15 @@ export class Game {
 
     const { arsenal, killLimit } = this.config;
     const killsText = killLimit > 0 ? `Limite: ${killLimit} kills` : 'Treino livre';
-    const level = Math.min((this.scores.get(this.localId)?.k ?? 0) + 1, GUN_GAME_LADDER.length);
+    const gunGame = arsenal === 'gungame';
+    const levels = GUN_GAME_LADDER.length;
+    const myLevel = this.scores.get(this.localId)?.lv ?? 0;
+    const level = Math.min(myLevel + 1, levels);
+    const next = GUN_GAME_LADDER[myLevel + 1];
+    const goal = next === undefined ? 'mate com a faca para vencer' : `próxima: ${WEAPONS[next].name}`;
     const limit =
-      arsenal === 'gungame'
-        ? `Gun Game: nível ${level} de ${GUN_GAME_LADDER.length}`
+      gunGame
+        ? `Gun Game: nível ${level} de ${levels} · ${goal}`
         : arsenal === 'all'
           ? killsText
           : `${ARSENAL_NAMES[arsenal]} · ${killsText}`;
@@ -898,20 +913,23 @@ export class Game {
       );
     } else {
       // Right side: best opponent (so you always see who you're racing against).
-      const mine = this.scores.get(this.localId)?.k ?? 0;
+      // Gun Game is decided by level, not kills.
+      const rank = (sc?: { k: number; lv: number }): number => (gunGame ? (sc?.lv ?? 0) : (sc?.k ?? 0));
+      const show = (v: number): string => (gunGame ? `${Math.min(v + 1, levels)}/${levels}` : String(v));
+      const mine = rank(this.scores.get(this.localId));
       let bestId = -1;
       let bestK = -Infinity;
       for (const [id, sc] of this.scores) {
         if (id === this.localId || this.infos.get(id)?.bot) continue;
-        if (sc.k > bestK) {
-          bestK = sc.k;
+        if (rank(sc) > bestK) {
+          bestK = rank(sc);
           bestId = id;
         }
       }
       const label = bestId < 0 ? '' : bestK > mine ? 'LÍDER ' : '2º ';
       this.hud.setScore(
-        { text: `VOCÊ ${mine}`, color: this.displayColor(this.localId) },
-        { text: bestId >= 0 ? `${label}${this.nameOf(bestId)} ${bestK}` : '—', color: bestId >= 0 ? this.displayColor(bestId) : '#fff' },
+        { text: `VOCÊ ${show(mine)}`, color: this.displayColor(this.localId) },
+        { text: bestId >= 0 ? `${label}${this.nameOf(bestId)} ${show(bestK)}` : '—', color: bestId >= 0 ? this.displayColor(bestId) : '#fff' },
         limit,
       );
     }
@@ -951,7 +969,7 @@ export class Game {
   private renderScoreboard(): void {
     const entries: ScoreEntry[] = [];
     for (const info of this.infos.values()) {
-      const sc = this.scores.get(info.id) ?? { k: 0, d: 0, pg: 0 };
+      const sc = this.scores.get(info.id) ?? { k: 0, d: 0, pg: 0, lv: 0 };
       const alive = info.id === this.localId ? this.alive : (this.remotes.get(info.id)?.alive ?? false);
       entries.push({
         id: info.id,

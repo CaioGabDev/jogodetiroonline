@@ -191,7 +191,7 @@ export class Lobby {
       // Fixed by the rules: everyone for themselves, and the match ends at the last weapon.
       this.config.append(
         el('div', { class: 'cfg-row' }, [el('span', { text: 'Modo' }), el('b', { text: 'Mata-mata (FFA)' })]),
-        el('div', { class: 'cfg-row' }, [el('span', { text: 'Vitória' }), el('b', { text: 'Passar pela última arma' })]),
+        el('div', { class: 'cfg-row' }, [el('span', { text: 'Vitória' }), el('b', { text: 'Matar com a faca no último nível' })]),
       );
     } else {
       this.config.append(
