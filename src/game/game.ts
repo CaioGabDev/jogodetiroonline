@@ -96,6 +96,8 @@ export class Game {
   private burstLeft = 0;
   /** Primaries and pistol confirmed by the host. */
   private ld: number[] = [...DEFAULT_LOADOUT];
+  /** Asks the app to open the inventory with the current weapons. */
+  onInventory: ((loadout: number[]) => void) | null = null;
   private shotSeq = 0;
   private pendingShots: Array<{ s: number; w: number }> = [];
   /** Simulation clock (ms) advanced by the fixed step; weapon timing uses it so fire rate is exact at any FPS. */
@@ -230,6 +232,7 @@ export class Game {
         const kind = m.kill ? 'kill' : m.hs ? 'head' : 'hit';
         this.hud.hitmarker(kind);
         audio.hitmarker(kind);
+        if (settings.get().showDamage) this.hud.addDamageNumber(m.dmg, kind, m.p[0], m.p[1], m.p[2]);
         break;
       }
       case 'dmg':
@@ -401,6 +404,11 @@ export class Game {
 
   private get canAct(): boolean {
     return this.alive && !this.ended && input.gameEnabled;
+  }
+
+  /** The weapon check in updateWeapons switches away if the one in hand left the loadout. */
+  setLoadout(weapons: number[]): void {
+    this.ld = weapons;
   }
 
   /** Weapons in number key order: 1 and 2 primaries, 3 pistol, 4 knife. The host enforces the same list. */
@@ -613,6 +621,7 @@ export class Game {
     if (act) {
       if (input.consume('chat')) this.openChat(false);
       else if (input.consume('teamChat')) this.openChat(this.config.mode === 'tdm');
+      else if (input.consume('inventory') && this.config.arsenal === 'all') this.onInventory?.(this.ld);
     }
 
     let fwd = 0;
@@ -921,6 +930,10 @@ export class Game {
     }
 
     this.hud.updateIndicators(dt, this.me.x, this.me.z, this.yaw);
+    this.hud.updateDamageNumbers(dt, (x, y, z) => {
+      const p = _v1.set(x, y, z).project(this.sm.camera);
+      return p.z > 1 ? null : [((p.x + 1) / 2) * window.innerWidth, ((1 - p.y) / 2) * window.innerHeight];
+    });
     this.hud.setStats(s.showFps ? fps : null, s.showPing ? (this.scores.get(this.localId)?.pg ?? 0) : null);
 
     // Scoreboard (hold Tab)

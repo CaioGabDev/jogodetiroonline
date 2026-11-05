@@ -12,6 +12,7 @@ import type { HostMsg, LobbyState, MatchInfo, WelcomeMsg } from './net/protocol'
 import { SceneManager } from './render/scene';
 import { Chat } from './ui/chat';
 import { Hud } from './ui/hud';
+import { Inventory } from './ui/inventory';
 import { LoadoutPicker } from './ui/loadout';
 import { Lobby } from './ui/lobby';
 import { MainMenu } from './ui/menu';
@@ -35,6 +36,8 @@ class App {
   private settingsUI: SettingsUI;
   private roomBrowser: RoomBrowser;
   private loadout: LoadoutPicker;
+  private inventory: Inventory;
+  private unhookInventory: (() => void) | null = null;
   private loop: GameLoop;
 
   private screen: Screen = 'menu';
@@ -102,6 +105,15 @@ class App {
       // The click on Confirmar is what lets the browser capture the mouse again.
       if (go) input.requestLock();
     });
+
+    this.inventory = new Inventory(
+      ui,
+      (w) => {
+        this.net?.send({ type: 'loadout', w, go: false });
+        this.game?.setLoadout(w);
+      },
+      () => this.closeInventory(true),
+    );
 
     this.chat.onClose = () => this.updateGameInput();
     input.onLockChange((locked) => this.onLockChange(locked));
@@ -196,7 +208,7 @@ class App {
       } else {
         this.chat.close();
         this.game?.resetInputState();
-        if (!this.results.visible && !this.settingsUI.isOpen && !this.loadout.visible) this.pause.show(true);
+        if (!this.results.visible && !this.settingsUI.isOpen && !this.loadout.visible && !this.inventory.visible) this.pause.show(true);
       }
     }
     this.updateGameInput();
@@ -326,6 +338,7 @@ class App {
         break;
       case 'pick':
         // Choosing needs the cursor.
+        this.closeInventory(false);
         input.exitLock();
         this.pause.show(false);
         this.loadout.open(m.ms);
@@ -340,6 +353,7 @@ class App {
       case 'end': {
         if (!this.game) break;
         this.game.end();
+        this.closeInventory(false);
         input.exitLock();
         const mode = this.lobbyState?.config.mode ?? 'ffa';
         const isHost = this.lobbyState?.hostId === net.localId;
@@ -370,8 +384,30 @@ class App {
       match,
     );
     this.showScreen('game');
+    this.game.onInventory = (loadout) => this.openInventory(loadout);
     this.syncTeamButton();
     if (!input.locked) this.pause.show(true, true);
+  }
+
+  private openInventory(loadout: number[]): void {
+    this.inventory.open(loadout);
+    input.releaseMouse();
+    this.unhookInventory = input.addKeyHook((code, e) => {
+      if (code !== 'KeyB' && code !== 'Escape') return false;
+      e.preventDefault();
+      this.closeInventory(code === 'KeyB');
+      return true;
+    });
+  }
+
+  /** The match goes on while it's open. Esc closes it and lands on the pause menu instead of the game. */
+  private closeInventory(resume: boolean): void {
+    if (!this.inventory.visible) return;
+    this.inventory.close();
+    this.unhookInventory?.();
+    this.unhookInventory = null;
+    if (resume) input.requestLock();
+    else if (this.screen === 'game' && !this.results.visible) this.pause.show(true);
   }
 
   private syncTeamButton(): void {
@@ -387,6 +423,7 @@ class App {
 
   private stopGame(): void {
     this.loadout.close();
+    this.closeInventory(false);
     if (this.game) {
       this.game.dispose();
       this.game = null;

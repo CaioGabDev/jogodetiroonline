@@ -15,6 +15,7 @@ export type Action =
   | 'weapon2'
   | 'weapon3'
   | 'weapon4'
+  | 'inventory'
   | 'scoreboard'
   | 'chat'
   | 'teamChat';
@@ -34,6 +35,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   weapon2: 'Primária 2',
   weapon3: 'Pistola',
   weapon4: 'Faca',
+  inventory: 'Inventário',
   scoreboard: 'Placar',
   chat: 'Chat (todos)',
   teamChat: 'Chat (time)',
@@ -71,6 +73,7 @@ export interface Settings {
   crosshair: CrosshairSettings;
   showFps: boolean;
   showPing: boolean;
+  showDamage: boolean;
   killfeedSize: number;
   /** Mouse wheel order of the slots (0-1 primaries, 2 pistol, 3 knife). The first one is the starting weapon. */
   wheel: number[];
@@ -97,6 +100,7 @@ export const DEFAULT_SETTINGS: Settings = {
     weapon2: ['Digit2', ''],
     weapon3: ['Digit3', ''],
     weapon4: ['Digit4', ''],
+    inventory: ['KeyB', ''],
     scoreboard: ['Tab', ''],
     chat: ['Enter', ''],
     teamChat: ['KeyY', ''],
@@ -120,6 +124,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   showFps: false,
   showPing: true,
+  showDamage: true,
   killfeedSize: 5,
   wheel: [0, 1, 2, 3],
 };
@@ -157,6 +162,7 @@ function sanitize(raw: unknown): Settings {
   s.uiVolume = num('uiVolume', 0, 1, s.uiVolume);
   s.showFps = bool('showFps', s.showFps);
   s.showPing = bool('showPing', s.showPing);
+  s.showDamage = bool('showDamage', s.showDamage);
   s.killfeedSize = Math.round(num('killfeedSize', 2, 10, s.killfeedSize));
   if (Array.isArray(r.wheel) && s.wheel.every((slot) => (r.wheel as unknown[]).includes(slot)) && r.wheel.length === s.wheel.length) {
     s.wheel = r.wheel as number[];

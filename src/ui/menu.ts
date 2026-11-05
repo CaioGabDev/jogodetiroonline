@@ -136,6 +136,7 @@ export class MainMenu {
         ['Mouse Dir.', 'mirar / luneta'],
         ['R', 'recarregar'],
         ['1-4 / Roda', 'trocar arma'],
+        ['B', 'inventário'],
         ['Tab', 'placar'],
         ['Enter / Y', 'chat / chat do time'],
         ['Esc', 'pausa'],

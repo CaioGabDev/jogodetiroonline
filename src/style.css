@@ -451,6 +451,12 @@ kbd {
   }
 }
 
+.inventory-slots {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
 .wheel-control {
   display: flex;
   align-items: center;
@@ -1435,6 +1441,34 @@ kbd {
   color: #7fd8ff;
   letter-spacing: 0.15em;
   font-size: 13px;
+}
+
+.dmg-numbers {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.dmg-number {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  will-change: transform;
+}
+
+.dmg-number.head {
+  font-size: 24px;
+  color: #ffd23f;
+}
+
+.dmg-number.kill {
+  font-size: 26px;
+  color: #ff4d4d;
 }
 
 .notice {

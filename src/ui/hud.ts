@@ -16,6 +16,19 @@ interface DmgIndicator {
   life: number;
 }
 
+interface DamageNumber {
+  el: HTMLElement;
+  x: number;
+  y: number;
+  z: number;
+  age: number;
+  drift: number;
+}
+
+const MAX_DAMAGE_NUMBERS = 16;
+/** Seconds a damage number stays on screen. */
+const DAMAGE_NUMBER_LIFE = 0.8;
+
 export class Hud {
   readonly root: HTMLElement;
   private crosshair: HTMLCanvasElement;
@@ -43,6 +56,8 @@ export class Hud {
   private stats: HTMLElement;
   private scope: HTMLElement;
   private notice: HTMLElement;
+  private damageLayer: HTMLElement;
+  private damageNumbers: DamageNumber[] = [];
   private indicators: DmgIndicator[] = [];
   private lastSpread = -1;
   private hitTimer = 0;
@@ -120,12 +135,14 @@ export class Hud {
     this.stats = el('div', { class: 'stats' });
     this.scope = el('div', { class: 'scope hidden' }, [el('div', { class: 'scope-lines' })]);
     this.notice = el('div', { class: 'notice hidden' });
+    this.damageLayer = el('div', { class: 'dmg-numbers' });
 
     this.root = el('div', { class: 'hud hidden' }, [
       this.scope,
       this.lowHp,
       this.dmgFlash,
       this.dmgWrap,
+      this.damageLayer,
       this.crosshair,
       this.hitmarkerEl,
       hpBox,
@@ -202,6 +219,33 @@ export class Hud {
     this.text(this.scoreR, right.text);
     this.scoreR.style.color = right.color;
     this.text(this.scoreMid, mid);
+  }
+
+  /** Floating number over the target. A small sideways offset keeps fast hits from stacking. */
+  addDamageNumber(amount: number, kind: 'hit' | 'head' | 'kill', x: number, y: number, z: number): void {
+    const e = el('div', { class: `dmg-number ${kind}`, text: String(amount) });
+    this.damageLayer.append(e);
+    this.damageNumbers.push({ el: e, x, y, z, age: 0, drift: (Math.random() - 0.5) * 36 });
+    if (this.damageNumbers.length > MAX_DAMAGE_NUMBERS) this.damageNumbers.shift()?.el.remove();
+  }
+
+  /** `project` gives the screen position of a world point, or null when it's behind the camera. */
+  updateDamageNumbers(dt: number, project: (x: number, y: number, z: number) => [number, number] | null): void {
+    this.damageNumbers = this.damageNumbers.filter((n) => {
+      n.age += dt;
+      if (n.age >= DAMAGE_NUMBER_LIFE) {
+        n.el.remove();
+        return false;
+      }
+      const s = project(n.x, n.y, n.z);
+      n.el.style.visibility = s ? 'visible' : 'hidden';
+      if (s) {
+        const t = n.age / DAMAGE_NUMBER_LIFE;
+        n.el.style.opacity = String(Math.min(1, (1 - t) * 2.5));
+        n.el.style.transform = `translate(-50%, -100%) translate(${s[0] + n.drift * t}px, ${s[1] - 42 * t}px)`;
+      }
+      return true;
+    });
   }
 
   hitmarker(kind: 'hit' | 'head' | 'kill'): void {
@@ -319,5 +363,7 @@ export class Hud {
     this.setScope(false);
     this.setProtected(false);
     this.dmgFlash.style.opacity = '0';
+    this.damageNumbers.forEach((n) => n.el.remove());
+    this.damageNumbers = [];
   }
 }

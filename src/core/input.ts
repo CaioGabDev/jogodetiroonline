@@ -144,6 +144,11 @@ class Input {
     }
   }
 
+  /** Frees the cursor but stays in fullscreen, so Ctrl+W remains blocked. */
+  releaseMouse(): void {
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+
   exitLock(): void {
     if (document.pointerLockElement) document.exitPointerLock();
     keyboardLock()?.unlock();

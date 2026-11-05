@@ -235,6 +235,8 @@ export interface HitMsg {
   dmg: number;
   hs: boolean;
   kill: boolean;
+  /** Above the target's head, where the damage number appears. */
+  p: Vec3;
 }
 
 export interface DamageMsg {

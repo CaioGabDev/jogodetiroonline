@@ -31,6 +31,7 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 | Mirar / luneta | Botão direito (segurar ou alternar) |
 | Recarregar | R |
 | Trocar arma | 1 e 2 primárias, 3 pistola, 4 faca, ou roda do mouse |
+| Inventário | B (nas partidas com todas as armas) |
 | Placar | Tab (segurar) |
 | Chat (todos) / chat do time | Enter / Y |
 | Pausa | Esc |
@@ -39,7 +40,7 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 
 ### Armas
 
-No começo da partida, na tela de spawn, você tem **10 segundos** para escolher **2 armas primárias e 1 pistola**. Se o tempo acabar, o que faltar vira o padrão (Rifle de Assalto + SMG + Pistola). A faca vai sempre junto. Todos os atributos ficam em `src/game/weapons.ts`.
+No começo da partida, na tela de spawn, você tem **10 segundos** para escolher **2 armas primárias e 1 pistola**. Se o tempo acabar, o que faltar vira o padrão (Rifle de Assalto + SMG + Pistola). A faca vai sempre junto. Durante a partida, `B` abre o inventário: clique no slot e depois na arma que vai nele. A troca vale na hora e a partida não pausa. Todos os atributos ficam em `src/game/weapons.ts`.
 
 | Primária | Pente | Características |
 | --- | --- | --- |
@@ -62,6 +63,8 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 **Faca:** alcance curto, e com ela o boneco corre bem mais rápido e para na hora.
 
 **Pular enquanto corre** (toque no Shift, depois W + Espaço) dá um impulso de velocidade (+25%) e mais controle no ar, com qualquer arma.
+
+**Dano na tela:** o dano que você causa aparece sobre o alvo: branco é normal, amarelo é headshot e vermelho é abate. Dá para desligar em Configurações → HUD.
 
 **Abate:** a arma em mãos recarrega por completo e a vida volta a 100%.
 

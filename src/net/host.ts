@@ -5,6 +5,7 @@ import {
   MAP_NAMES,
   FFA_COLORS,
   HISTORY_MS,
+  HITBOX,
   LOADOUT_PICK_MS,
   MAX_INTERP_DELAY,
   SNAP_SAMPLE_DELAY,
@@ -544,9 +545,11 @@ export class HostServer {
   }
 
   private onLoadout(p: SPlayer, m: LoadoutMsg): void {
-    if (!p.picking || !validLoadout(m.w)) return;
+    if (!validLoadout(m.w)) return;
+    // Outside the spawn screen this is the inventory, which only exists with every weapon enabled.
+    if (!p.picking && (this.phase !== 'playing' || this.config.arsenal !== 'all')) return;
     p.loadout = [...m.w];
-    if (m.go) p.respawnAt = now();
+    if (p.picking && m.go) p.respawnAt = now();
   }
 
   private onChat(p: SPlayer, raw: string, teamOnly: boolean): void {
@@ -938,7 +941,8 @@ export class HostServer {
       this.send(target, { type: 'dmg', from: p.info.id, src: [r2(p.x), r2(p.y + 1.4), r2(p.z)], amt: amount });
       const killed = target.hp <= 0;
       if (killed) this.kill(p, target, w, hs);
-      this.send(p, { type: 'hit', dmg: amount, hs, kill: killed });
+      const top = target.y + (target.crouch ? HITBOX.crouchHeadTop : HITBOX.standHeadTop);
+      this.send(p, { type: 'hit', dmg: amount, hs, kill: killed, p: [r2(target.x), r2(top), r2(target.z)] });
     }
   }
 
