@@ -1,14 +1,18 @@
 import {
   ARSENAL_NAMES,
+  BOMB_MAPS,
   FFA_COLORS,
   KILL_LIMITS,
   MAP_HINTS,
   MAP_NAMES,
   MAX_PLAYERS,
+  ROUND_WINS,
   TEAM_COLORS,
   TEAM_NAMES,
   TIME_LIMITS,
+  teamMode,
   type Arsenal,
+  type GameMode,
   type MapId,
   type MatchConfig,
   type Team,
@@ -119,7 +123,7 @@ export class Lobby {
 
     // Players
     clear(this.players);
-    if (state.config.mode === 'tdm') {
+    if (teamMode(state.config.mode)) {
       const cols = el('div', { class: 'team-cols' });
       for (const team of ['red', 'blue'] as Team[]) {
         const list = humans.filter((p) => p.team === team);
@@ -182,11 +186,13 @@ export class Lobby {
       return el('div', { class: 'cfg-row' }, [el('span', { text: label }), s]);
     };
     const gunGame = c.arsenal === 'gungame';
-    const mapOptions = (Object.keys(MAP_NAMES) as MapId[]).map((id): [MapId, string] => [id, `${MAP_NAMES[id]} (${MAP_HINTS[id]})`]);
-    this.config.append(
-      sel<MapId>('Mapa', mapOptions, c.map, (v) => ({ map: v })),
-      sel<Arsenal>('Armas', Object.entries(ARSENAL_NAMES) as Array<[Arsenal, string]>, c.arsenal, (v) => ({ arsenal: v })),
-    );
+    const bomb = c.mode === 'bomb';
+    const mapOptions = (Object.keys(MAP_NAMES) as MapId[])
+      .filter((id) => BOMB_MAPS.includes(id) === bomb)
+      .map((id): [MapId, string] => [id, `${MAP_NAMES[id]} (${MAP_HINTS[id]})`]);
+    const arsenals = (Object.entries(ARSENAL_NAMES) as Array<[Arsenal, string]>).filter(([a]) => a !== 'shop');
+    this.config.append(sel<MapId>('Mapa', mapOptions, c.map, (v) => ({ map: v })));
+    if (!bomb) this.config.append(sel<Arsenal>('Armas', arsenals, c.arsenal, (v) => ({ arsenal: v })));
     if (gunGame) {
       // Fixed by the rules: everyone for themselves, and the match ends at the last weapon.
       this.config.append(
@@ -195,20 +201,26 @@ export class Lobby {
       );
     } else {
       this.config.append(
-        sel<'ffa' | 'tdm'>(
+        sel<GameMode>(
           'Modo',
           [
             ['ffa', 'Mata-mata (FFA)'],
             ['tdm', 'Mata-mata em equipe (TDM)'],
+            ['bomb', 'Bomba (ataque e defesa)'],
           ],
           c.mode,
           (v) => ({ mode: v }),
         ),
-        sel<number>('Limite de kills', KILL_LIMITS.map((k) => [k, `${k} kills`] as [number, string]), c.killLimit, (v) => ({ killLimit: v })),
       );
+      if (bomb) {
+        const wins = ROUND_WINS.map((n): [number, string] => [n, `${n} vitórias (até ${(n - 1) * 2} rodadas)`]);
+        this.config.append(sel<number>('Partida', wins, c.rounds, (v) => ({ rounds: v })));
+      } else {
+        this.config.append(sel<number>('Limite de kills', KILL_LIMITS.map((k) => [k, `${k} kills`] as [number, string]), c.killLimit, (v) => ({ killLimit: v })));
+      }
     }
-    this.config.append(sel<number>('Tempo', TIME_LIMITS.map((t) => [t, `${t} min`] as [number, string]), c.timeLimit, (v) => ({ timeLimit: v })));
-    if (c.mode === 'tdm') {
+    if (!bomb) this.config.append(sel<number>('Tempo', TIME_LIMITS.map((t) => [t, `${t} min`] as [number, string]), c.timeLimit, (v) => ({ timeLimit: v })));
+    if (teamMode(c.mode)) {
       this.config.append(
         sel<string>(
           'Fogo amigo',
@@ -226,7 +238,7 @@ export class Lobby {
     clear(this.actions);
     this.actions.append(el('button', { class: 'btn ghost', text: 'Sair', onClick: () => this.cb.onLeave() }));
     if (isHost) {
-      if (c.mode === 'tdm') this.actions.append(el('button', { class: 'btn', text: 'Auto-balancear times', onClick: () => this.cb.onBalance() }));
+      if (teamMode(c.mode)) this.actions.append(el('button', { class: 'btn', text: 'Auto-balancear times', onClick: () => this.cb.onBalance() }));
       const start = el('button', { class: 'btn primary big', text: 'Iniciar partida', onClick: () => this.cb.onStart() });
       this.actions.append(start);
       if (humans.length < 2) this.actions.append(el('div', { class: 'hint', text: 'Você pode iniciar sozinho, mas é mais divertido com amigos: copie o link acima.' }));

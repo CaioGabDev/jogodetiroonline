@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check": "node scripts/check-gameplay.mjs && node scripts/check-maps.mjs && node scripts/check-equipment.mjs && node scripts/check-bomb.mjs"
   },
   "dependencies": {
     "peerjs": "^1.5.5",

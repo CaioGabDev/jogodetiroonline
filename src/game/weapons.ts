@@ -5,7 +5,9 @@ import type { Arsenal } from './constants';
  * the clients, the HUD and the loadout screen follow.
  */
 
-export type WeaponCategory = 'primary' | 'pistol' | 'melee';
+export type WeaponCategory = 'primary' | 'pistol' | 'melee' | 'lethal' | 'tactical' | 'objective';
+
+export type ProjectileKind = 'bolt' | 'grenade' | 'knife' | 'bottle' | 'can';
 
 export type WeaponSound =
   | 'rifle'
@@ -19,7 +21,8 @@ export type WeaponSound =
   | 'pistol'
   | 'deagle'
   | 'revolver'
-  | 'knife';
+  | 'knife'
+  | 'throw';
 
 export interface WeaponDef {
   id: number;
@@ -41,6 +44,10 @@ export interface WeaponDef {
   spreadAds: number;
   spreadMove: number;
   spreadAir: number;
+  /** Damage multiplier on a headshot. */
+  headMul: number;
+  /** Milliseconds after a sprint before this weapon can fire or aim. */
+  sprintOut: number;
   /** Vertical recoil: radians of upward kick per shot. */
   kick: number;
   /** Horizontal recoil: radians per shot, multiplied by the pattern or a random value. */
@@ -72,9 +79,23 @@ export interface WeaponDef {
   /** Milliseconds between bursts. */
   burstPause?: number;
   /** Fires a physical projectile, simulated by the host, instead of an instant hit. */
-  projectile?: { speed: number; gravity: number; kind: 'bolt' | 'grenade' };
+  projectile?: {
+    speed: number;
+    gravity: number;
+    kind: ProjectileKind;
+    /** Seconds until it goes off. With a fuse it bounces instead of stopping at the first thing it hits. */
+    fuse?: number;
+    /** Radians added to the aim, so a throw at the crosshair lands near it. */
+    loft?: number;
+  };
   /** Damage in an area around the impact. `min` is the damage multiplier at the edge. */
   splash?: { radius: number; min: number };
+  /** Burns the ground where it lands. */
+  fire?: { radius: number; ms: number; dps: number };
+  /** Longest effect on whoever the blast reaches. `blind` blinds, and depends on looking at it; otherwise it slows. */
+  stun?: { radius: number; ms: number; blind: boolean };
+  /** Fills the area with a cloud nobody sees through. Sold only in the bomb mode. */
+  smoke?: { radius: number; ms: number };
   /** No flash, no tracer and a sound that only carries a few meters. */
   silent?: boolean;
   /** Close-range swing: no ammo, no reload, no ADS. */
@@ -96,7 +117,50 @@ export const W = {
   DEAGLE: 10,
   REVOLVER: 11,
   AUTO_PISTOL: 12,
+  FRAG: 13,
+  THROWING_KNIFE: 14,
+  MOLOTOV: 15,
+  FLASHBANG: 16,
+  CONCUSSION: 17,
+  SMOKE: 18,
+  /** Not a weapon: it's here so the kill feed can name it. */
+  BOMB: 19,
 } as const;
+
+type ThrownDef = Pick<WeaponDef, 'id' | 'name' | 'short' | 'category' | 'desc' | 'damage' | 'mag'> & Partial<WeaponDef>;
+
+/** Thrown equipment lives in this table so ammo sync, projectiles and the kill feed work on it. What only guns use stays neutral. */
+function thrown(d: ThrownDef): WeaponDef {
+  return {
+    interval: 0,
+    auto: false,
+    reserve: 0,
+    maxReserve: 0,
+    infiniteReserve: false,
+    pellets: 1,
+    spreadHip: 0,
+    spreadAds: 0,
+    spreadMove: 0,
+    spreadAir: 0,
+    headMul: 1,
+    sprintOut: 0,
+    kick: 0,
+    kickYaw: 0,
+    recover: 1,
+    reloadTime: 0,
+    zoom: 1,
+    adsTime: 0.2,
+    range: 0,
+    falloff: null,
+    tracer: 0,
+    ammoPickup: 0,
+    sound: 'throw',
+    fireKick: 0,
+    shape: { len: 0, h: 0 },
+    silent: true,
+    ...d,
+  };
+}
 
 export const WEAPONS: WeaponDef[] = [
   {
@@ -105,32 +169,35 @@ export const WEAPONS: WeaponDef[] = [
     short: 'RIFLE',
     category: 'primary',
     desc: 'Equilibrado, recuo médio',
-    damage: 20,
-    interval: 100,
+    damage: 33,
+    interval: 86,
     auto: true,
     mag: 30,
     reserve: 90,
     maxReserve: 180,
     infiniteReserve: false,
     pellets: 1,
-    spreadHip: 0.022,
-    spreadAds: 0.004,
-    spreadMove: 0.03,
-    spreadAir: 0.08,
-    kick: 0.011,
-    kickYaw: 0.006,
+    spreadHip: 0.03,
+    spreadAds: 0.003,
+    spreadMove: 0.02,
+    spreadAir: 0.06,
+    kick: 0.006,
+    kickYaw: 0.004,
     recover: 6,
-    reloadTime: 2.0,
+    reloadTime: 2.2,
     zoom: 1.35,
-    adsTime: 0.16,
+    adsTime: 0.2,
     range: 200,
-    falloff: null,
+    falloff: { start: 38, end: 40, min: 0.76 },
     tracer: 0xffd27a,
     ammoPickup: 60,
     sound: 'rifle',
     fireKick: 1,
     shape: { len: 0.75, h: 0.12 },
     pattern: true,
+    headMul: 1.4,
+    sprintOut: 200,
+    moveMul: 0.95,
   },
   {
     id: W.PISTOL,
@@ -138,7 +205,7 @@ export const WEAPONS: WeaponDef[] = [
     short: 'PISTOLA',
     category: 'pistol',
     desc: 'Rápida, dano baixo',
-    damage: 18,
+    damage: 34,
     interval: 130,
     auto: false,
     mag: 12,
@@ -146,67 +213,71 @@ export const WEAPONS: WeaponDef[] = [
     maxReserve: 0,
     infiniteReserve: true,
     pellets: 1,
-    spreadHip: 0.015,
+    spreadHip: 0.012,
     spreadAds: 0.004,
-    spreadMove: 0.02,
+    spreadMove: 0.012,
     spreadAir: 0.06,
-    kick: 0.018,
+    kick: 0.01,
     kickYaw: 0.004,
     recover: 9,
-    reloadTime: 1.4,
+    reloadTime: 1.6,
     zoom: 1.2,
-    adsTime: 0.12,
+    adsTime: 0.13,
     range: 150,
-    falloff: null,
+    falloff: { start: 12, end: 14, min: 0.6 },
     tracer: 0xfff0b0,
     ammoPickup: 0,
     sound: 'pistol',
     fireKick: 1,
     shape: { len: 0.35, h: 0.12 },
+    headMul: 1.4,
+    sprintOut: 120,
   },
   {
     id: W.SHOTGUN,
     name: 'Escopeta',
     short: 'ESCOPETA',
     category: 'primary',
-    desc: 'Dano altíssimo de perto, fraca de longe',
-    damage: 14,
-    interval: 850,
+    desc: 'Mata com 1 tiro de perto, fraca de longe',
+    damage: 20,
+    interval: 800,
     auto: false,
-    mag: 8,
-    reserve: 24,
-    maxReserve: 40,
+    mag: 7,
+    reserve: 21,
+    maxReserve: 35,
     infiniteReserve: false,
-    pellets: 8,
-    spreadHip: 0.075,
+    pellets: 7,
+    spreadHip: 0.065,
     spreadAds: 0.055,
     spreadMove: 0.015,
     spreadAir: 0.03,
-    kick: 0.06,
+    kick: 0.04,
     kickYaw: 0.01,
     recover: 5,
-    reloadTime: 2.5,
+    reloadTime: 3,
     zoom: 1.15,
-    adsTime: 0.14,
+    adsTime: 0.2,
     range: 60,
-    falloff: { start: 7, end: 28, min: 0.25 },
+    falloff: { start: 6, end: 16, min: 0.3 },
     tracer: 0xffb060,
     ammoPickup: 12,
     sound: 'shotgun',
     fireKick: 1.6,
     shape: { len: 0.85, h: 0.14 },
+    headMul: 1,
+    sprintOut: 200,
   },
   {
     id: W.SNIPER,
     name: 'Sniper',
     short: 'SNIPER',
     category: 'primary',
-    desc: 'Mata com 1 tiro na cabeça, tiro lento',
-    damage: 90,
-    interval: 1300,
+    desc: 'Mata com 1 tiro no corpo, tiro lento',
+    damage: 100,
+    interval: 1200,
     auto: false,
     mag: 5,
-    reserve: 20,
+    reserve: 15,
     maxReserve: 30,
     infiniteReserve: false,
     pellets: 1,
@@ -218,9 +289,9 @@ export const WEAPONS: WeaponDef[] = [
     kick: 0,
     kickYaw: 0,
     recover: 4,
-    reloadTime: 3.0,
+    reloadTime: 3.4,
     zoom: 4.2,
-    adsTime: 0.25,
+    adsTime: 0.35,
     range: 400,
     falloff: null,
     tracer: 0xbfe6ff,
@@ -229,15 +300,18 @@ export const WEAPONS: WeaponDef[] = [
     fireKick: 1.6,
     shape: { len: 1.1, h: 0.11 },
     scoped: true,
+    headMul: 1.5,
+    sprintOut: 300,
+    moveMul: 0.9,
   },
   {
     id: W.KNIFE,
     name: 'Faca',
     short: 'FACA',
     category: 'melee',
-    desc: 'Corre bem mais rápido, alcance curto',
-    damage: 70,
-    interval: 500,
+    desc: 'Mata com 1 golpe, alcance curto',
+    damage: 150,
+    interval: 700,
     auto: false,
     mag: 0,
     reserve: 0,
@@ -254,7 +328,7 @@ export const WEAPONS: WeaponDef[] = [
     reloadTime: 0,
     zoom: 1,
     adsTime: 0.1,
-    range: 2.4,
+    range: 2.8,
     falloff: null,
     tracer: 0xcdd4dc,
     ammoPickup: 0,
@@ -262,48 +336,52 @@ export const WEAPONS: WeaponDef[] = [
     fireKick: 1,
     shape: { len: 0.3, h: 0.05 },
     melee: true,
+    headMul: 1,
+    sprintOut: 0,
   },
   {
     id: W.SMG,
     name: 'SMG',
     short: 'SMG',
     category: 'primary',
-    desc: 'Cadência alta, dano baixo, recuo leve',
-    damage: 13,
-    interval: 65,
+    desc: 'Mata rápido de perto, perde dano de longe',
+    damage: 33,
+    interval: 67,
     auto: true,
     mag: 30,
     reserve: 120,
     maxReserve: 210,
     infiniteReserve: false,
     pellets: 1,
-    spreadHip: 0.026,
-    spreadAds: 0.009,
-    spreadMove: 0.018,
+    spreadHip: 0.02,
+    spreadAds: 0.008,
+    spreadMove: 0.012,
     spreadAir: 0.06,
-    kick: 0.005,
-    kickYaw: 0.004,
+    kick: 0.004,
+    kickYaw: 0.003,
     recover: 8,
-    reloadTime: 1.7,
+    reloadTime: 2,
     zoom: 1.25,
-    adsTime: 0.13,
+    adsTime: 0.15,
     range: 120,
-    falloff: { start: 18, end: 60, min: 0.55 },
+    falloff: { start: 13, end: 15, min: 0.6 },
     tracer: 0xffe0a0,
     ammoPickup: 60,
     sound: 'smg',
     fireKick: 0.7,
     shape: { len: 0.5, h: 0.11 },
     pattern: true,
+    headMul: 1.4,
+    sprintOut: 150,
   },
   {
     id: W.LMG,
     name: 'LMG',
     short: 'LMG',
     category: 'primary',
-    desc: 'Dano alto, recuo muito difícil, pesada',
-    damage: 28,
-    interval: 110,
+    desc: 'Dano alto, pente grande, pesada',
+    damage: 40,
+    interval: 86,
     auto: true,
     mag: 100,
     reserve: 200,
@@ -311,24 +389,26 @@ export const WEAPONS: WeaponDef[] = [
     infiniteReserve: false,
     pellets: 1,
     spreadHip: 0.05,
-    spreadAds: 0.012,
+    spreadAds: 0.01,
     spreadMove: 0.05,
     spreadAir: 0.1,
-    kick: 0.032,
-    kickYaw: 0.024,
-    recover: 3,
-    reloadTime: 5.0,
+    kick: 0.012,
+    kickYaw: 0.01,
+    recover: 4,
+    reloadTime: 7,
     zoom: 1.3,
-    adsTime: 0.3,
+    adsTime: 0.35,
     range: 220,
-    falloff: null,
+    falloff: { start: 40, end: 42, min: 0.75 },
     tracer: 0xffc060,
     ammoPickup: 100,
     sound: 'lmg',
     fireKick: 1.3,
     shape: { len: 0.95, h: 0.16 },
     pattern: true,
-    moveMul: 0.72,
+    moveMul: 0.85,
+    headMul: 1.25,
+    sprintOut: 350,
   },
   {
     id: W.CROSSBOW,
@@ -363,6 +443,9 @@ export const WEAPONS: WeaponDef[] = [
     shape: { len: 0.7, h: 0.1 },
     projectile: { speed: 75, gravity: 9, kind: 'bolt' },
     silent: true,
+    headMul: 1.5,
+    sprintOut: 250,
+    moveMul: 0.95,
   },
   {
     id: W.DMR,
@@ -370,8 +453,8 @@ export const WEAPONS: WeaponDef[] = [
     short: 'DMR',
     category: 'primary',
     desc: 'Tiro a tiro, boa em média distância',
-    damage: 42,
-    interval: 260,
+    damage: 45,
+    interval: 200,
     auto: false,
     mag: 15,
     reserve: 60,
@@ -382,20 +465,23 @@ export const WEAPONS: WeaponDef[] = [
     spreadAds: 0.002,
     spreadMove: 0.03,
     spreadAir: 0.08,
-    kick: 0.016,
+    kick: 0.012,
     kickYaw: 0.004,
     recover: 7,
-    reloadTime: 2.2,
+    reloadTime: 2.4,
     zoom: 2,
-    adsTime: 0.2,
+    adsTime: 0.25,
     range: 280,
-    falloff: null,
+    falloff: { start: 40, end: 42, min: 0.75 },
     tracer: 0xe8e0c0,
     ammoPickup: 30,
     sound: 'dmr',
     fireKick: 1.2,
     shape: { len: 0.95, h: 0.11 },
     scoped: true,
+    headMul: 1.5,
+    sprintOut: 250,
+    moveMul: 0.95,
   },
   {
     id: W.LAUNCHER,
@@ -406,9 +492,9 @@ export const WEAPONS: WeaponDef[] = [
     damage: 95,
     interval: 900,
     auto: false,
-    mag: 6,
-    reserve: 12,
-    maxReserve: 18,
+    mag: 3,
+    reserve: 6,
+    maxReserve: 9,
     infiniteReserve: false,
     pellets: 1,
     spreadHip: 0.012,
@@ -420,16 +506,19 @@ export const WEAPONS: WeaponDef[] = [
     recover: 5,
     reloadTime: 3.2,
     zoom: 1.2,
-    adsTime: 0.2,
+    adsTime: 0.3,
     range: 200,
     falloff: null,
     tracer: 0xffa040,
-    ammoPickup: 6,
+    ammoPickup: 3,
     sound: 'launcher',
     fireKick: 1.6,
     shape: { len: 0.7, h: 0.17 },
     projectile: { speed: 34, gravity: 16, kind: 'grenade' },
     splash: { radius: 5.5, min: 0.2 },
+    headMul: 1,
+    sprintOut: 350,
+    moveMul: 0.85,
   },
   {
     id: W.DEAGLE,
@@ -437,8 +526,8 @@ export const WEAPONS: WeaponDef[] = [
     short: 'DEAGLE',
     category: 'pistol',
     desc: 'Dano muito alto, recuo forte, tiro lento',
-    damage: 60,
-    interval: 480,
+    damage: 50,
+    interval: 350,
     auto: false,
     mag: 7,
     reserve: 0,
@@ -449,19 +538,21 @@ export const WEAPONS: WeaponDef[] = [
     spreadAds: 0.004,
     spreadMove: 0.03,
     spreadAir: 0.08,
-    kick: 0.06,
+    kick: 0.035,
     kickYaw: 0.014,
     recover: 6,
     reloadTime: 1.9,
     zoom: 1.25,
     adsTime: 0.15,
     range: 170,
-    falloff: null,
+    falloff: { start: 15, end: 17, min: 0.6 },
     tracer: 0xffe6a0,
     ammoPickup: 0,
     sound: 'deagle',
     fireKick: 1.6,
     shape: { len: 0.42, h: 0.14 },
+    headMul: 1.5,
+    sprintOut: 150,
   },
   {
     id: W.REVOLVER,
@@ -469,8 +560,8 @@ export const WEAPONS: WeaponDef[] = [
     short: 'REVÓLVER',
     category: 'pistol',
     desc: 'Dano alto, preciso, recarga lenta',
-    damage: 48,
-    interval: 380,
+    damage: 50,
+    interval: 330,
     auto: false,
     mag: 6,
     reserve: 0,
@@ -481,19 +572,21 @@ export const WEAPONS: WeaponDef[] = [
     spreadAds: 0.001,
     spreadMove: 0.02,
     spreadAir: 0.06,
-    kick: 0.03,
+    kick: 0.02,
     kickYaw: 0.006,
     recover: 7,
     reloadTime: 3.0,
     zoom: 1.3,
     adsTime: 0.15,
     range: 190,
-    falloff: null,
+    falloff: { start: 18, end: 20, min: 0.68 },
     tracer: 0xfff0c8,
     ammoPickup: 0,
     sound: 'revolver',
     fireKick: 1.3,
     shape: { len: 0.4, h: 0.13 },
+    headMul: 1.5,
+    sprintOut: 150,
   },
   {
     id: W.AUTO_PISTOL,
@@ -501,7 +594,7 @@ export const WEAPONS: WeaponDef[] = [
     short: 'AUTO',
     category: 'pistol',
     desc: 'Dispara em rajada, recuo médio',
-    damage: 16,
+    damage: 25,
     interval: 70,
     auto: false,
     mag: 20,
@@ -520,7 +613,7 @@ export const WEAPONS: WeaponDef[] = [
     zoom: 1.2,
     adsTime: 0.12,
     range: 130,
-    falloff: { start: 15, end: 50, min: 0.6 },
+    falloff: { start: 10, end: 12, min: 0.6 },
     tracer: 0xfff0b0,
     ammoPickup: 0,
     sound: 'pistol',
@@ -529,28 +622,103 @@ export const WEAPONS: WeaponDef[] = [
     pattern: true,
     burst: 3,
     burstPause: 320,
+    headMul: 1.4,
+    sprintOut: 120,
   },
+  thrown({
+    id: W.FRAG,
+    name: 'Granada',
+    short: 'GRANADA',
+    category: 'lethal',
+    desc: 'Quica e explode em 2,2 s, mata de perto',
+    damage: 160,
+    mag: 1,
+    projectile: { speed: 20, gravity: 14, kind: 'grenade', fuse: 2.2, loft: 0.12 },
+    splash: { radius: 7, min: 0.1 },
+  }),
+  thrown({
+    id: W.THROWING_KNIFE,
+    name: 'Faca de arremesso',
+    short: 'ARREMESSO',
+    category: 'lethal',
+    desc: 'Mata com 1 acerto direto, sem dano em área',
+    damage: 150,
+    mag: 1,
+    projectile: { speed: 36, gravity: 7, kind: 'knife' },
+  }),
+  thrown({
+    id: W.MOLOTOV,
+    name: 'Molotov',
+    short: 'MOLOTOV',
+    category: 'lethal',
+    desc: 'Quebra ao bater e queima o chão por 6 s',
+    damage: 0,
+    mag: 1,
+    projectile: { speed: 20, gravity: 14, kind: 'bottle', loft: 0.12 },
+    fire: { radius: 3.5, ms: 6000, dps: 40 },
+  }),
+  thrown({
+    id: W.FLASHBANG,
+    name: 'Flashbang',
+    short: 'FLASH',
+    category: 'tactical',
+    desc: 'Cega e ensurdece, pior para quem olha',
+    damage: 0,
+    mag: 2,
+    projectile: { speed: 20, gravity: 14, kind: 'can', fuse: 1.4, loft: 0.12 },
+    stun: { radius: 16, ms: 4500, blind: true },
+  }),
+  thrown({
+    id: W.CONCUSSION,
+    name: 'Concussão',
+    short: 'CONCUSSÃO',
+    category: 'tactical',
+    desc: 'Deixa lento, sem corrida e com a mira pesada',
+    damage: 0,
+    mag: 2,
+    projectile: { speed: 20, gravity: 14, kind: 'can', fuse: 1.4, loft: 0.12 },
+    stun: { radius: 10, ms: 5000, blind: false },
+  }),
+  thrown({
+    id: W.SMOKE,
+    name: 'Fumaça',
+    short: 'FUMAÇA',
+    category: 'tactical',
+    desc: 'Cobre a passagem por 17 s e corta a visão',
+    damage: 0,
+    mag: 0,
+    projectile: { speed: 20, gravity: 14, kind: 'can', fuse: 1.6, loft: 0.12 },
+    smoke: { radius: 5.5, ms: 17000 },
+  }),
+  thrown({ id: W.BOMB, name: 'Bomba', short: 'BOMBA', category: 'objective', desc: '', damage: 0, mag: 0 }),
 ];
 
 export const WEAPON_COUNT = WEAPONS.length;
-export const HEADSHOT_MULT = 2;
 
-/** Two primaries and a pistol. Used when the time to choose runs out. */
-export const DEFAULT_LOADOUT: number[] = [W.RIFLE, W.SMG, W.PISTOL];
+/** Two primaries, a pistol, a lethal and a tactical. Used when the time to choose runs out. */
+export const DEFAULT_LOADOUT: number[] = [W.RIFLE, W.SMG, W.PISTOL, W.FRAG, W.FLASHBANG];
 
 export const PRIMARIES = WEAPONS.filter((w) => w.category === 'primary');
 export const PISTOLS = WEAPONS.filter((w) => w.category === 'pistol');
+export const LETHALS = WEAPONS.filter((w) => w.category === 'lethal');
+export const TACTICALS = WEAPONS.filter((w) => w.category === 'tactical' && !w.smoke);
+
+/** Line on the loadout cards. */
+export function magLabel(w: WeaponDef): string {
+  return w.category === 'lethal' || w.category === 'tactical' ? `Por vida: ${w.mag}` : `Pente: ${w.mag}`;
+}
 
 export function validLoadout(l: number[]): boolean {
-  const [a, b, c] = l;
-  return l.length === 3 && a !== b && WEAPONS[a]?.category === 'primary' && WEAPONS[b]?.category === 'primary' && WEAPONS[c]?.category === 'pistol';
+  const [a, b, c, d, e] = l;
+  const is = (w: number, category: WeaponCategory): boolean => WEAPONS[w]?.category === category;
+  return l.length === 5 && a !== b && is(a, 'primary') && is(b, 'primary') && is(c, 'pistol') && is(d, 'lethal') && is(e, 'tactical');
 }
 
 /** Completes a partial choice with the default weapons. */
-export function fillLoadout(primaries: number[], pistol: number | null): number[] {
+export function fillLoadout(primaries: number[], pistol: number | null, lethal: number | null, tactical: number | null): number[] {
   const chosen = primaries.slice(0, 2);
   for (const w of DEFAULT_LOADOUT.slice(0, 2)) if (chosen.length < 2 && !chosen.includes(w)) chosen.push(w);
-  return [...chosen, pistol ?? DEFAULT_LOADOUT[2]];
+  return [...chosen, pistol ?? DEFAULT_LOADOUT[2], lethal ?? DEFAULT_LOADOUT[3], tactical ?? DEFAULT_LOADOUT[4]];
 }
 
 /** Gun Game levels: every weapon, one kill each, from the easiest to the hardest. A kill on the last one wins. */
@@ -577,26 +745,46 @@ export function allowedWeapons(arsenal: Arsenal, level: number, loadout: number[
       return [W.SNIPER, W.KNIFE];
     case 'shotgun':
       return [W.SHOTGUN, W.KNIFE];
+    case 'shop':
+      return [...loadout, W.KNIFE];
     case 'gungame': {
       const w = GUN_GAME_LADDER[Math.min(level, GUN_GAME_LADDER.length - 1)];
       return w === W.KNIFE ? [w] : [w, W.KNIFE];
     }
     default:
-      return [...loadout, W.KNIFE];
+      return [...loadout.slice(0, 3), W.KNIFE];
   }
+}
+
+/** Equipment a player spawns with. Fixed until the next spawn, or swapping it in the inventory would refill it. */
+export function spawnEquipment(arsenal: Arsenal, loadout: number[]): number[] {
+  return arsenal === 'all' ? loadout.slice(3) : [];
 }
 
 /** Horizontal recoil pattern (multiplied by kickYaw), cycles after the end. */
 export const RECOIL_PATTERN = [0, 0.3, -0.2, 0.5, 0.8, 0.4, -0.3, -0.9, -1.2, -0.6, 0.2, 0.9, 1.3, 0.8, -0.2, -1.0];
 
 export function damageAt(def: WeaponDef, dist: number, head: boolean): number {
-  let dmg = def.damage * (head ? HEADSHOT_MULT : 1);
+  let dmg = def.damage * (head ? def.headMul : 1);
   if (def.falloff) {
     const f = def.falloff;
     const t = Math.min(1, Math.max(0, (dist - f.start) / (f.end - f.start)));
     dmg *= 1 - t * (1 - f.min);
   }
   return dmg;
+}
+
+export function blastDamage(def: WeaponDef, dist: number): number {
+  const s = def.splash;
+  return s ? def.damage * (1 - (dist / s.radius) * (1 - s.min)) : 0;
+}
+
+/** `facing` is 1 looking straight at the blast and -1 with the back to it. */
+export function stunMs(def: WeaponDef, dist: number, facing: number): number {
+  const s = def.stun;
+  if (!s || dist >= s.radius) return 0;
+  const closeness = 0.4 + 0.6 * (1 - dist / s.radius);
+  return s.ms * closeness * (s.blind && facing < 0.3 ? 0.35 : 1);
 }
 
 export function fullAmmo(): { mag: number[]; reserve: number[] } {

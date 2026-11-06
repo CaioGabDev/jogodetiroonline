@@ -38,7 +38,7 @@ function parseRoom(raw: unknown): RoomInfo | null {
     typeof r.code === 'string' &&
     /^[A-Z0-9]{6}$/.test(r.code) &&
     host !== '' &&
-    (r.mode === 'ffa' || r.mode === 'tdm') &&
+    (r.mode === 'ffa' || r.mode === 'tdm' || r.mode === 'bomb') &&
     typeof r.arsenal === 'string' &&
     Object.hasOwn(ARSENAL_NAMES, r.arsenal) &&
     typeof r.map === 'string' &&

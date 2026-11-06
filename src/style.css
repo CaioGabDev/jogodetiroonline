@@ -366,13 +366,18 @@ kbd {
 }
 
 .loadout-panel {
-  width: 900px;
+  width: 1100px;
   max-width: 100%;
   max-height: calc(100vh - 32px);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.loadout-panel > .btn {
+  position: sticky;
+  bottom: 0;
 }
 
 .loadout-head {
@@ -435,6 +440,23 @@ kbd {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.buy-menu .loadout-col {
+  flex: 1;
+}
+
+.buy-menu .loadout-grid {
+  grid-template-columns: 1fr;
+}
+
+.buy-menu .loadout-card {
+  padding: 5px 10px;
+}
+
+.loadout-card:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .loadout-card.active {
   border-color: var(--accent-2);
   background: rgba(255, 176, 32, 0.14);
@@ -453,7 +475,7 @@ kbd {
 
 .inventory-slots {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 8px;
 }
 
@@ -1366,6 +1388,102 @@ kbd {
   position: absolute;
   inset: 0;
   background: radial-gradient(ellipse at center, rgba(255, 0, 0, 0) 40%, rgba(200, 0, 0, 0.85) 100%);
+  opacity: 0;
+}
+
+.smoke-in {
+  position: absolute;
+  inset: 0;
+  background: #b9b9b9;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.radar {
+  position: absolute;
+  top: 40px;
+  left: 12px;
+  width: 180px;
+  height: 180px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.buy-team {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.buy-team b {
+  color: #7fe08a;
+}
+
+.hud-gear {
+  position: absolute;
+  left: 24px;
+  bottom: 116px;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 6px 14px;
+  border-radius: 10px;
+}
+
+.gear-money {
+  font-size: 24px;
+  font-weight: 800;
+  color: #7fe08a;
+  font-variant-numeric: tabular-nums;
+}
+
+.gear-line {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.hud-prompt {
+  position: absolute;
+  left: 50%;
+  top: 62%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  font-size: 15px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.work-bar {
+  position: absolute;
+  left: 50%;
+  top: 67%;
+  width: 240px;
+  height: 8px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.work-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent-2);
+}
+
+.flash-white {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+}
+
+.daze {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(40, 50, 60, 0.2) 25%, rgba(8, 12, 18, 0.9) 100%);
   opacity: 0;
 }
 

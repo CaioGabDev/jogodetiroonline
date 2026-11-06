@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { MapDef, MatKind, RampDef } from '../game/mapData';
+import type { MapDef, MatKind, PropDef, RampDef, Rect } from '../game/mapData';
 import { TEAM_COLORS } from '../game/constants';
 import { getTexture, makeGlowTexture, TEX_SCALE } from './textures';
 
@@ -75,6 +76,47 @@ function rampGeometry(r: RampDef, scale: number): THREE.BufferGeometry {
   return g;
 }
 
+const propModels = new Map<string, Promise<THREE.Object3D>>();
+
+function loadProp(model: string): Promise<THREE.Object3D> {
+  let p = propModels.get(model);
+  if (!p) {
+    p = new GLTFLoader().loadAsync(`${import.meta.env.BASE_URL}models/map/${model}.glb`).then((g) => g.scene);
+    propModels.set(model, p);
+  }
+  return p;
+}
+
+/** Stretches a copy of the model to fill the prop's box. Copies share geometry, so scene.ts leaves them undisposed. */
+function placeProp(source: THREE.Object3D, def: PropDef): THREE.Object3D {
+  const box = new THREE.Box3().setFromObject(source);
+  const size = box.getSize(new THREE.Vector3());
+  const [w, h, d] = def.size;
+  const sideways = def.turn % 2 === 1;
+  const model = source.clone();
+  model.scale.set((sideways ? d : w) / size.x, h / size.y, (sideways ? w : d) / size.z);
+  model.position.set(-(box.min.x + size.x / 2) * model.scale.x, -box.min.y * model.scale.y, -(box.min.z + size.z / 2) * model.scale.z);
+  const holder = new THREE.Group();
+  holder.position.set(def.x, def.y, def.z);
+  holder.rotation.y = (def.turn * Math.PI) / 2;
+  holder.add(model);
+  holder.traverse((o) => {
+    o.userData.shared = true;
+    if (o instanceof THREE.Mesh) o.castShadow = o.receiveShadow = true;
+  });
+  return holder;
+}
+
+/** Props appear as their files arrive. Collision doesn't wait for them. */
+function addProps(def: MapDef, group: THREE.Group): void {
+  for (const p of def.props ?? []) {
+    loadProp(p.model).then(
+      (m) => group.add(placeProp(m, p)),
+      (e: unknown) => console.warn('Modelo não carregou:', p.model, e),
+    );
+  }
+}
+
 export function buildMap(def: MapDef, anisotropy: number): { group: THREE.Group; materials: THREE.Material[] } {
   const group = new THREE.Group();
   group.name = 'map';
@@ -84,6 +126,7 @@ export function buildMap(def: MapDef, anisotropy: number): { group: THREE.Group;
     byMat.get(k)!.push(g);
   };
   for (const b of def.boxes) {
+    if (b.hidden) continue;
     const w = b.max[0] - b.min[0];
     const h = b.max[1] - b.min[1];
     const d = b.max[2] - b.min[2];
@@ -121,7 +164,38 @@ export function buildMap(def: MapDef, anisotropy: number): { group: THREE.Group;
     m.position.set(mark.x, 0.02, mark.z);
     group.add(m);
   }
+  for (const site of def.bomb?.sites ?? []) group.add(siteMark(site.name, site.rect));
+  addProps(def, group);
   return { group, materials };
+}
+
+/** Painted area of a bomb site, with its letter. */
+function siteMark(name: string, [x0, z0, x1, z1]: Rect): THREE.Group {
+  const mark = new THREE.Group();
+  mark.position.set((x0 + x1) / 2, 0.03, (z0 + z1) / 2);
+  const area = new THREE.Mesh(
+    new THREE.PlaneGeometry(x1 - x0, z1 - z0),
+    new THREE.MeshBasicMaterial({ color: 0xd8342a, transparent: true, opacity: 0.13, depthWrite: false }),
+  );
+  area.rotation.x = -Math.PI / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.font = 'bold 110px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillText(name, 64, 70);
+  }
+  const letter = new THREE.Mesh(
+    new THREE.PlaneGeometry(5, 5),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false }),
+  );
+  letter.rotation.x = -Math.PI / 2;
+  letter.position.y = 0.01;
+  mark.add(area, letter);
+  return mark;
 }
 
 export function buildSky(): THREE.Mesh {
@@ -158,10 +232,7 @@ export class PickupView {
   private items: THREE.Group[] = [];
 
   constructor(map: MapDef) {
-    const glowHealth = makeGlowTexture('rgba(255,255,255,0.9)', 'rgba(80,255,120,0.35)');
     const glowAmmo = makeGlowTexture('rgba(255,255,255,0.9)', 'rgba(255,200,60,0.35)');
-    const white = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.4 });
-    const red = new THREE.MeshStandardMaterial({ color: 0xe02424, emissive: 0x550000, roughness: 0.4 });
     const olive = new THREE.MeshStandardMaterial({ color: 0x4b5a2a, roughness: 0.6 });
     const yellow = new THREE.MeshStandardMaterial({ color: 0xe8b923, emissive: 0x332200, roughness: 0.5 });
     const padMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.7 });
@@ -174,22 +245,14 @@ export class PickupView {
       g.add(pad);
       const item = new THREE.Group();
       item.position.y = 0.8;
-      if (def.kind === 'health') {
-        item.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.45, 0.45), white));
-        const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.47), red);
-        const c2 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.36, 0.47), red);
-        item.add(c1, c2);
-      } else {
-        item.add(new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.4, 0.4), olive));
-        const s = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.1, 0.42), yellow);
-        item.add(s);
-      }
+      item.add(new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.4, 0.4), olive));
+      item.add(new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.1, 0.42), yellow));
       item.traverse((o) => {
         if (o instanceof THREE.Mesh) o.castShadow = true;
       });
       const glow = new THREE.Sprite(
         new THREE.SpriteMaterial({
-          map: def.kind === 'health' ? glowHealth : glowAmmo,
+          map: glowAmmo,
           transparent: true,
           depthWrite: false,
           blending: THREE.AdditiveBlending,

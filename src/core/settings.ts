@@ -15,6 +15,11 @@ export type Action =
   | 'weapon2'
   | 'weapon3'
   | 'weapon4'
+  | 'melee'
+  | 'lethal'
+  | 'tactical'
+  | 'smoke'
+  | 'use'
   | 'inventory'
   | 'scoreboard'
   | 'chat'
@@ -35,6 +40,11 @@ export const ACTION_LABELS: Record<Action, string> = {
   weapon2: 'Primária 2',
   weapon3: 'Pistola',
   weapon4: 'Faca',
+  melee: 'Golpe rápido',
+  lethal: 'Equipamento letal',
+  tactical: 'Equipamento tático',
+  smoke: 'Fumaça',
+  use: 'Plantar / desarmar',
   inventory: 'Inventário',
   scoreboard: 'Placar',
   chat: 'Chat (todos)',
@@ -100,6 +110,11 @@ export const DEFAULT_SETTINGS: Settings = {
     weapon2: ['Digit2', ''],
     weapon3: ['Digit3', ''],
     weapon4: ['Digit4', ''],
+    melee: ['KeyV', ''],
+    lethal: ['KeyG', ''],
+    tactical: ['KeyQ', ''],
+    smoke: ['KeyX', ''],
+    use: ['KeyE', ''],
     inventory: ['KeyB', ''],
     scoreboard: ['Tab', ''],
     chat: ['Enter', ''],

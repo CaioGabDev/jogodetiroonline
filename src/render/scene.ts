@@ -74,7 +74,7 @@ export class SceneManager {
     // Textures are shared between maps, so only geometry and materials go away.
     this.mapGroup?.removeFromParent();
     this.mapGroup?.traverse((o) => {
-      if (o instanceof THREE.Mesh) {
+      if (o instanceof THREE.Mesh && !o.userData.shared) {
         o.geometry.dispose();
         (o.material as THREE.Material).dispose();
       }

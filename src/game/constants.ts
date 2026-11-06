@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 13;
 /** Prefix added to the room code to form the host's PeerJS id (avoids collisions on the public server). */
 export const PEER_PREFIX = 'arenafps-v1-';
 
@@ -18,6 +18,10 @@ export const TEAM_SWITCH_COOLDOWN_MS = 10000;
 export const SPAWN_PROTECT_MS = 2000;
 export const PICKUP_RESPAWN_MS = 20000;
 export const MAX_HP = 100;
+/** Health starts coming back this long after the last hit. */
+export const REGEN_DELAY_MS = 5000;
+/** HP per second while regenerating. */
+export const REGEN_RATE = 50;
 
 export const NAME_MAX = 16;
 export const CHAT_MAX = 120;
@@ -40,27 +44,29 @@ export const HITBOX = {
 };
 
 export const MOVE = {
-  walk: 6,
-  sprint: 8.5,
-  knifeWalk: 10,
-  knifeSprint: 14.5,
-  knifeAirAccel: 7,
-  /** High accel and friction: with the knife, starts, stops and turns are near-instant. */
-  knifeAccel: 30,
-  knifeFriction: 14,
-  crouch: 3,
-  ads: 3.6,
-  accel: 12,
-  airAccel: 2.5,
-  /** Air control while sprinting. */
-  sprintAirAccel: 6,
-  /** Speed multiplier for jumping out of a sprint. Based on the run speed, so hops don't stack. */
-  sprintJump: 1.25,
-  friction: 7,
+  walk: 5.4,
+  sprint: 8.1,
+  crouch: 2.6,
+  ads: 2.9,
+  accel: 14,
+  airAccel: 2,
+  friction: 8,
   stopSpeed: 1.5,
   gravity: 20,
-  jump: 7.2,
+  jump: 6.3,
   step: 0.5,
+  /** Seconds of sprint on a full tank, and seconds regained per second. */
+  sprintTime: 4,
+  sprintRecover: 2,
+  /** Fuel needed to start sprinting again, so an empty tank can't stutter. */
+  sprintMin: 0.5,
+  slideSpeed: 10,
+  slideTime: 0.7,
+  slideFriction: 1.6,
+  /** Highest ledge a mantle reaches, from the ground and in mid-air. With `jump` this matches what a jump reached before. */
+  mantleReach: 1.45,
+  mantleAirReach: 0.45,
+  mantleTime: 0.4,
 };
 
 export type Team = 'red' | 'blue';
@@ -81,26 +87,47 @@ export const FFA_COLORS = [
   '#e0e0e0',
 ];
 
-export type GameMode = 'ffa' | 'tdm';
+export type GameMode = 'ffa' | 'tdm' | 'bomb';
+
+/** Modes where players fight in two teams. */
+export const teamMode = (mode: GameMode): boolean => mode !== 'ffa';
 
 /** Which weapons a match allows. Independent from the mode, except Gun Game, which is always FFA. */
-export type Arsenal = 'all' | 'sniper' | 'shotgun' | 'gungame';
+export type Arsenal = 'all' | 'sniper' | 'shotgun' | 'gungame' | 'shop';
 
 export const ARSENAL_NAMES: Record<Arsenal, string> = {
   all: 'Todas as armas',
   sniper: 'Só sniper',
   shotgun: 'Só doze',
   gungame: 'Gun Game',
+  shop: 'Compra por rodada',
 };
 
-export type MapId = 'arena' | 'mirante' | 'galpao';
+export type MapId = 'arena' | 'mirante' | 'galpao' | 'vila' | 'centro' | 'patio' | 'usina' | 'mercado';
 
-export const MAP_NAMES: Record<MapId, string> = { arena: 'Arena', mirante: 'Mirante', galpao: 'Galpão' };
+export const MAP_NAMES: Record<MapId, string> = {
+  arena: 'Arena',
+  mirante: 'Mirante',
+  galpao: 'Galpão',
+  vila: 'Vila',
+  centro: 'Centro',
+  patio: 'Pátio',
+  usina: 'Usina',
+  mercado: 'Mercado',
+};
+
+/** Built for attack and defense: the only maps of the bomb mode, which is the only mode they fit. */
+export const BOMB_MAPS: MapId[] = ['usina', 'mercado'];
 
 export const MAP_HINTS: Record<MapId, string> = {
   arena: 'equilibrado',
   mirante: 'grande, tiro a distância',
   galpao: 'pequeno e frenético',
+  vila: 'pequeno, casas e quintais',
+  centro: 'médio, três rotas',
+  patio: 'contêineres, três alturas',
+  usina: 'bomba, dois pátios e meio exposto',
+  mercado: 'bomba, ataque na diagonal',
 };
 
 export interface MatchConfig {
@@ -112,9 +139,12 @@ export interface MatchConfig {
   /** Minutes; 0 = no limit. */
   timeLimit: number;
   friendlyFire: boolean;
+  /** Bomb mode: round wins that take the match. Sides swap halfway. */
+  rounds: number;
 }
 
 export const KILL_LIMITS = [10, 20, 30, 50];
 export const TIME_LIMITS = [5, 10, 15, 20];
+export const ROUND_WINS = [7, 9, 13];
 
-export const DEFAULT_CONFIG: MatchConfig = { map: 'arena', mode: 'ffa', arsenal: 'all', killLimit: 20, timeLimit: 10, friendlyFire: false };
+export const DEFAULT_CONFIG: MatchConfig = { map: 'arena', mode: 'ffa', arsenal: 'all', killLimit: 20, timeLimit: 10, friendlyFire: false, rounds: 13 };
