@@ -30,10 +30,11 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 | Atirar | Botão esquerdo |
 | Mirar / luneta | Botão direito (segurar ou alternar) |
 | Recarregar | R |
+| Inspecionar arma | Y (atirar, mirar, recarregar, trocar de arma ou correr cancela) |
 | Trocar arma | 1 e 2 primárias, 3 pistola, 4 faca, ou roda do mouse |
 | Inventário | B (nas partidas com todas as armas) |
 | Placar | Tab (segurar) |
-| Chat (todos) / chat do time | Enter / Y |
+| Chat (todos) / chat do time | Enter / U |
 | Pausa | Esc |
 
 > No Chrome e no Edge o jogo abre em tela cheia para que **Ctrl+W não feche a aba** (dá para agachar com Ctrl e andar normalmente). Nos outros navegadores isso não é possível: aparece um aviso antes de sair, e o `C` é mais seguro para agachar.

@@ -242,6 +242,8 @@ export interface ViewmodelState {
   sprint: boolean;
   /** Reload progress 0..1, or -1 when not reloading. */
   reload: number;
+  /** Inspection progress 0..1, or -1 when not inspecting. */
+  inspect: number;
   /** Weapon raise progress 0..1 (1 = ready). */
   raise: number;
   lookDX: number;
@@ -371,6 +373,18 @@ export class Viewmodel {
       rotX -= r * 0.5;
       rotZ += r * 0.35;
       pos.y -= r * 0.08;
+    }
+    if (s.inspect >= 0) {
+      // Brings the weapon in, shows one side, turns it over to show the other, and puts it back.
+      const smooth = THREE.MathUtils.smoothstep;
+      const hold = smooth(s.inspect, 0, 0.12) * (1 - smooth(s.inspect, 0.88, 1));
+      const turn = smooth(s.inspect, 0.12, 0.42) - 2 * smooth(s.inspect, 0.5, 0.8);
+      pos.x -= hold * 0.1;
+      pos.y += hold * 0.05;
+      pos.z += hold * 0.08;
+      rotX += hold * 0.2;
+      rotY += hold * (0.45 + turn * 0.75);
+      rotZ += hold * (0.25 - turn * 0.3);
     }
     const lower = 1 - s.raise;
     pos.y -= lower * 0.3;

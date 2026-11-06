@@ -39,6 +39,8 @@ const BLOOM_EPSILON = 0.0001;
 const CROUCH_RECOIL = 0.7;
 /** aimT above this shows the full-screen scope. */
 const SCOPE_IN = 0.85;
+/** Length of the weapon inspection animation. */
+const INSPECT_MS = 2600;
 const SLOT_ACTIONS = ['weapon1', 'weapon2', 'weapon3', 'weapon4'] as const;
 
 const _v1 = new THREE.Vector3();
@@ -101,6 +103,9 @@ export class Game {
   private recoilY = 0;
   private bloom = 0;
   private burst = 0;
+  private inspectStart = 0;
+  /** Past this time no inspection is running. */
+  private inspectUntil = 0;
   /** Shots left in the current burst of a burst-fire weapon. */
   private burstLeft = 0;
   /** Primaries and pistol confirmed by the host. */
@@ -505,6 +510,7 @@ export class Game {
     // Read before lastShot changes: this shot's spread depends on the time since the previous one.
     const spread = this.currentSpread();
     this.lastShot = t;
+    this.inspectUntil = 0;
     if (!def.melee) this.mag[w]--;
     if (this.burstLeft > 0) this.burstLeft--;
     this.sprinting = false;
@@ -600,6 +606,9 @@ export class Game {
     this.bloom -= this.bloom * damp(5, dt);
     if (this.bloom < BLOOM_EPSILON) this.bloom = 0;
 
+    // Anything that needs the weapon ends the inspection; the viewmodel eases back to its normal pose.
+    if (!this.alive || this.aimT > 0 || this.sprinting || this.reloadW >= 0 || t < this.switchUntil) this.inspectUntil = 0;
+
     // Covers Gun Game level-ups and settings changed mid-match.
     const allowed = this.allowed();
     if (!allowed.includes(this.weapon)) this.setWeapon(allowed[0]);
@@ -620,6 +629,11 @@ export class Game {
       this.setWeapon(allowed[next % allowed.length]);
     }
     if (input.consume('reload')) this.startReload();
+    if (input.consume('inspect') && this.reloadW < 0 && t >= this.switchUntil && this.aimT === 0 && !this.sprinting && t >= this.inspectUntil) {
+      this.inspectStart = t;
+      this.inspectUntil = t + INSPECT_MS;
+      audio.switchWeapon();
+    }
 
     const wd = WEAPONS[this.weapon];
     const pressed = input.consume('fire');
@@ -849,6 +863,7 @@ export class Game {
       onGround: this.me.onGround,
       sprint: this.sprinting,
       reload: this.reloadW >= 0 ? (t - this.reloadStart) / (this.reloadUntil - this.reloadStart) : -1,
+      inspect: t < this.inspectUntil ? (t - this.inspectStart) / INSPECT_MS : -1,
       raise: t < this.switchUntil ? 1 - (this.switchUntil - t) / SWITCH_MS : 1,
       lookDX: this.frameLookX,
       lookDY: this.frameLookY,

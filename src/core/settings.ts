@@ -9,6 +9,7 @@ export type Action =
   | 'crouch'
   | 'sprint'
   | 'reload'
+  | 'inspect'
   | 'fire'
   | 'aim'
   | 'weapon1'
@@ -29,6 +30,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   crouch: 'Agachar',
   sprint: 'Correr',
   reload: 'Recarregar',
+  inspect: 'Inspecionar arma',
   fire: 'Atirar',
   aim: 'Mirar (ADS)',
   weapon1: 'Primária 1',
@@ -94,6 +96,7 @@ export const DEFAULT_SETTINGS: Settings = {
     crouch: ['KeyC', 'ControlLeft'],
     sprint: ['ShiftLeft', ''],
     reload: ['KeyR', ''],
+    inspect: ['KeyY', ''],
     fire: ['Mouse0', ''],
     aim: ['Mouse2', ''],
     weapon1: ['Digit1', ''],
@@ -103,7 +106,7 @@ export const DEFAULT_SETTINGS: Settings = {
     inventory: ['KeyB', ''],
     scoreboard: ['Tab', ''],
     chat: ['Enter', ''],
-    teamChat: ['KeyY', ''],
+    teamChat: ['KeyU', ''],
   },
   fov: 90,
   quality: 'medium',
@@ -135,6 +138,14 @@ const STORAGE_KEY = 'arenafps.settings.v1';
 
 function cloneDefaults(): Settings {
   return JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as Settings;
+}
+
+/** Saves from before weapon inspection have team chat on Y. A key the player rebound on purpose is left alone. */
+function freeInspectKey(s: Settings): void {
+  const taken = (code: string): boolean => Object.entries(s.binds).some(([a, keys]) => a !== 'inspect' && keys.includes(code));
+  const slot = s.binds.teamChat.indexOf('KeyY');
+  if (slot >= 0) s.binds.teamChat[slot] = taken('KeyU') ? '' : 'KeyU';
+  if (taken('KeyY')) s.binds.inspect = ['', ''];
 }
 
 /** Merges stored data over defaults, validating every field. */
@@ -175,6 +186,7 @@ function sanitize(raw: unknown): Settings {
         s.binds[a] = [v[0] as string, v[1] as string];
       }
     }
+    if (!('inspect' in b)) freeInspectKey(s);
   }
   if (r.crosshair && typeof r.crosshair === 'object') {
     const c = r.crosshair as Record<string, unknown>;
