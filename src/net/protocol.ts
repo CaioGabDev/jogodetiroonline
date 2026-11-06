@@ -139,7 +139,7 @@ export interface SetColorMsg {
 
 export interface LoadoutMsg {
   type: 'loadout';
-  /** Two primaries and a pistol. */
+  /** Two primaries, a pistol, a lethal and a tactical. */
   w: number[];
   /** Player confirmed: spawn now instead of waiting for the timer. */
   go: boolean;
@@ -212,6 +212,8 @@ export interface ProjMsg {
   w: number;
   o: Vec3;
   v: Vec3;
+  /** It bounced: this corrects the path of one already in flight. */
+  b?: boolean;
 }
 
 export interface ProjEndMsg {
@@ -255,6 +257,13 @@ export interface KillMsg {
   v: number;
   w: number;
   hs: boolean;
+}
+
+/** The blast of a tactical reached this player. */
+export interface StunMsg {
+  type: 'stun';
+  w: number;
+  ms: number;
 }
 
 export interface ShotMsg {
@@ -320,6 +329,7 @@ export type HostMsg =
   | PickMsg
   | ProjMsg
   | ProjEndMsg
+  | StunMsg
   | PickupMsg
   | ChatMsg
   | SysMsg
@@ -367,7 +377,7 @@ export function parseClientMsg(raw: unknown): ClientMsg | null {
     case 'reload':
       return isWeapon(m.w) ? (m as unknown as ReloadMsg) : null;
     case 'loadout':
-      return Array.isArray(m.w) && m.w.length === 3 && m.w.every(isWeapon) && typeof m.go === 'boolean' ? (m as unknown as LoadoutMsg) : null;
+      return Array.isArray(m.w) && m.w.length === 5 && m.w.every(isWeapon) && typeof m.go === 'boolean' ? (m as unknown as LoadoutMsg) : null;
     case 'chat':
       return isStr(m.text, CHAT_MAX) && typeof m.team === 'boolean' ? (m as unknown as ChatSendMsg) : null;
     case 'pong':

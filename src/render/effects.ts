@@ -1,9 +1,14 @@
 import * as THREE from 'three';
+import type { ProjectileKind } from '../game/weapons';
 import { makeDecalTexture, makeGlowTexture } from './textures';
 
 const MAX_TRACERS = 48;
 const MAX_DECALS = 160;
 const MAX_PARTICLES = 600;
+/** Flames drawn per molotov. */
+const FIRE_FLAMES = 44;
+/** Seconds a fire takes to die down at the end. */
+const FIRE_FADE = 0.6;
 
 interface Tracer {
   mesh: THREE.Mesh;
@@ -21,6 +26,11 @@ interface Projectile {
   mesh: THREE.Mesh;
   vel: THREE.Vector3;
   gravity: number;
+  life: number;
+}
+
+interface Fire {
+  group: THREE.Group;
   life: number;
 }
 
@@ -43,10 +53,23 @@ export class Effects {
   private light: THREE.PointLight;
   private lightLife = 0;
   private projectiles = new Map<number, Projectile>();
-  private boltGeo = new THREE.BoxGeometry(0.03, 0.03, 0.55);
-  private grenadeGeo = new THREE.SphereGeometry(0.11, 10, 8);
-  private boltMat = new THREE.MeshBasicMaterial({ color: 0xc9b98a });
-  private grenadeMat = new THREE.MeshBasicMaterial({ color: 0x3a4030 });
+  private projectileLook: Record<ProjectileKind, [THREE.BufferGeometry, THREE.Material]> = {
+    bolt: [new THREE.BoxGeometry(0.03, 0.03, 0.55), new THREE.MeshBasicMaterial({ color: 0xc9b98a })],
+    grenade: [new THREE.SphereGeometry(0.11, 10, 8), new THREE.MeshBasicMaterial({ color: 0x3a4030 })],
+    knife: [new THREE.BoxGeometry(0.02, 0.05, 0.32), new THREE.MeshBasicMaterial({ color: 0xc8ccd0 })],
+    bottle: [new THREE.CylinderGeometry(0.045, 0.065, 0.26, 8), new THREE.MeshBasicMaterial({ color: 0x4f7a3a })],
+    can: [new THREE.CylinderGeometry(0.055, 0.055, 0.16, 8), new THREE.MeshBasicMaterial({ color: 0xa8acb0 })],
+  };
+  private fires: Fire[] = [];
+  /** Marks the ground that burns, so the danger reads from far away. */
+  private scorchGeo = new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2);
+  private scorchMat = new THREE.MeshBasicMaterial({ color: 0x140a04, transparent: true, opacity: 0.72, depthWrite: false });
+  private flameMat = new THREE.SpriteMaterial({
+    map: makeGlowTexture('rgba(255,225,130,1)', 'rgba(255,90,15,0.75)'),
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
 
   constructor() {
     const tracerGeo = new THREE.BoxGeometry(0.025, 0.025, 1);
@@ -122,8 +145,10 @@ export class Effects {
     t.max = t.life = 0.07;
   }
 
-  addProjectile(id: number, pos: THREE.Vector3, vel: THREE.Vector3, gravity: number, kind: 'bolt' | 'grenade'): void {
-    const mesh = new THREE.Mesh(kind === 'bolt' ? this.boltGeo : this.grenadeGeo, kind === 'bolt' ? this.boltMat : this.grenadeMat);
+  /** Calling it again with the same id replaces that one: the host does that when it bounces. */
+  addProjectile(id: number, pos: THREE.Vector3, vel: THREE.Vector3, gravity: number, kind: ProjectileKind): void {
+    this.removeProjectile(id);
+    const mesh = new THREE.Mesh(...this.projectileLook[kind]);
     mesh.position.copy(pos);
     this.group.add(mesh);
     this.projectiles.set(id, { mesh, vel, gravity, life: 9 });
@@ -140,6 +165,24 @@ export class Effects {
     this.muzzleFlash(pos, radius * 1.3, true, 0.18);
     this.muzzleFlash(pos, radius * 0.8, false, 0.28);
     this.impact(pos, null, 'world', 45);
+  }
+
+  fire(pos: THREE.Vector3, radius: number, ms: number): void {
+    const group = new THREE.Group();
+    group.position.copy(pos);
+    const scorch = new THREE.Mesh(this.scorchGeo, this.scorchMat);
+    scorch.scale.setScalar(radius);
+    scorch.position.y = 0.03;
+    group.add(scorch);
+    for (let i = 0; i < FIRE_FLAMES; i++) {
+      const flame = new THREE.Sprite(this.flameMat);
+      const a = Math.random() * Math.PI * 2;
+      const r = radius * Math.sqrt(Math.random());
+      flame.position.set(Math.cos(a) * r, 0.35, Math.sin(a) * r);
+      group.add(flame);
+    }
+    this.group.add(group);
+    this.fires.push({ group, life: ms / 1000 });
   }
 
   muzzleFlash(pos: THREE.Vector3, scale = 0.6, light = true, life = 0.05): void {
@@ -224,6 +267,21 @@ export class Effects {
       p.mesh.position.addScaledVector(p.vel, dt);
       p.mesh.lookAt(Effects.tmpN.copy(p.mesh.position).add(p.vel));
     }
+    this.fires = this.fires.filter((f) => {
+      f.life -= dt;
+      if (f.life <= 0) {
+        f.group.removeFromParent();
+        return false;
+      }
+      const size = Math.min(1, f.life / FIRE_FADE);
+      const clock = performance.now() / 90;
+      f.group.children.forEach((flame, i) => {
+        if (!(flame instanceof THREE.Sprite)) return;
+        const flicker = 0.75 + 0.35 * Math.sin(clock + i * 2.1);
+        flame.scale.set(0.6 * size, 1.25 * size * flicker, 1);
+      });
+      return true;
+    });
     for (const t of this.tracers) {
       if (!t.mesh.visible) continue;
       t.life -= dt;

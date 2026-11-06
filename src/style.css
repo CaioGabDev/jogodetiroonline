@@ -366,13 +366,18 @@ kbd {
 }
 
 .loadout-panel {
-  width: 900px;
+  width: 1100px;
   max-width: 100%;
   max-height: calc(100vh - 32px);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.loadout-panel > .btn {
+  position: sticky;
+  bottom: 0;
 }
 
 .loadout-head {
@@ -453,7 +458,7 @@ kbd {
 
 .inventory-slots {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 8px;
 }
 
@@ -1366,6 +1371,20 @@ kbd {
   position: absolute;
   inset: 0;
   background: radial-gradient(ellipse at center, rgba(255, 0, 0, 0) 40%, rgba(200, 0, 0, 0.85) 100%);
+  opacity: 0;
+}
+
+.flash-white {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+}
+
+.daze {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(40, 50, 60, 0.2) 25%, rgba(8, 12, 18, 0.9) 100%);
   opacity: 0;
 }
 

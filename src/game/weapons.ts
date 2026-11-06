@@ -5,7 +5,9 @@ import type { Arsenal } from './constants';
  * the clients, the HUD and the loadout screen follow.
  */
 
-export type WeaponCategory = 'primary' | 'pistol' | 'melee';
+export type WeaponCategory = 'primary' | 'pistol' | 'melee' | 'lethal' | 'tactical';
+
+export type ProjectileKind = 'bolt' | 'grenade' | 'knife' | 'bottle' | 'can';
 
 export type WeaponSound =
   | 'rifle'
@@ -19,7 +21,8 @@ export type WeaponSound =
   | 'pistol'
   | 'deagle'
   | 'revolver'
-  | 'knife';
+  | 'knife'
+  | 'throw';
 
 export interface WeaponDef {
   id: number;
@@ -76,9 +79,21 @@ export interface WeaponDef {
   /** Milliseconds between bursts. */
   burstPause?: number;
   /** Fires a physical projectile, simulated by the host, instead of an instant hit. */
-  projectile?: { speed: number; gravity: number; kind: 'bolt' | 'grenade' };
+  projectile?: {
+    speed: number;
+    gravity: number;
+    kind: ProjectileKind;
+    /** Seconds until it goes off. With a fuse it bounces instead of stopping at the first thing it hits. */
+    fuse?: number;
+    /** Radians added to the aim, so a throw at the crosshair lands near it. */
+    loft?: number;
+  };
   /** Damage in an area around the impact. `min` is the damage multiplier at the edge. */
   splash?: { radius: number; min: number };
+  /** Burns the ground where it lands. */
+  fire?: { radius: number; ms: number; dps: number };
+  /** Longest effect on whoever the blast reaches. `blind` blinds, and depends on looking at it; otherwise it slows. */
+  stun?: { radius: number; ms: number; blind: boolean };
   /** No flash, no tracer and a sound that only carries a few meters. */
   silent?: boolean;
   /** Close-range swing: no ammo, no reload, no ADS. */
@@ -100,7 +115,47 @@ export const W = {
   DEAGLE: 10,
   REVOLVER: 11,
   AUTO_PISTOL: 12,
+  FRAG: 13,
+  THROWING_KNIFE: 14,
+  MOLOTOV: 15,
+  FLASHBANG: 16,
+  CONCUSSION: 17,
 } as const;
+
+type ThrownDef = Pick<WeaponDef, 'id' | 'name' | 'short' | 'category' | 'desc' | 'damage' | 'mag' | 'projectile'> & Partial<WeaponDef>;
+
+/** Thrown equipment lives in this table so ammo sync, projectiles and the kill feed work on it. What only guns use stays neutral. */
+function thrown(d: ThrownDef): WeaponDef {
+  return {
+    interval: 0,
+    auto: false,
+    reserve: 0,
+    maxReserve: 0,
+    infiniteReserve: false,
+    pellets: 1,
+    spreadHip: 0,
+    spreadAds: 0,
+    spreadMove: 0,
+    spreadAir: 0,
+    headMul: 1,
+    sprintOut: 0,
+    kick: 0,
+    kickYaw: 0,
+    recover: 1,
+    reloadTime: 0,
+    zoom: 1,
+    adsTime: 0.2,
+    range: 0,
+    falloff: null,
+    tracer: 0,
+    ammoPickup: 0,
+    sound: 'throw',
+    fireKick: 0,
+    shape: { len: 0, h: 0 },
+    silent: true,
+    ...d,
+  };
+}
 
 export const WEAPONS: WeaponDef[] = [
   {
@@ -565,26 +620,88 @@ export const WEAPONS: WeaponDef[] = [
     headMul: 1.4,
     sprintOut: 120,
   },
+  thrown({
+    id: W.FRAG,
+    name: 'Granada',
+    short: 'GRANADA',
+    category: 'lethal',
+    desc: 'Quica e explode em 2,2 s, mata de perto',
+    damage: 160,
+    mag: 1,
+    projectile: { speed: 20, gravity: 14, kind: 'grenade', fuse: 2.2, loft: 0.12 },
+    splash: { radius: 7, min: 0.1 },
+  }),
+  thrown({
+    id: W.THROWING_KNIFE,
+    name: 'Faca de arremesso',
+    short: 'ARREMESSO',
+    category: 'lethal',
+    desc: 'Mata com 1 acerto direto, sem dano em área',
+    damage: 150,
+    mag: 1,
+    projectile: { speed: 36, gravity: 7, kind: 'knife' },
+  }),
+  thrown({
+    id: W.MOLOTOV,
+    name: 'Molotov',
+    short: 'MOLOTOV',
+    category: 'lethal',
+    desc: 'Quebra ao bater e queima o chão por 6 s',
+    damage: 0,
+    mag: 1,
+    projectile: { speed: 20, gravity: 14, kind: 'bottle', loft: 0.12 },
+    fire: { radius: 3.5, ms: 6000, dps: 40 },
+  }),
+  thrown({
+    id: W.FLASHBANG,
+    name: 'Flashbang',
+    short: 'FLASH',
+    category: 'tactical',
+    desc: 'Cega e ensurdece, pior para quem olha',
+    damage: 0,
+    mag: 2,
+    projectile: { speed: 20, gravity: 14, kind: 'can', fuse: 1.4, loft: 0.12 },
+    stun: { radius: 16, ms: 4500, blind: true },
+  }),
+  thrown({
+    id: W.CONCUSSION,
+    name: 'Concussão',
+    short: 'CONCUSSÃO',
+    category: 'tactical',
+    desc: 'Deixa lento, sem corrida e com a mira pesada',
+    damage: 0,
+    mag: 2,
+    projectile: { speed: 20, gravity: 14, kind: 'can', fuse: 1.4, loft: 0.12 },
+    stun: { radius: 10, ms: 5000, blind: false },
+  }),
 ];
 
 export const WEAPON_COUNT = WEAPONS.length;
 
-/** Two primaries and a pistol. Used when the time to choose runs out. */
-export const DEFAULT_LOADOUT: number[] = [W.RIFLE, W.SMG, W.PISTOL];
+/** Two primaries, a pistol, a lethal and a tactical. Used when the time to choose runs out. */
+export const DEFAULT_LOADOUT: number[] = [W.RIFLE, W.SMG, W.PISTOL, W.FRAG, W.FLASHBANG];
 
 export const PRIMARIES = WEAPONS.filter((w) => w.category === 'primary');
 export const PISTOLS = WEAPONS.filter((w) => w.category === 'pistol');
+export const LETHALS = WEAPONS.filter((w) => w.category === 'lethal');
+export const TACTICALS = WEAPONS.filter((w) => w.category === 'tactical');
+
+/** Line on the loadout cards. */
+export function magLabel(w: WeaponDef): string {
+  return w.category === 'lethal' || w.category === 'tactical' ? `Por vida: ${w.mag}` : `Pente: ${w.mag}`;
+}
 
 export function validLoadout(l: number[]): boolean {
-  const [a, b, c] = l;
-  return l.length === 3 && a !== b && WEAPONS[a]?.category === 'primary' && WEAPONS[b]?.category === 'primary' && WEAPONS[c]?.category === 'pistol';
+  const [a, b, c, d, e] = l;
+  const is = (w: number, category: WeaponCategory): boolean => WEAPONS[w]?.category === category;
+  return l.length === 5 && a !== b && is(a, 'primary') && is(b, 'primary') && is(c, 'pistol') && is(d, 'lethal') && is(e, 'tactical');
 }
 
 /** Completes a partial choice with the default weapons. */
-export function fillLoadout(primaries: number[], pistol: number | null): number[] {
+export function fillLoadout(primaries: number[], pistol: number | null, lethal: number | null, tactical: number | null): number[] {
   const chosen = primaries.slice(0, 2);
   for (const w of DEFAULT_LOADOUT.slice(0, 2)) if (chosen.length < 2 && !chosen.includes(w)) chosen.push(w);
-  return [...chosen, pistol ?? DEFAULT_LOADOUT[2]];
+  return [...chosen, pistol ?? DEFAULT_LOADOUT[2], lethal ?? DEFAULT_LOADOUT[3], tactical ?? DEFAULT_LOADOUT[4]];
 }
 
 /** Gun Game levels: every weapon, one kill each, from the easiest to the hardest. A kill on the last one wins. */
@@ -616,8 +733,13 @@ export function allowedWeapons(arsenal: Arsenal, level: number, loadout: number[
       return w === W.KNIFE ? [w] : [w, W.KNIFE];
     }
     default:
-      return [...loadout, W.KNIFE];
+      return [...loadout.slice(0, 3), W.KNIFE];
   }
+}
+
+/** Equipment a player spawns with. Fixed until the next spawn, or swapping it in the inventory would refill it. */
+export function spawnEquipment(arsenal: Arsenal, loadout: number[]): number[] {
+  return arsenal === 'all' ? loadout.slice(3) : [];
 }
 
 /** Horizontal recoil pattern (multiplied by kickYaw), cycles after the end. */
@@ -631,6 +753,19 @@ export function damageAt(def: WeaponDef, dist: number, head: boolean): number {
     dmg *= 1 - t * (1 - f.min);
   }
   return dmg;
+}
+
+export function blastDamage(def: WeaponDef, dist: number): number {
+  const s = def.splash;
+  return s ? def.damage * (1 - (dist / s.radius) * (1 - s.min)) : 0;
+}
+
+/** `facing` is 1 looking straight at the blast and -1 with the back to it. */
+export function stunMs(def: WeaponDef, dist: number, facing: number): number {
+  const s = def.stun;
+  if (!s || dist >= s.radius) return 0;
+  const closeness = 0.4 + 0.6 * (1 - dist / s.radius);
+  return s.ms * closeness * (s.blind && facing < 0.3 ? 0.35 : 1);
 }
 
 export function fullAmmo(): { mag: number[]; reserve: number[] } {

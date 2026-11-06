@@ -31,6 +31,7 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 | Agachar | C ou Ctrl (segurar ou alternar) |
 | Slide | Agachar enquanto corre |
 | Golpe rápido | V (saca a faca, golpeia e volta para a arma) |
+| Equipamento letal / tático | G / Q (arremessa sem trocar de arma) |
 | Atirar | Botão esquerdo |
 | Mirar / luneta | Botão direito (segurar ou alternar) |
 | Recarregar | R |
@@ -80,6 +81,20 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 
 Headshot multiplica o dano por um valor de cada arma (de 1,25× na LMG a 1,5× na sniper), e a partir de certa distância o dano cai. Os números ficam em `src/game/weapons.ts`. O lança-granadas não fere quem atirou.
 
+### Equipamentos
+
+Nas partidas com todas as armas, cada um escolhe um letal e um tático na tela de spawn, e eles voltam a cada vida. A troca pelo inventário vale ao renascer.
+
+| Equipamento | Tipo | Por vida | Efeito |
+| --- | --- | --- | --- |
+| Granada | Letal | 1 | Quica e explode em 2,2 s. Raio de 7 m, mata a até cerca de 2,9 m |
+| Faca de arremesso | Letal | 1 | Mata com 1 acerto direto, sem dano em área |
+| Molotov | Letal | 1 | Quebra ao bater e queima 3,5 m de raio por 6 s, a 40 de dano por segundo |
+| Flashbang | Tática | 2 | Explode em 1,4 s. Cega e ensurdece em até 16 m, e dura bem menos de costas para ela |
+| Concussão | Tática | 2 | Explode em 1,4 s. Em até 10 m, reduz a velocidade e a mira e impede a corrida |
+
+Paredes bloqueiam as explosões. Seu próprio equipamento também pega você, e morrer assim conta só a morte. Companheiros de time só são atingidos com fogo amigo ligado.
+
 ### Mapas
 
 O host escolhe o mapa no lobby:
@@ -124,7 +139,7 @@ Para testar o multiplayer na mesma máquina, abra duas abas (ou uma aba anônima
 ```bash
 npm run build      # checagem de tipos + build de produção em dist/
 npm run preview    # serve o build de dist/
-npm run check      # confere movimentação, balanceamento das armas e equilíbrio dos mapas
+npm run check      # confere movimentação, balanceamento, equilíbrio dos mapas e equipamentos
 ```
 
 ---

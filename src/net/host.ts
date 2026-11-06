@@ -33,7 +33,7 @@ import {
 import { MAPS, type MapDef, type SpawnDef } from '../game/mapData';
 import { CollisionWorld, eyeHeight } from '../game/physics';
 import { PositionHistory, rayPlayer } from '../game/hitbox';
-import { DEFAULT_LOADOUT, GUN_GAME_LADDER, W, WEAPONS, allowedWeapons, damageAt, fullAmmo, validLoadout } from '../game/weapons';
+import { DEFAULT_LOADOUT, GUN_GAME_LADDER, W, WEAPONS, allowedWeapons, blastDamage, damageAt, fullAmmo, spawnEquipment, stunMs, validLoadout } from '../game/weapons';
 import { clamp, now, r2, r3, randomCode, sanitizeText } from '../core/util';
 import {
   F_ADS,
@@ -123,8 +123,10 @@ interface SPlayer {
   lastHistT: number;
   /** Host time until this player may change teams again. */
   teamLockUntil: number;
-  /** Two primaries and a pistol. */
+  /** Two primaries, a pistol, a lethal and a tactical. */
   loadout: number[];
+  /** What this life can throw, set on spawning. */
+  equip: number[];
   /** On the spawn screen, waiting for the timer or a confirmation. */
   picking: boolean;
 }
@@ -144,10 +146,23 @@ interface Projectile {
   lastT: number;
 }
 
+/** Burning ground left by a molotov. */
+interface Fire {
+  owner: SPlayer;
+  w: number;
+  x: number;
+  y: number;
+  z: number;
+  until: number;
+  nextAt: number;
+}
+
 type DamageMap = Map<SPlayer, { dmg: number; hs: boolean }>;
 
 /** Projectiles that hit nothing are dropped after this long. */
 const PROJECTILE_MAX_MS = 8000;
+/** Time between burns while standing in fire. */
+const FIRE_TICK_MS = 250;
 
 interface PickupState {
   active: boolean;
@@ -217,6 +232,7 @@ export class HostServer {
   private pending = new Set<Conn>();
   private projectiles: Projectile[] = [];
   private nextProjectile = 1;
+  private fires: Fire[] = [];
 
   constructor(
     offline: boolean,
@@ -414,6 +430,7 @@ export class HostServer {
       clockAhead: 0,
       teamLockUntil: 0,
       loadout: [...DEFAULT_LOADOUT],
+      equip: [],
       picking: false,
     };
   }
@@ -460,6 +477,7 @@ export class HostServer {
     if (!p) return;
     this.players.delete(id);
     this.projectiles = this.projectiles.filter((pr) => pr.owner !== p);
+    this.fires = this.fires.filter((f) => f.owner !== p);
     this.broadcast({ type: 'sys', text: `${p.info.name} saiu da partida` });
     this.broadcastLobby();
   }
@@ -628,6 +646,7 @@ export class HostServer {
     this.world = new CollisionWorld(this.map);
     this.pickups = this.map.pickups.map(() => ({ active: true, respawnAt: 0 }));
     this.projectiles = [];
+    this.fires = [];
     for (const p of this.players.values()) {
       p.kills = 0;
       p.level = 0;
@@ -710,6 +729,7 @@ export class HostServer {
     p.mag = ammo.mag;
     p.reserve = ammo.reserve;
     p.reloadW = -1;
+    p.equip = spawnEquipment(this.config.arsenal, p.loadout);
     p.weapon = this.allowed(p)[0];
     p.tp++;
     p.lastCt = -1;
@@ -855,6 +875,18 @@ export class HostServer {
       p.lastShotSeq = Math.max(p.lastShotSeq, m.s);
       this.sendAmmo(p);
     };
+    const eye = p.y + eyeHeight(p.crouch);
+    if (Math.hypot(m.o[0] - p.x, m.o[1] - eye, m.o[2] - p.z) > 3) return reject();
+    // Thrown with the gun still in hand. What limits it is the count, not a fire rate.
+    if (p.equip.includes(w)) {
+      if (p.mag[w] <= 0) return reject();
+      p.mag[w]--;
+      p.lastShotSeq = m.s;
+      p.protectedUntil = 0;
+      p.reloadW = -1;
+      this.launch(p, w, m);
+      return;
+    }
     if (!this.allowed(p).includes(w)) return reject();
     if (w !== p.weapon) {
       p.weapon = w;
@@ -872,8 +904,6 @@ export class HostServer {
     if (p.credits < 1) return reject();
     p.credits -= 1;
 
-    const eye = p.y + eyeHeight(p.crouch);
-    if (Math.hypot(m.o[0] - p.x, m.o[1] - eye, m.o[2] - p.z) > 3) return reject();
     const pellets = m.d.length / 3;
     if (pellets > def.pellets) return reject();
 
@@ -944,7 +974,8 @@ export class HostServer {
     this.dealDamage(p, dmgMap, w);
   }
 
-  private dealDamage(p: SPlayer, dmgMap: DamageMap, w: number): void {
+  /** `src` is where the indicator on the victim's screen points to; by default, the attacker. */
+  private dealDamage(p: SPlayer, dmgMap: DamageMap, w: number, src?: [number, number, number]): void {
     const t = now();
     for (const [target, { dmg, hs }] of dmgMap) {
       if (!target.alive || t < target.protectedUntil) continue;
@@ -953,13 +984,21 @@ export class HostServer {
       const dealt = Math.min(amount, target.hp);
       target.hp -= amount;
       target.lastHurtAt = t;
-      p.damage += dealt;
-      this.send(target, { type: 'dmg', from: p.info.id, src: [r2(p.x), r2(p.y + 1.4), r2(p.z)], amt: amount });
+      if (target !== p) p.damage += dealt;
+      this.send(target, { type: 'dmg', from: p.info.id, src: src ?? [r2(p.x), r2(p.y + 1.4), r2(p.z)], amt: amount });
       const killed = target.hp <= 0;
       if (killed) this.kill(p, target, w, hs);
-      const top = target.y + (target.crouch ? HITBOX.crouchHeadTop : HITBOX.standHeadTop);
-      this.send(p, { type: 'hit', dmg: amount, hs, kill: killed, p: [r2(target.x), r2(top), r2(target.z)] });
+      if (target !== p) this.send(p, { type: 'hit', dmg: amount, hs, kill: killed, p: this.overHead(target) });
     }
+  }
+
+  private overHead(p: SPlayer): [number, number, number] {
+    return [r2(p.x), r2(p.y + (p.crouch ? HITBOX.crouchHeadTop : HITBOX.standHeadTop)), r2(p.z)];
+  }
+
+  private announceProjectile(pr: Projectile, bounced: boolean): void {
+    const m: HostMsg = { type: 'proj', id: pr.id, i: pr.owner.info.id, w: pr.w, o: [r2(pr.x), r2(pr.y), r2(pr.z)], v: [r2(pr.vx), r2(pr.vy), r2(pr.vz)] };
+    this.broadcast(bounced ? { ...m, b: true } : m);
   }
 
   private launch(p: SPlayer, w: number, m: ShootMsg): void {
@@ -982,7 +1021,7 @@ export class HostServer {
       lastT: t,
     };
     this.projectiles.push(pr);
-    this.broadcast({ type: 'proj', id: pr.id, i: p.info.id, w, o: [r2(pr.x), r2(pr.y), r2(pr.z)], v: [r2(pr.vx), r2(pr.vy), r2(pr.vz)] });
+    this.announceProjectile(pr, false);
   }
 
   /** Moves projectiles along their arc, checking the path they cover this tick. */
@@ -991,6 +1030,15 @@ export class HostServer {
       const def = WEAPONS[pr.w];
       const dt = Math.min(0.1, (t - pr.lastT) / 1000);
       pr.lastT = t;
+      const fuse = def.projectile?.fuse;
+      if (fuse !== undefined) {
+        if (t - pr.bornAt >= fuse * 1000) {
+          this.projectileHit(pr, null, [0, 1, 0]);
+          return false;
+        }
+        if (this.world.stepThrown(pr, def.projectile?.gravity ?? 0, dt)) this.announceProjectile(pr, true);
+        return true;
+      }
       pr.vy -= (def.projectile?.gravity ?? 0) * dt;
       const sx = pr.vx * dt;
       const sy = pr.vy * dt;
@@ -1027,25 +1075,72 @@ export class HostServer {
 
   private projectileHit(pr: Projectile, hit: { pl: SPlayer; head: boolean } | null, n: [number, number, number]): void {
     const def = WEAPONS[pr.w];
+    if (def.fire) this.ignite(pr, n, def.fire.ms);
     this.broadcast({ type: 'pimp', id: pr.id, w: pr.w, p: [r2(pr.x), r2(pr.y), r2(pr.z)], h: hit ? 2 : 1, n: [r3(n[0]), r3(n[1]), r3(n[2])] });
+    const cy = pr.y + n[1] * 0.2;
+    const cx = pr.x + n[0] * 0.2;
+    const cz = pr.z + n[2] * 0.2;
+    if (def.stun) this.stunBlast(pr, cx, cy, cz, def.stun.radius);
     const dmgMap: DamageMap = new Map();
     if (def.splash) {
-      // Walls block the blast, and the shooter takes no damage from their own explosion.
-      const { radius, min } = def.splash;
-      const cy = pr.y + n[1] * 0.2;
-      const cx = pr.x + n[0] * 0.2;
-      const cz = pr.z + n[2] * 0.2;
-      for (const o of this.players.values()) {
-        if (o === pr.owner || !o.alive) continue;
-        if (!this.isEnemy(pr.owner, o) && !this.config.friendlyFire) continue;
-        const d = Math.hypot(o.x - cx, o.y + 1 - cy, o.z - cz);
-        if (d > radius || !this.world.lineOfSight(cx, cy, cz, o.x, o.y + 1, o.z)) continue;
-        dmgMap.set(o, { dmg: def.damage * (1 - (d / radius) * (1 - min)), hs: false });
-      }
+      for (const { pl, d } of this.blastHits(pr.owner, pr.w, cx, cy, cz, def.splash.radius)) dmgMap.set(pl, { dmg: blastDamage(def, d), hs: false });
     } else if (hit) {
       dmgMap.set(hit.pl, { dmg: damageAt(def, 0, hit.head), hs: hit.head });
     }
-    this.dealDamage(pr.owner, dmgMap, pr.w);
+    this.dealDamage(pr.owner, dmgMap, pr.w, def.splash ? [r2(cx), r2(cy), r2(cz)] : undefined);
+  }
+
+  /** Who a blast reaches: walls block it, and thrown equipment catches its thrower too. The launcher never hurts the shooter. */
+  private blastHits(owner: SPlayer, w: number, x: number, y: number, z: number, radius: number): Array<{ pl: SPlayer; d: number }> {
+    const thrown = owner.equip.includes(w);
+    const out: Array<{ pl: SPlayer; d: number }> = [];
+    for (const o of this.players.values()) {
+      if (!o.alive) continue;
+      if (o === owner ? !thrown : !this.isEnemy(owner, o) && !this.config.friendlyFire) continue;
+      const d = Math.hypot(o.x - x, o.y + 1 - y, o.z - z);
+      if (d <= radius && this.world.lineOfSight(x, y, z, o.x, o.y + 1, o.z)) out.push({ pl: o, d });
+    }
+    return out;
+  }
+
+  private stunBlast(pr: Projectile, x: number, y: number, z: number, radius: number): void {
+    const t = now();
+    for (const { pl, d } of this.blastHits(pr.owner, pr.w, x, y, z, radius)) {
+      if (t < pl.protectedUntil) continue;
+      const dy = y - (pl.y + eyeHeight(pl.crouch));
+      const len = Math.max(0.01, Math.hypot(x - pl.x, dy, z - pl.z));
+      const flat = Math.cos(pl.pitch);
+      const facing = (-Math.sin(pl.yaw) * flat * (x - pl.x) + Math.sin(pl.pitch) * dy - Math.cos(pl.yaw) * flat * (z - pl.z)) / len;
+      this.send(pl, { type: 'stun', w: pr.w, ms: Math.round(stunMs(WEAPONS[pr.w], d, facing)) });
+      if (pl !== pr.owner) this.send(pr.owner, { type: 'hit', dmg: 0, hs: false, kill: false, p: this.overHead(pl) });
+    }
+  }
+
+  /** The fire settles on the ground under where the bottle broke, so a throw at a wall burns at its foot. */
+  private ignite(pr: Projectile, n: [number, number, number], ms: number): void {
+    pr.x += n[0] * 0.3;
+    pr.z += n[2] * 0.3;
+    const y = this.world.groundHeight(pr.x, pr.z, pr.y + 0.6, 40);
+    if (y === -Infinity) return;
+    pr.y = y;
+    const t = now();
+    this.fires.push({ owner: pr.owner, w: pr.w, x: pr.x, y, z: pr.z, until: t + ms, nextAt: t });
+  }
+
+  private updateFires(t: number): void {
+    this.fires = this.fires.filter((f) => {
+      if (t >= f.until) return false;
+      if (t < f.nextAt) return true;
+      f.nextAt = t + FIRE_TICK_MS;
+      const fire = WEAPONS[f.w].fire;
+      if (!fire) return false;
+      const dmgMap: DamageMap = new Map();
+      for (const { pl } of this.blastHits(f.owner, f.w, f.x, f.y + 1, f.z, fire.radius)) {
+        dmgMap.set(pl, { dmg: (fire.dps * FIRE_TICK_MS) / 1000, hs: false });
+      }
+      this.dealDamage(f.owner, dmgMap, f.w, [r2(f.x), r2(f.y + 1), r2(f.z)]);
+      return true;
+    });
   }
 
   private kill(killer: SPlayer, victim: SPlayer, w: number, hs: boolean): void {
@@ -1054,8 +1149,11 @@ export class HostServer {
     victim.deaths++;
     victim.reloadW = -1;
     victim.respawnAt = now() + RESPAWN_MS;
+    const suicide = killer === victim;
     const teamKill = this.config.mode === 'tdm' && killer.info.team === victim.info.team;
-    if (teamKill) {
+    if (suicide) {
+      // Only the death counts.
+    } else if (teamKill) {
       killer.kills--;
       this.teamScore[killer.info.team === 'red' ? 0 : 1]--;
     } else {
@@ -1198,6 +1296,7 @@ export class HostServer {
       });
       this.updateBots(t);
       this.updateProjectiles(t);
+      this.updateFires(t);
       if (this.endsAt > 0 && t >= this.endsAt) this.endMatch('time');
     }
 

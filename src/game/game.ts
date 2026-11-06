@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
-import { settings } from '../core/settings';
+import { keyLabel, settings } from '../core/settings';
 import { clamp, damp, now, r2, r3 } from '../core/util';
 import { ARSENAL_NAMES, INPUT_RATE, MAX_HP, MOVE, RESPAWN_MS, TEAM_COLORS, type MatchConfig } from './constants';
 import { rayPlayer } from './hitbox';
 import { MAPS, type MapDef } from './mapData';
 import { CollisionWorld, eyeHeight, type PState } from './physics';
 import { RemotePlayer } from './player';
-import { DEFAULT_LOADOUT, GUN_GAME_LADDER, RECOIL_PATTERN, W, WEAPONS, WEAPON_COUNT, allowedWeapons, fullAmmo } from './weapons';
+import { DEFAULT_LOADOUT, GUN_GAME_LADDER, RECOIL_PATTERN, W, WEAPONS, WEAPON_COUNT, allowedWeapons, fullAmmo, spawnEquipment } from './weapons';
 import type { NetClient } from '../net/client';
 import { F_PROTECTED, type HostMsg, type LobbyState, type MatchInfo, type PlayerInfo, type ProjEndMsg, type ProjMsg } from '../net/protocol';
 import type { SceneManager } from '../render/scene';
@@ -35,6 +35,11 @@ const SLIDE_ROLL = 0.06;
 /** Longest wait after a shot before recoil starts to recover, whatever the weapon's fire rate. */
 const RECOVER_DELAY_MS = 300;
 const SLOT_ACTIONS = ['weapon1', 'weapon2', 'weapon3', 'weapon4'] as const;
+const EQUIP_ACTIONS = ['lethal', 'tactical'] as const;
+/** While concussed: share of movement speed and of mouse sensitivity, and how far the view sways in radians. */
+const CONCUSSED_SPEED = 0.55;
+const CONCUSSED_LOOK = 0.4;
+const CONCUSSED_SWAY = 0.05;
 
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -111,6 +116,10 @@ export class Game {
   private burstLeft = 0;
   /** Primaries and pistol confirmed by the host. */
   private ld: number[] = [...DEFAULT_LOADOUT];
+  /** What this life can throw: lethal, then tactical. Empty where the mode has no equipment. */
+  private equip: number[] = [];
+  /** Slowed and with heavy aim until this time, after a concussion. */
+  private dazedUntil = 0;
   /** Asks the app to open the inventory with the current weapons. */
   onInventory: ((loadout: number[]) => void) | null = null;
   private shotSeq = 0;
@@ -247,7 +256,8 @@ export class Game {
         const kind = m.kill ? 'kill' : m.hs ? 'head' : 'hit';
         this.hud.hitmarker(kind);
         audio.hitmarker(kind);
-        if (settings.get().showDamage) this.hud.addDamageNumber(m.dmg, kind, m.p[0], m.p[1], m.p[2]);
+        // A tactical hits for 0: the marker says it caught someone, without a number.
+        if (settings.get().showDamage && m.dmg > 0) this.hud.addDamageNumber(m.dmg, kind, m.p[0], m.p[1], m.p[2]);
         break;
       }
       case 'dmg':
@@ -270,6 +280,15 @@ export class Game {
         break;
       case 'pimp':
         this.onProjectileEnd(m);
+        break;
+      case 'stun':
+        if (!this.alive) break;
+        if (WEAPONS[m.w]?.stun?.blind) this.hud.stun(true, m.ms);
+        else {
+          this.dazedUntil = this.simT + m.ms;
+          this.hud.stun(false, m.ms);
+        }
+        audio.stunned(m.ms);
         break;
       case 'pickup':
         this.sm.pickups.setActive(m.idx, m.on);
@@ -317,6 +336,9 @@ export class Game {
     this.me.crouch = false;
     this.me.slide = 0;
     this.me.mantle = null;
+    this.equip = spawnEquipment(this.config.arsenal, this.ld);
+    this.dazedUntil = 0;
+    this.hud.clearStun();
     this.stamina = MOVE.sprintTime;
     this.sprintOutUntil = 0;
     this.shotQueued = false;
@@ -398,7 +420,13 @@ export class Game {
     const def = WEAPONS[m.w];
     if (!def?.projectile) return;
     const pos = new THREE.Vector3(m.o[0], m.o[1], m.o[2]);
-    this.effects.addProjectile(m.id, pos, new THREE.Vector3(m.v[0], m.v[1], m.v[2]), def.projectile.gravity, def.projectile.kind);
+    const vel = new THREE.Vector3(m.v[0], m.v[1], m.v[2]);
+    // Bouncing to a stop: without gravity it stays where the host put it.
+    this.effects.addProjectile(m.id, pos, vel, vel.lengthSq() > 0 ? def.projectile.gravity : 0, def.projectile.kind);
+    if (m.b) {
+      audio.clink(pos);
+      return;
+    }
     if (m.i === this.localId) return;
     if (!def.silent) this.effects.muzzleFlash(pos, 0.55, true);
     audio.shot(def.sound, pos);
@@ -414,6 +442,12 @@ export class Game {
       audio.explosion(pos);
       const dist = Math.hypot(pos.x - this.me.x, pos.y - this.me.y, pos.z - this.me.z);
       this.shake = Math.min(1, this.shake + Math.max(0, 1 - dist / (def.splash.radius * 3)));
+    } else if (def.fire) {
+      this.effects.fire(pos, def.fire.radius, def.fire.ms);
+      audio.ignite(pos);
+    } else if (def.stun) {
+      this.effects.muzzleFlash(pos, def.stun.blind ? 7 : 3.5, true, 0.12);
+      audio.bang(pos);
     } else if (m.h === 2) {
       this.effects.impact(pos, null, 'player', 6);
     } else {
@@ -463,6 +497,24 @@ export class Game {
     this.switchUntil = this.simT;
     this.meleeBackAt = this.simT + MELEE_MS;
     this.fire();
+  }
+
+  /** Goes out at once, with the gun dipping as if swapped. The host flies it and decides what it does. */
+  private throwEquipment(w: number | undefined): void {
+    const def = w === undefined ? undefined : WEAPONS[w];
+    if (w === undefined || !def?.projectile || this.mag[w] <= 0) return;
+    this.mag[w]--;
+    this.reloadW = -1;
+    this.burstLeft = 0;
+    this.adsToggled = false;
+    this.switchUntil = this.simT + SWITCH_MS;
+    this.protected = false;
+    this.viewDir(_fwd, this.yaw, this.pitch + (def.projectile.loft ?? 0));
+    this.shotSeq++;
+    this.pendingShots.push({ s: this.shotSeq, w });
+    const eye = this.me.y + this.eyeH;
+    this.net.send({ type: 'shoot', s: this.shotSeq, w, o: [r2(this.me.x), r2(eye), r2(this.me.z)], d: [r3(_fwd.x), r3(_fwd.y), r3(_fwd.z)], rt: 0 });
+    audio.shot(def.sound);
   }
 
   private setWeapon(w: number, instant = false): void {
@@ -636,6 +688,9 @@ export class Game {
       this.setWeapon(allowed[next % allowed.length]);
     }
     if (input.consume('reload')) this.startReload();
+    EQUIP_ACTIONS.forEach((action, i) => {
+      if (input.consume(action)) this.throwEquipment(this.equip[i]);
+    });
 
     const wd = WEAPONS[this.weapon];
     const pressed = input.consume('fire');
@@ -697,6 +752,7 @@ export class Game {
     }
     const t = this.simT;
     const def = WEAPONS[this.weapon];
+    const dazed = t < this.dazedUntil;
     const wantAds = ads;
     const busy = this.reloadW >= 0 || t < this.switchUntil || t < this.sprintOutUntil;
     if (busy || def.melee) ads = false;
@@ -713,7 +769,7 @@ export class Game {
     const slide = wantCrouch && !this.wasCrouching && wasSprinting;
     this.wasCrouching = wantCrouch;
     const moving = this.me.slide <= 0 && this.me.mantle === null;
-    this.sprinting = act && wantSprint && fwd > 0 && !wantAds && !wantCrouch && !shotPause && !input.isDown('fire') && fuel && moving;
+    this.sprinting = act && wantSprint && fwd > 0 && !wantAds && !wantCrouch && !shotPause && !input.isDown('fire') && fuel && moving && !dazed;
     this.stamina = this.sprinting ? Math.max(0, this.stamina - dt) : Math.min(MOVE.sprintTime, this.stamina + dt * MOVE.sprintRecover);
     if (this.stamina <= 0) this.sprintLatched = false;
     if (wasSprinting && !this.sprinting) this.sprintOutUntil = t + def.sprintOut;
@@ -729,7 +785,7 @@ export class Game {
       this.prev.z = this.me.z;
       const res = this.world.step(
         this.me,
-        { fwd, side, jump, crouch: wantCrouch, sprint: this.sprinting, slide, speedMul: def.moveMul ?? 1, ads: this.aimT > 0.3, yaw: this.yaw },
+        { fwd, side, jump, crouch: wantCrouch, sprint: this.sprinting, slide, speedMul: (def.moveMul ?? 1) * (dazed ? CONCUSSED_SPEED : 1), ads: this.aimT > 0.3, yaw: this.yaw },
         dt,
       );
       if (res.jumped || res.mantled) audio.jump();
@@ -795,11 +851,12 @@ export class Game {
 
     // Mouse look (per frame for responsiveness)
     const [mdx, mdy] = input.takeMouse();
+    const dazed = this.simT < this.dazedUntil;
     this.frameLookX = mdx;
     this.frameLookY = mdy;
     if (this.alive && !this.ended) {
       const zoom = 1 + (def.zoom - 1) * this.aimT;
-      const sens = this.aimT > 0.5 ? s.adsSensitivity / zoom : s.sensitivity;
+      const sens = (this.aimT > 0.5 ? s.adsSensitivity / zoom : s.sensitivity) * (dazed ? CONCUSSED_LOOK : 1);
       this.yaw -= mdx * sens * LOOK_SCALE;
       this.pitch -= mdy * sens * LOOK_SCALE * (s.invertY ? -1 : 1);
       this.pitch = clamp(this.pitch, -1.55, 1.55);
@@ -854,7 +911,8 @@ export class Game {
       cam.position.set(px + Math.cos(this.yaw) * bobX, py + this.eyeH + bobY - this.landDip * steady, pz - Math.sin(this.yaw) * bobX);
       this.shake -= this.shake * damp(8, dt);
       const sh = this.shake * 0.02 * steady;
-      this.roll += ((this.me.slide > 0 ? SLIDE_ROLL : 0) - this.roll) * damp(10, dt);
+      const sway = dazed ? Math.sin(this.simT / 400) * CONCUSSED_SWAY : 0;
+      this.roll += ((this.me.slide > 0 ? SLIDE_ROLL : 0) + sway - this.roll) * damp(10, dt);
       cam.rotation.set(
         this.pitch + recoilP + (Math.random() - 0.5) * sh,
         this.yaw + recoilY + (Math.random() - 0.5) * sh,
@@ -939,6 +997,7 @@ export class Game {
     const reload = this.reloadW >= 0 ? (this.simT - this.reloadStart) / (this.reloadUntil - this.reloadStart) : -1;
     this.hud.setAmmo(this.weapon, this.mag[this.weapon], this.reserve[this.weapon], reload);
     this.hud.setSlots(this.allowed(), this.keySlots());
+    this.hud.setEquipment(this.equip.map((w, i) => ({ key: keyLabel(s.binds[EQUIP_ACTIONS[i]][0]), name: WEAPONS[w].short, left: this.mag[w] })));
     this.hud.setProtected(this.alive && this.protected);
     const tl = this.timeLeft < 0 ? -1 : Math.max(0, this.timeLeft - (t - this.timeRecvAt));
     this.hud.setTimer(tl);

@@ -21,6 +21,16 @@ interface Ramp extends RampDef {
   planes: Plane[];
 }
 
+/** Something in flight that bounces. */
+export interface Thrown {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+}
+
 export interface RayHit {
   dist: number;
   nx: number;
@@ -40,6 +50,11 @@ const MANTLE_PROBE = 0.55;
 const MANTLE_MIN = 0.3;
 /** Share of the mantle spent going up. */
 const MANTLE_RISE = 0.6;
+/** Speed a thrown object keeps off a surface, and along it. */
+const BOUNCE = 0.4;
+const BOUNCE_GRIP = 0.6;
+/** Slower than this on the ground, it stops. */
+const REST_SPEED = 1.5;
 
 /** Ray vs AABB (slab method). Returns entry distance and face normal. */
 export function rayBox(
@@ -296,6 +311,29 @@ export class CollisionWorld {
     const len = Math.hypot(dx, dy, dz);
     if (len < 1e-6) return true;
     return this.raycast(ax, ay, az, dx / len, dy / len, dz / len, len) === null;
+  }
+
+  /** Advances a thrown object by dt. Returns true when it bounced, which changes its path. */
+  stepThrown(o: Thrown, gravity: number, dt: number): boolean {
+    if (o.vx === 0 && o.vy === 0 && o.vz === 0) return false;
+    o.vy -= gravity * dt;
+    const speed = Math.hypot(o.vx, o.vy, o.vz);
+    const dx = o.vx / speed;
+    const dy = o.vy / speed;
+    const dz = o.vz / speed;
+    const len = speed * dt;
+    const hit = this.raycast(o.x, o.y, o.z, dx, dy, dz, len);
+    const dist = hit ? Math.max(0, hit.dist - 0.03) : len;
+    o.x += dx * dist;
+    o.y += dy * dist;
+    o.z += dz * dist;
+    if (!hit) return false;
+    const into = o.vx * hit.nx + o.vy * hit.ny + o.vz * hit.nz;
+    o.vx = (o.vx - hit.nx * into) * BOUNCE_GRIP - hit.nx * into * BOUNCE;
+    o.vy = (o.vy - hit.ny * into) * BOUNCE_GRIP - hit.ny * into * BOUNCE;
+    o.vz = (o.vz - hit.nz * into) * BOUNCE_GRIP - hit.nz * into * BOUNCE;
+    if (hit.ny > 0.5 && Math.hypot(o.vx, o.vy, o.vz) < REST_SPEED) o.vx = o.vy = o.vz = 0;
+    return true;
   }
 
   private moveAxis(s: PState, axis: 'x' | 'z', d: number, h: number): void {
