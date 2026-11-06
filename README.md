@@ -60,9 +60,9 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 | Revólver | 6 | dano alto, preciso, recarga lenta |
 | Pistola Automática | 20 | dispara em rajada, recuo médio |
 
-**Faca:** alcance curto, e com ela o boneco corre bem mais rápido e para na hora.
+**Faca:** alcance curto, e com ela o boneco corre muito mais rápido (até 17,5 m/s) e para na hora.
 
-**Pular enquanto corre** (toque no Shift, depois W + Espaço) dá um impulso de velocidade (+25%) e mais controle no ar, com qualquer arma.
+**Pular enquanto corre** (toque no Shift, depois W + Espaço) dá um impulso de velocidade (+25%) e mais controle no ar, com qualquer arma. O boneco continua correndo durante o pulo, e segurar o Espaço emenda um pulo no outro.
 
 **Dano na tela:** o dano que você causa aparece sobre o alvo: branco é normal, amarelo é headshot e vermelho é abate. Dá para desligar em Configurações → HUD.
 

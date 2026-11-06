@@ -42,12 +42,12 @@ export const HITBOX = {
 export const MOVE = {
   walk: 6,
   sprint: 8.5,
-  knifeWalk: 10,
-  knifeSprint: 14.5,
-  knifeAirAccel: 7,
+  knifeWalk: 12,
+  knifeSprint: 17.5,
+  knifeAirAccel: 9,
   /** High accel and friction: with the knife, starts, stops and turns are near-instant. */
-  knifeAccel: 30,
-  knifeFriction: 14,
+  knifeAccel: 40,
+  knifeFriction: 16,
   crouch: 3,
   ads: 3.6,
   accel: 12,

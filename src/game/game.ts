@@ -378,7 +378,8 @@ export class Game {
         this.effects.impact(end, null, 'player', 6);
       }
     }
-    if (!melee) this.effects.muzzleFlash(muzzle, 0.55, true);
+    if (melee) r?.model.swing();
+    else this.effects.muzzleFlash(muzzle, 0.55, true);
     audio.shot(def?.sound ?? 'rifle', muzzle);
   }
 

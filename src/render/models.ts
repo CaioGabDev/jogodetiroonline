@@ -7,6 +7,10 @@ const skinMat = new THREE.MeshLambertMaterial({ color: 0xd9a77c });
 const darkMat = new THREE.MeshLambertMaterial({ color: 0x1d2026 });
 const visorMat = new THREE.MeshLambertMaterial({ color: 0x111111, emissive: 0x0a2a3a });
 const gunMat = new THREE.MeshLambertMaterial({ color: 0x2b2e33 });
+const steelMat = new THREE.MeshLambertMaterial({ color: 0xdfe4ea });
+
+/** Duration of a knife swing seen from outside, in seconds. */
+const SWING_TIME = 0.28;
 
 function part(mat: THREE.Material, sx: number, sy: number, sz: number, x = 0, y = 0, z = 0): THREE.Mesh {
   const m = new THREE.Mesh(boxGeo, mat);
@@ -38,7 +42,10 @@ export class PlayerModel {
   private legR: THREE.Group;
   private head: THREE.Group;
   private armGroup = new THREE.Group();
+  private armR = new THREE.Group();
   private gun: THREE.Mesh;
+  private knife = new THREE.Group();
+  private swingT = 0;
   private teamMat: THREE.MeshLambertMaterial;
   private label: THREE.Sprite | null = null;
   private labelText = '';
@@ -73,10 +80,25 @@ export class PlayerModel {
 
     // Arms + gun pivot at shoulder height, pitched with aim.
     this.armGroup.position.set(0, 0.55, 0);
-    this.armGroup.add(part(this.teamMat, 0.13, 0.13, 0.45, 0.24, -0.05, -0.2));
+    // The right arm pivots at the shoulder to swing the knife.
+    this.armR.position.set(0.24, -0.05, 0);
+    this.armR.add(part(this.teamMat, 0.13, 0.13, 0.45, 0, 0, -0.2));
+    this.armR.add(part(skinMat, 0.14, 0.14, 0.12, 0, 0, -0.46));
+    this.armGroup.add(this.armR);
     this.armGroup.add(part(this.teamMat, 0.13, 0.13, 0.45, -0.18, -0.05, -0.25));
+    this.armGroup.add(part(skinMat, 0.14, 0.14, 0.12, -0.18, -0.05, -0.51));
     this.gun = part(gunMat, 0.09, 0.12, 0.75, 0.06, 0, -0.55);
     this.armGroup.add(this.gun);
+
+    // Held in the right hand: the blade leaves the fist, it isn't the fist.
+    this.knife.position.set(0, 0, -0.5);
+    this.knife.rotation.x = 0.5;
+    this.knife.add(part(darkMat, 0.05, 0.05, 0.14, 0, 0, -0.06));
+    this.knife.add(part(darkMat, 0.1, 0.03, 0.03, 0, 0, -0.13));
+    this.knife.add(part(steelMat, 0.025, 0.08, 0.32, 0, 0, -0.29));
+    this.knife.visible = false;
+    this.armR.add(this.knife);
+
     this.muzzle.position.set(0.06, 0, -0.95);
     this.armGroup.add(this.muzzle);
     this.upper.add(this.armGroup);
@@ -113,10 +135,17 @@ export class PlayerModel {
   }
 
   setWeapon(w: number): void {
-    const s = (WEAPONS[w] ?? WEAPONS[0]).shape;
+    const def = WEAPONS[w] ?? WEAPONS[0];
+    const s = def.shape;
+    this.gun.visible = !def.melee;
+    this.knife.visible = def.melee === true;
     this.gun.scale.set(0.09, s.h, s.len);
     this.gun.position.z = -0.2 - s.len / 2;
     this.muzzle.position.z = -0.2 - s.len;
+  }
+
+  swing(): void {
+    this.swingT = SWING_TIME;
   }
 
   update(s: ModelState, dt: number): void {
@@ -147,6 +176,10 @@ export class PlayerModel {
 
     this.armGroup.rotation.x = s.pitch * 0.9;
     this.head.rotation.x = s.pitch * 0.5;
+
+    this.swingT = Math.max(0, this.swingT - dt);
+    const thrust = Math.sin((1 - this.swingT / SWING_TIME) * Math.PI);
+    this.armR.rotation.set(thrust * 0.5, thrust * 0.9, 0);
 
     // Spawn protection: flicker.
     const vis = !s.protected || Math.floor(performance.now() / 90) % 2 === 0;
