@@ -72,6 +72,8 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 
 Headshot causa dano dobrado em todas as armas, exceto a explosão do lança-granadas. O lança-granadas não fere quem atirou.
 
+**Precisão:** parado e no chão, o primeiro tiro sai exatamente no centro da mira. Depois de 350 ms sem atirar, o tiro volta a contar como primeiro. Movimento, pulo e tiro contínuo abrem o spread. Sniper e DMR só têm esse primeiro tiro exato com a luneta aberta; sem mirar, dispersam sempre. Na escopeta, um pellet sai no centro e os outros abrem o cone em volta. Besta e lança-granadas saem no centro, mas o projétil cai com a distância. Agachado, o recuo cai 30%.
+
 ### Mapas
 
 O host escolhe o mapa no lobby:
