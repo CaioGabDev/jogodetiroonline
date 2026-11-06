@@ -8,7 +8,7 @@ import { rayPlayer } from './hitbox';
 import { MAPS, type MapDef } from './mapData';
 import { CollisionWorld, eyeHeight, type PState } from './physics';
 import { RemotePlayer } from './player';
-import { DEFAULT_LOADOUT, GUN_GAME_LADDER, RECOIL_PATTERN, WEAPONS, WEAPON_COUNT, allowedWeapons, fullAmmo } from './weapons';
+import { DEFAULT_LOADOUT, GUN_GAME_LADDER, RECOIL_PATTERN, W, WEAPONS, WEAPON_COUNT, allowedWeapons, fullAmmo } from './weapons';
 import type { NetClient } from '../net/client';
 import { F_PROTECTED, type HostMsg, type LobbyState, type MatchInfo, type PlayerInfo, type ProjEndMsg, type ProjMsg } from '../net/protocol';
 import type { SceneManager } from '../render/scene';
@@ -28,6 +28,10 @@ export interface GameDeps {
 
 const LOOK_SCALE = 0.0005;
 const SWITCH_MS = 380;
+/** How long the knife stays out after a quick melee. */
+const MELEE_MS = 450;
+/** Camera roll during a slide, in radians. */
+const SLIDE_ROLL = 0.06;
 /** Longest wait after a shot before recoil starts to recover, whatever the weapon's fire rate. */
 const RECOVER_DELAY_MS = 300;
 const SLOT_ACTIONS = ['weapon1', 'weapon2', 'weapon3', 'weapon4'] as const;
@@ -55,7 +59,7 @@ export class Game {
   private config: MatchConfig;
 
   // Local player
-  private me: PState = { x: 0, y: -50, z: 0, vx: 0, vy: 0, vz: 0, onGround: true, crouch: false };
+  private me: PState = { x: 0, y: -50, z: 0, vx: 0, vy: 0, vz: 0, onGround: true, crouch: false, slide: 0, mantle: null };
   private prev = { x: 0, y: -50, z: 0 };
   private yaw = 0;
   private pitch = 0;
@@ -70,6 +74,17 @@ export class Game {
   /** Sprint key was tapped; stays on until forward is released. */
   private sprintLatched = false;
   private wasForward = false;
+  /** Seconds of sprint left. */
+  private stamina: number = MOVE.sprintTime;
+  /** Weapon can't fire or aim until this time, after a sprint. */
+  private sprintOutUntil = 0;
+  /** A semi-auto shot pressed during that delay, fired when it ends. */
+  private shotQueued = false;
+  private wasCrouching = false;
+  private roll = 0;
+  /** Weapon to go back to after a quick melee, or -1. */
+  private meleeBack = -1;
+  private meleeBackAt = 0;
   private stepAcc = 0;
   private bobPhase = 0;
   private landDip = 0;
@@ -240,6 +255,9 @@ export class Game {
         this.hud.damageFrom(m.src[0], m.src[2], m.amt);
         audio.hurt();
         this.shake = Math.min(1, this.shake + m.amt / 60);
+        // Flinch: being shot throws the aim off, and recoil recovery brings it back.
+        this.recoilP += 0.004 + Math.random() * 0.006;
+        this.recoilY += (Math.random() - 0.5) * 0.012;
         break;
       case 'kill':
         this.onKill(m.k, m.v, m.w, m.hs);
@@ -256,10 +274,9 @@ export class Game {
       case 'pickup':
         this.sm.pickups.setActive(m.idx, m.on);
         if (!m.on && m.by === this.localId) {
-          const kind = this.map.pickups[m.idx]?.kind ?? 'health';
-          audio.pickup(kind);
-          this.hud.notify(kind === 'health' ? 'VIDA CHEIA' : 'ARMA RECARREGADA');
-          if (kind === 'ammo' && this.reloadW === this.weapon) this.reloadW = -1;
+          audio.pickup();
+          this.hud.notify('ARMA RECARREGADA');
+          if (this.reloadW === this.weapon) this.reloadW = -1;
         }
         break;
       case 'score':
@@ -298,6 +315,12 @@ export class Game {
     if (ld) this.ld = ld;
     this.me.onGround = true;
     this.me.crouch = false;
+    this.me.slide = 0;
+    this.me.mantle = null;
+    this.stamina = MOVE.sprintTime;
+    this.sprintOutUntil = 0;
+    this.shotQueued = false;
+    this.meleeBack = -1;
     this.crouchToggled = false;
     this.adsToggled = false;
     this.sprintLatched = false;
@@ -345,8 +368,6 @@ export class Game {
       this.viewmodel.visible = false;
       audio.death();
     } else if (k === this.localId) {
-      // The host just refilled the weapon in hand; a reload finishing now would add to it.
-      if (this.reloadW === this.weapon) this.reloadW = -1;
       this.hud.notify(`Você eliminou ${victim.name}${hs ? ' (HEADSHOT)' : ''}`);
     }
   }
@@ -430,6 +451,18 @@ export class Game {
   private allowed(): number[] {
     const keys = this.keySlots();
     return this.config.arsenal === 'all' ? settings.get().wheel.map((slot) => keys[slot]) : keys;
+  }
+
+  /** The knife comes out, strikes and goes away again, whatever was in hand. */
+  private quickMelee(): void {
+    if (this.simT - this.lastShot < WEAPONS[W.KNIFE].interval) return;
+    if (this.weapon !== W.KNIFE) {
+      this.meleeBack = this.weapon;
+      this.setWeapon(W.KNIFE, true);
+    }
+    this.switchUntil = this.simT;
+    this.meleeBackAt = this.simT + MELEE_MS;
+    this.fire();
   }
 
   private setWeapon(w: number, instant = false): void {
@@ -592,6 +625,11 @@ export class Game {
     SLOT_ACTIONS.forEach((action, i) => {
       if (input.consume(action) && keys[i] !== undefined) this.setWeapon(keys[i]);
     });
+    if (input.consume('melee')) this.quickMelee();
+    if (this.meleeBack >= 0 && t >= this.meleeBackAt) {
+      if (this.weapon === W.KNIFE && allowed.includes(this.meleeBack)) this.setWeapon(this.meleeBack);
+      this.meleeBack = -1;
+    }
     const wheel = input.takeWheel();
     if (wheel !== 0) {
       const next = allowed.indexOf(this.weapon) + (wheel > 0 ? 1 : -1) + allowed.length;
@@ -602,9 +640,11 @@ export class Game {
     const wd = WEAPONS[this.weapon];
     const pressed = input.consume('fire');
     if (pressed && wd.burst && this.burstLeft === 0 && t - this.lastShot >= (wd.burstPause ?? 0)) this.burstLeft = wd.burst;
-    const want = wd.burst ? this.burstLeft > 0 : wd.auto ? input.isDown('fire') : pressed;
+    if (pressed && t < this.sprintOutUntil) this.shotQueued = true;
+    const want = wd.burst ? this.burstLeft > 0 : wd.auto ? input.isDown('fire') : pressed || this.shotQueued;
     if (!want) return;
-    if (t < this.switchUntil || this.reloadW >= 0) return;
+    if (t < this.switchUntil || t < this.sprintOutUntil || this.reloadW >= 0) return;
+    this.shotQueued = false;
     if (t - this.lastShot < wd.interval - 1) return;
     if (!wd.melee && this.mag[this.weapon] <= 0) {
       this.burstLeft = 0;
@@ -657,7 +697,8 @@ export class Game {
     }
     const t = this.simT;
     const def = WEAPONS[this.weapon];
-    const busy = this.reloadW >= 0 || t < this.switchUntil;
+    const wantAds = ads;
+    const busy = this.reloadW >= 0 || t < this.switchUntil || t < this.sprintOutUntil;
     if (busy || def.melee) ads = false;
     const shotPause = !def.melee && t - this.lastShot <= 300;
     // One tap is enough: many keyboards drop Space while Shift and W are both held,
@@ -666,7 +707,16 @@ export class Game {
     if (this.wasForward && fwd <= 0) this.sprintLatched = false;
     this.wasForward = fwd > 0;
     const wantSprint = input.isDown('sprint') || this.sprintLatched;
-    this.sprinting = act && wantSprint && fwd > 0 && !ads && !wantCrouch && !shotPause;
+    const fuel = this.sprinting ? this.stamina > 0 : this.stamina >= MOVE.sprintMin;
+    const wasSprinting = this.sprinting;
+    // Pressing the crouch key out of a sprint slides. Comes first: crouching ends the sprint.
+    const slide = wantCrouch && !this.wasCrouching && wasSprinting;
+    this.wasCrouching = wantCrouch;
+    const moving = this.me.slide <= 0 && this.me.mantle === null;
+    this.sprinting = act && wantSprint && fwd > 0 && !wantAds && !wantCrouch && !shotPause && !input.isDown('fire') && fuel && moving;
+    this.stamina = this.sprinting ? Math.max(0, this.stamina - dt) : Math.min(MOVE.sprintTime, this.stamina + dt * MOVE.sprintRecover);
+    if (this.stamina <= 0) this.sprintLatched = false;
+    if (wasSprinting && !this.sprinting) this.sprintOutUntil = t + def.sprintOut;
 
     const aimTarget = ads && this.alive ? 1 : 0;
     const aStep = dt / def.adsTime;
@@ -679,10 +729,11 @@ export class Game {
       this.prev.z = this.me.z;
       const res = this.world.step(
         this.me,
-        { fwd, side, jump, crouch: wantCrouch, sprint: this.sprinting, knife: def.melee === true, speedMul: def.moveMul ?? 1, ads: this.aimT > 0.3, yaw: this.yaw },
+        { fwd, side, jump, crouch: wantCrouch, sprint: this.sprinting, slide, speedMul: def.moveMul ?? 1, ads: this.aimT > 0.3, yaw: this.yaw },
         dt,
       );
-      if (res.jumped) audio.jump();
+      if (res.jumped || res.mantled) audio.jump();
+      if (res.slid) audio.land();
       if (res.landed && res.fallSpeed > 4) {
         audio.land();
         this.landDip = Math.min(0.25, this.landDip + res.fallSpeed * 0.012);
@@ -792,7 +843,7 @@ export class Game {
       const pz = this.prev.z + (this.me.z - this.prev.z) * alpha;
       const speed = Math.hypot(this.me.vx, this.me.vz);
       const bobOn = this.me.onGround && speed > 1;
-      // Capped so the knife's speed doesn't turn the head bob into a shake.
+      // Capped so a slide doesn't turn the head bob into a shake.
       if (bobOn) this.bobPhase += dt * Math.min(speed, MOVE.sprint) * 1.45;
       const bobAmt = bobOn ? Math.min(1, speed / 6) * (1 - this.aimT) : 0;
       const bobY = Math.sin(this.bobPhase * 2) * 0.035 * bobAmt;
@@ -803,10 +854,11 @@ export class Game {
       cam.position.set(px + Math.cos(this.yaw) * bobX, py + this.eyeH + bobY - this.landDip * steady, pz - Math.sin(this.yaw) * bobX);
       this.shake -= this.shake * damp(8, dt);
       const sh = this.shake * 0.02 * steady;
+      this.roll += ((this.me.slide > 0 ? SLIDE_ROLL : 0) - this.roll) * damp(10, dt);
       cam.rotation.set(
         this.pitch + recoilP + (Math.random() - 0.5) * sh,
         this.yaw + recoilY + (Math.random() - 0.5) * sh,
-        0,
+        this.roll,
       );
     } else {
       this.renderDeathCam(dt);
@@ -817,7 +869,7 @@ export class Game {
     const scoped = this.alive && def.scoped === true && aimT > 0.85;
     this.hud.setScope(scoped);
     this.sm.showViewmodel = this.alive && !scoped;
-    this.hud.setCrosshairVisible(this.alive && !scoped && !this.ended);
+    this.hud.setCrosshairVisible(this.alive && aimT < 0.5 && !this.ended);
 
     // Viewmodel
     const t = this.simT;

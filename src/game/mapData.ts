@@ -27,7 +27,7 @@ export interface SpawnDef {
 }
 
 export interface PickupDef {
-  kind: 'health' | 'ammo';
+  kind: 'ammo';
   pos: [number, number, number];
 }
 
@@ -188,11 +188,6 @@ function arena(): MapDef {
       ),
     },
     pickups: [
-      { kind: 'health', pos: [0, 0, -22] },
-      { kind: 'health', pos: [0, 0, 28] },
-      { kind: 'health', pos: [-30, 0, -30] },
-      { kind: 'health', pos: [30, 0, 30] },
-      { kind: 'health', pos: [0, PLAT_H, -36] },
       { kind: 'ammo', pos: [-20, 0, -6] },
       { kind: 'ammo', pos: [20, 0, 6] },
       { kind: 'ammo', pos: [-20, 0, 36] },
@@ -329,11 +324,6 @@ function mirante(): MapDef {
       blue: facing([...backOfFort(74), sp(71, 0, -3.5), sp(71, 0, 3.5), sp(71, 0, 10.5)], Math.PI / 2),
     },
     pickups: [
-      { kind: 'health', pos: [0, 0, -30] },
-      { kind: 'health', pos: [0, 0, 30] },
-      { kind: 'health', pos: [-40, 0, -60] },
-      { kind: 'health', pos: [40, 0, 60] },
-      { kind: 'health', pos: [5, MESA_H, -5] },
       { kind: 'ammo', pos: [-62, FORT_H, 0] },
       { kind: 'ammo', pos: [62, FORT_H, 0] },
       { kind: 'ammo', pos: [0, TOWER_H, -62] },
@@ -428,9 +418,6 @@ function galpao(): MapDef {
       ),
     },
     pickups: [
-      { kind: 'health', pos: [0, CAT_H, 0] },
-      { kind: 'health', pos: [-9, 0, 18] },
-      { kind: 'health', pos: [9, 0, -18] },
       { kind: 'ammo', pos: [0, CAT_H, -22.5] },
       { kind: 'ammo', pos: [0, CAT_H, 22.5] },
       { kind: 'ammo', pos: [-13, 0, 0] },

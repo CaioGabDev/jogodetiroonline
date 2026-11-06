@@ -129,10 +129,12 @@ export class MainMenu {
       el('h3', { text: 'Como jogar' }),
       ...[
         ['WASD', 'mover'],
-        ['Espaço', 'pular'],
+        ['Espaço', 'pular / subir em borda'],
         ['Shift', 'correr (um toque basta)'],
+        ['C na corrida', 'slide'],
         ['C / Ctrl', 'agachar'],
         ['Mouse Esq.', 'atirar'],
+        ['V', 'golpe rápido'],
         ['Mouse Dir.', 'mirar / luneta'],
         ['R', 'recarregar'],
         ['1-4 / Roda', 'trocar arma'],

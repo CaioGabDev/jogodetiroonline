@@ -278,10 +278,10 @@ class AudioEngine {
     this.noiseBurst(d, { type: 'lowpass', freq: 400, dur: 0.5, gain: 0.4 });
   }
 
-  pickup(kind: 'health' | 'ammo'): void {
+  pickup(): void {
     const d = this.out('ui');
     if (!d) return;
-    const base = kind === 'health' ? 660 : 520;
+    const base = 520;
     [0, 0.06, 0.12].forEach((delay, i) =>
       this.tone(d, { type: 'triangle', freq: base * (1 + i * 0.25), dur: 0.12, gain: 0.18, delay }),
     );

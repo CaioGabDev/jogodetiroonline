@@ -158,10 +158,7 @@ export class PickupView {
   private items: THREE.Group[] = [];
 
   constructor(map: MapDef) {
-    const glowHealth = makeGlowTexture('rgba(255,255,255,0.9)', 'rgba(80,255,120,0.35)');
     const glowAmmo = makeGlowTexture('rgba(255,255,255,0.9)', 'rgba(255,200,60,0.35)');
-    const white = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.4 });
-    const red = new THREE.MeshStandardMaterial({ color: 0xe02424, emissive: 0x550000, roughness: 0.4 });
     const olive = new THREE.MeshStandardMaterial({ color: 0x4b5a2a, roughness: 0.6 });
     const yellow = new THREE.MeshStandardMaterial({ color: 0xe8b923, emissive: 0x332200, roughness: 0.5 });
     const padMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.7 });
@@ -174,22 +171,14 @@ export class PickupView {
       g.add(pad);
       const item = new THREE.Group();
       item.position.y = 0.8;
-      if (def.kind === 'health') {
-        item.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.45, 0.45), white));
-        const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.47), red);
-        const c2 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.36, 0.47), red);
-        item.add(c1, c2);
-      } else {
-        item.add(new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.4, 0.4), olive));
-        const s = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.1, 0.42), yellow);
-        item.add(s);
-      }
+      item.add(new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.4, 0.4), olive));
+      item.add(new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.1, 0.42), yellow));
       item.traverse((o) => {
         if (o instanceof THREE.Mesh) o.castShadow = true;
       });
       const glow = new THREE.Sprite(
         new THREE.SpriteMaterial({
-          map: def.kind === 'health' ? glowHealth : glowAmmo,
+          map: glowAmmo,
           transparent: true,
           depthWrite: false,
           blending: THREE.AdditiveBlending,

@@ -1,8 +1,10 @@
 # Arena FPS Online
 
 Jogo de tiro em primeira pessoa multiplayer (até 10 jogadores) que roda direto no navegador.
-Feito com **Vite + TypeScript + Three.js**, multiplayer **P2P via WebRTC (PeerJS)** e sem nenhum asset externo:
-geometria feita em código, texturas geradas em canvas e sons sintetizados com a Web Audio API.
+Feito com **Vite + TypeScript + Three.js** e multiplayer **P2P via WebRTC (PeerJS)**. As armas e o soldado são modelos
+CC0 de Quaternius (créditos em `public/models/LICENCAS.txt`). Mapas, texturas e sons continuam gerados em código.
+
+A jogabilidade segue a fórmula de FPS militar arcade: morte rápida, vida que regenera, corrida curta, slide e mantle.
 
 Funciona como site estático (Vercel, Netlify, GitHub Pages…): não existe servidor de jogo.
 Quem cria a sala vira o **host** e roda a simulação oficial no próprio navegador.
@@ -24,9 +26,11 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 | Ação | Tecla |
 | --- | --- |
 | Mover | W A S D |
-| Pular | Espaço |
-| Correr | Shift (um toque basta: continua correndo até soltar o W) |
+| Pular / subir em borda | Espaço (com W, sobe em bordas de até 1,45 m) |
+| Correr | Shift (um toque basta: continua correndo até soltar o W ou acabar o fôlego) |
 | Agachar | C ou Ctrl (segurar ou alternar) |
+| Slide | Agachar enquanto corre |
+| Golpe rápido | V (saca a faca, golpeia e volta para a arma) |
 | Atirar | Botão esquerdo |
 | Mirar / luneta | Botão direito (segurar ou alternar) |
 | Recarregar | R |
@@ -44,33 +48,37 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 
 | Primária | Pente | Características |
 | --- | --- | --- |
-| SMG | 30 | cadência alta, dano baixo, recuo leve |
-| Rifle de Assalto | 30 | equilibrado, recuo médio |
-| LMG | 100 | dano alto, recuo muito difícil, recarga lenta, anda mais devagar |
-| Escopeta | 8 | dano altíssimo de perto, fraca de longe |
-| Sniper | 5 | mata com 1 tiro na cabeça, luneta, tiro lento |
+| SMG | 30 | 4 tiros de perto (200 ms), 6 de longe, a mais rápida para mirar |
+| Rifle de Assalto | 30 | 4 tiros em qualquer distância (260 ms) |
+| LMG | 100 | 3 tiros de perto, 4 de longe, recarga e mira lentas, anda mais devagar |
+| Escopeta | 7 | mata com 1 tiro de perto, fraca de longe |
+| Sniper | 5 | mata com 1 tiro no corpo, luneta, tiro lento |
 | Besta | 1 | seta com queda, silenciosa, dano alto, recarga lenta |
-| DMR | 15 | tiro a tiro, luneta, boa em média distância |
-| Lança-granadas | 6 | dano em área, projétil em arco |
+| DMR | 15 | tiro a tiro, luneta, 3 tiros em qualquer distância |
+| Lança-granadas | 3 | dano em área, projétil em arco |
 
 | Pistola | Pente | Características |
 | --- | --- | --- |
-| Pistola | 12 | rápida, dano baixo |
-| Desert Eagle | 7 | dano muito alto, recuo forte, tiro lento |
-| Revólver | 6 | dano alto, preciso, recarga lenta |
+| Pistola | 12 | rápida, 3 tiros de perto, perde dano depois de 12 m |
+| Desert Eagle | 7 | 2 tiros de perto, recuo forte, tiro lento |
+| Revólver | 6 | 2 tiros de perto, preciso, recarga lenta |
 | Pistola Automática | 20 | dispara em rajada, recuo médio |
 
-**Faca:** alcance curto, e com ela o boneco corre bem mais rápido e para na hora.
+**Faca:** mata com 1 golpe, em até 2,8 m. O `V` dá o golpe com qualquer arma em mãos.
 
-**Pular enquanto corre** (toque no Shift, depois W + Espaço) dá um impulso de velocidade (+25%) e mais controle no ar, com qualquer arma.
+**Corrida:** dura 4 s e o fôlego volta no dobro da velocidade. Ao parar de correr, a arma leva um instante para atirar e mirar (de 120 ms na pistola a 350 ms na LMG). Armas pesadas deixam o boneco mais lento.
+
+**Slide:** agachar enquanto corre desliza 0,7 s mais rápido que a corrida, com a altura de agachado. Dá para atirar durante o slide, e pular o cancela.
+
+**Levar tiro** tira a mira do lugar (flinch).
 
 **Dano na tela:** o dano que você causa aparece sobre o alvo: branco é normal, amarelo é headshot e vermelho é abate. Dá para desligar em Configurações → HUD.
 
-**Abate:** a arma em mãos recarrega por completo e a vida volta a 100%.
+**Vida:** 100 pontos, que regeneram sozinhos depois de 5 s sem levar dano.
 
-**Itens no chão** (reaparecem em 20 s): o kit médico enche a vida, e a munição recarrega por completo a arma em mãos.
+**Itens no chão** (reaparecem em 20 s): a munição recarrega por completo a arma em mãos.
 
-Headshot causa dano dobrado em todas as armas, exceto a explosão do lança-granadas. O lança-granadas não fere quem atirou.
+Headshot multiplica o dano por um valor de cada arma (de 1,25× na LMG a 1,5× na sniper), e a partir de certa distância o dano cai. Os números ficam em `src/game/weapons.ts`. O lança-granadas não fere quem atirou.
 
 ### Mapas
 
@@ -89,7 +97,7 @@ O host também escolhe as **Armas** da partida:
 
 - **Todas as armas:** cada jogador escolhe as armas na tela de spawn. Em Configurações → Armas dá para mudar a ordem da roda: a primeira é a arma inicial, e a roda do mouse e o HUD seguem essa ordem.
 - **Só sniper / Só doze:** só essa arma e a faca, em FFA ou TDM.
-- **Gun Game:** sempre FFA. Cada kill com a arma do seu nível troca para a próxima, passando por todas. Todo mundo também tem a faca para se mover: matar com ela não sobe de nível, mas faz a vítima voltar uma arma. No último nível só resta a faca, e quem mata com ela vence.
+- **Gun Game:** sempre FFA. Cada kill com a arma do seu nível troca para a próxima, passando por todas. Todo mundo também tem a faca: matar com ela não sobe de nível, mas faz a vítima voltar uma arma. No último nível só resta a faca, e quem mata com ela vence.
 
 Quem abrir o link no meio da partida entra direto no jogo. Durante a tela de resultados, espera no lobby.
 
@@ -111,6 +119,7 @@ Para testar o multiplayer na mesma máquina, abra duas abas (ou uma aba anônima
 ```bash
 npm run build      # checagem de tipos + build de produção em dist/
 npm run preview    # serve o build de dist/
+npm run check      # confere movimentação e balanceamento (slide, mantle, pulo, tiros para matar)
 ```
 
 ---

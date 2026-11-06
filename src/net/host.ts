@@ -17,6 +17,8 @@ import {
   PICKUP_RESPAWN_MS,
   PLAYER,
   PROTOCOL_VERSION,
+  REGEN_DELAY_MS,
+  REGEN_RATE,
   RESPAWN_MS,
   SNAPSHOT_RATE,
   SPAWN_PROTECT_MS,
@@ -90,6 +92,8 @@ interface SPlayer {
   onGround: boolean;
   weapon: number;
   hp: number;
+  /** Health regenerates some time after this. */
+  lastHurtAt: number;
   alive: boolean;
   protectedUntil: number;
   respawnAt: number;
@@ -382,6 +386,7 @@ export class HostServer {
       onGround: true,
       weapon: 0,
       hp: MAX_HP,
+      lastHurtAt: 0,
       alive: false,
       protectedUntil: 0,
       respawnAt: 0,
@@ -748,8 +753,7 @@ export class HostServer {
     const up = Math.max(0, ny - p.y);
     const h = m.c ? PLAYER.crouchHeight : PLAYER.height;
     const half = this.map.size / 2;
-    // Not per weapon: speed carries over for a moment after switching away from the knife.
-    const maxHoriz = (MOVE.knifeSprint * MOVE.sprintJump * 1.25 * dct) / 1000 + 0.3;
+    const maxHoriz = (MOVE.slideSpeed * 1.25 * dct) / 1000 + 0.3;
     const maxUp = (9 * dct) / 1000 + 0.35;
     const invalid =
       p.clockAhead > 1500 ||
@@ -786,17 +790,12 @@ export class HostServer {
       const st = this.pickups[i];
       if (!st.active) return;
       if (Math.abs(p.x - def.pos[0]) > 1.1 || Math.abs(p.z - def.pos[2]) > 1.1 || Math.abs(p.y - def.pos[1]) > 1.2) return;
-      if (def.kind === 'health') {
-        if (p.hp >= MAX_HP) return;
-        p.hp = MAX_HP;
-      } else if (!this.refillEquipped(p)) {
-        return;
-      }
+      if (!this.refillEquipped(p)) return;
       st.active = false;
       st.respawnAt = now() + PICKUP_RESPAWN_MS;
       // Before the ammo update: the client cancels a running reload on this message.
       this.broadcast({ type: 'pickup', idx: i, on: false, by: p.info.id });
-      if (def.kind === 'ammo') this.sendAmmo(p);
+      this.sendAmmo(p);
     });
   }
 
@@ -941,6 +940,7 @@ export class HostServer {
       if (amount <= 0) continue;
       const dealt = Math.min(amount, target.hp);
       target.hp -= amount;
+      target.lastHurtAt = t;
       p.damage += dealt;
       this.send(target, { type: 'dmg', from: p.info.id, src: [r2(p.x), r2(p.y + 1.4), r2(p.z)], amt: amount });
       const killed = target.hp <= 0;
@@ -1053,16 +1053,6 @@ export class HostServer {
       this.teamScore[killer.info.team === 'red' ? 0 : 1]++;
     }
     this.broadcast({ type: 'kill', k: killer.info.id, v: victim.info.id, w, hs });
-    if (!teamKill && killer.alive) {
-      // Reward: full health and a full magazine in the weapon in hand.
-      killer.hp = MAX_HP;
-      const def = WEAPONS[killer.weapon];
-      if (!def.melee) {
-        killer.mag[killer.weapon] = def.mag;
-        if (killer.reloadW === killer.weapon) killer.reloadW = -1;
-        this.sendAmmo(killer);
-      }
-    }
     this.sendScores();
     this.checkWin();
   }
@@ -1182,6 +1172,7 @@ export class HostServer {
     if (this.phase === 'playing') {
       for (const p of this.players.values()) {
         if (p.reloadW >= 0 && t >= p.reloadUntil) this.finishReload(p);
+        if (p.alive && p.hp < MAX_HP && t - p.lastHurtAt >= REGEN_DELAY_MS) p.hp = Math.min(MAX_HP, p.hp + REGEN_RATE / SNAPSHOT_RATE);
         if (!p.alive && p.respawnAt > 0 && t >= p.respawnAt) {
           p.respawnAt = 0;
           this.spawnPlayer(p);
