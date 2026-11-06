@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { WEAPONS } from '../game/weapons';
-import { weaponAsset } from './weaponAssets';
 import { makeLabelTexture } from './textures';
 
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -40,8 +39,6 @@ export class PlayerModel {
   private head: THREE.Group;
   private armGroup = new THREE.Group();
   private gun: THREE.Mesh;
-  /** Loaded gun models, by weapon id. Geometry is shared, so they are not disposed. */
-  private gunModels = new Map<number, THREE.Object3D>();
   private teamMat: THREE.MeshLambertMaterial;
   private label: THREE.Sprite | null = null;
   private labelText = '';
@@ -120,18 +117,6 @@ export class PlayerModel {
     this.gun.scale.set(0.09, s.h, s.len);
     this.gun.position.z = -0.2 - s.len / 2;
     this.muzzle.position.z = -0.2 - s.len;
-
-    let shown = this.gunModels.get(w);
-    const asset = shown ? null : weaponAsset(w);
-    if (asset) {
-      shown = asset.instance();
-      shown.scale.multiplyScalar(s.len);
-      shown.position.set(this.gun.position.x, this.gun.position.y, this.muzzle.position.z);
-      this.armGroup.add(shown);
-      this.gunModels.set(w, shown);
-    }
-    for (const [id, model] of this.gunModels) model.visible = id === w;
-    this.gun.visible = !shown;
   }
 
   update(s: ModelState, dt: number): void {

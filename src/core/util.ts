@@ -15,8 +15,6 @@ export const damp = (rate: number, dt: number): number => 1 - Math.exp(-rate * d
 /** Rounds to 2 decimals (keeps network payloads small). */
 export const r2 = (v: number): number => Math.round(v * 100) / 100;
 export const r3 = (v: number): number => Math.round(v * 1000) / 1000;
-/** Shot directions need this much: 3 decimals drift up to 17 cm at 200 m. */
-export const r5 = (v: number): number => Math.round(v * 100000) / 100000;
 
 const range = (a: number, b: number): string => String.fromCharCode(a) + '-' + String.fromCharCode(b);
 /** Control chars, zero-width chars and bidi overrides. */
