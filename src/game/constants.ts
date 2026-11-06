@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 /** Prefix added to the room code to form the host's PeerJS id (avoids collisions on the public server). */
 export const PEER_PREFIX = 'arenafps-v1-';
 
@@ -99,14 +99,17 @@ export const ARSENAL_NAMES: Record<Arsenal, string> = {
   gungame: 'Gun Game',
 };
 
-export type MapId = 'arena' | 'mirante' | 'galpao';
+export type MapId = 'arena' | 'mirante' | 'galpao' | 'vila' | 'centro' | 'patio';
 
-export const MAP_NAMES: Record<MapId, string> = { arena: 'Arena', mirante: 'Mirante', galpao: 'Galpão' };
+export const MAP_NAMES: Record<MapId, string> = { arena: 'Arena', mirante: 'Mirante', galpao: 'Galpão', vila: 'Vila', centro: 'Centro', patio: 'Pátio' };
 
 export const MAP_HINTS: Record<MapId, string> = {
   arena: 'equilibrado',
   mirante: 'grande, tiro a distância',
   galpao: 'pequeno e frenético',
+  vila: 'pequeno, casas e quintais',
+  centro: 'médio, três rotas',
+  patio: 'contêineres, três alturas',
 };
 
 export interface MatchConfig {

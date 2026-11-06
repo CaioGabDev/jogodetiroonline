@@ -3,6 +3,7 @@ import { audio } from './core/audio';
 import { input } from './core/input';
 import { GameLoop } from './core/loop';
 import { normalizeCode } from './core/util';
+import type { MapId } from './game/constants';
 import { Game } from './game/game';
 import { HostServer } from './net/host';
 import { RoomBrowser } from './net/directory';
@@ -61,7 +62,7 @@ class App {
     this.menu = new MainMenu(ui, {
       onCreate: (n, c) => void this.createRoom(n, c),
       onJoin: (n, c, code) => void this.joinRoom(n, c, code),
-      onPractice: (n, c) => void this.practice(n, c),
+      onPractice: (n, c, map) => void this.practice(n, c, map),
       onSettings: () => this.settingsUI.open(),
     });
     this.lobby = new Lobby(ui, {
@@ -244,11 +245,11 @@ class App {
     this.busy = false;
   }
 
-  private async practice(nick: string, color: string): Promise<void> {
+  private async practice(nick: string, color: string, map: MapId): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     audio.unlock();
-    const host = new HostServer(true);
+    const host = new HostServer(true, {}, map);
     await host.start();
     this.host = host;
     const ok = await this.connectLocal(host, nick, color);

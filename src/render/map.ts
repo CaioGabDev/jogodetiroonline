@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { MapDef, MatKind, RampDef } from '../game/mapData';
+import type { MapDef, MatKind, PropDef, RampDef } from '../game/mapData';
 import { TEAM_COLORS } from '../game/constants';
 import { getTexture, makeGlowTexture, TEX_SCALE } from './textures';
 
@@ -75,6 +76,47 @@ function rampGeometry(r: RampDef, scale: number): THREE.BufferGeometry {
   return g;
 }
 
+const propModels = new Map<string, Promise<THREE.Object3D>>();
+
+function loadProp(model: string): Promise<THREE.Object3D> {
+  let p = propModels.get(model);
+  if (!p) {
+    p = new GLTFLoader().loadAsync(`${import.meta.env.BASE_URL}models/map/${model}.glb`).then((g) => g.scene);
+    propModels.set(model, p);
+  }
+  return p;
+}
+
+/** Stretches a copy of the model to fill the prop's box. Copies share geometry, so scene.ts leaves them undisposed. */
+function placeProp(source: THREE.Object3D, def: PropDef): THREE.Object3D {
+  const box = new THREE.Box3().setFromObject(source);
+  const size = box.getSize(new THREE.Vector3());
+  const [w, h, d] = def.size;
+  const sideways = def.turn % 2 === 1;
+  const model = source.clone();
+  model.scale.set((sideways ? d : w) / size.x, h / size.y, (sideways ? w : d) / size.z);
+  model.position.set(-(box.min.x + size.x / 2) * model.scale.x, -box.min.y * model.scale.y, -(box.min.z + size.z / 2) * model.scale.z);
+  const holder = new THREE.Group();
+  holder.position.set(def.x, def.y, def.z);
+  holder.rotation.y = (def.turn * Math.PI) / 2;
+  holder.add(model);
+  holder.traverse((o) => {
+    o.userData.shared = true;
+    if (o instanceof THREE.Mesh) o.castShadow = o.receiveShadow = true;
+  });
+  return holder;
+}
+
+/** Props appear as their files arrive. Collision doesn't wait for them. */
+function addProps(def: MapDef, group: THREE.Group): void {
+  for (const p of def.props ?? []) {
+    loadProp(p.model).then(
+      (m) => group.add(placeProp(m, p)),
+      (e: unknown) => console.warn('Modelo não carregou:', p.model, e),
+    );
+  }
+}
+
 export function buildMap(def: MapDef, anisotropy: number): { group: THREE.Group; materials: THREE.Material[] } {
   const group = new THREE.Group();
   group.name = 'map';
@@ -84,6 +126,7 @@ export function buildMap(def: MapDef, anisotropy: number): { group: THREE.Group;
     byMat.get(k)!.push(g);
   };
   for (const b of def.boxes) {
+    if (b.hidden) continue;
     const w = b.max[0] - b.min[0];
     const h = b.max[1] - b.min[1];
     const d = b.max[2] - b.min[2];
@@ -121,6 +164,7 @@ export function buildMap(def: MapDef, anisotropy: number): { group: THREE.Group;
     m.position.set(mark.x, 0.02, mark.z);
     group.add(m);
   }
+  addProps(def, group);
   return { group, materials };
 }
 

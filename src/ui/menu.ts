@@ -1,13 +1,13 @@
 import { loadColor, loadNick, saveColor, saveNick } from '../core/settings';
 import { normalizeCode, sanitizeText } from '../core/util';
-import { ARSENAL_NAMES, FFA_COLORS, MAP_NAMES, MAX_PLAYERS, NAME_MAX } from '../game/constants';
+import { ARSENAL_NAMES, FFA_COLORS, MAP_NAMES, MAX_PLAYERS, NAME_MAX, type MapId } from '../game/constants';
 import type { RoomInfo } from '../net/directory';
 import { clear, el, show } from './dom';
 
 export interface MenuCallbacks {
   onCreate(nick: string, color: string): void;
   onJoin(nick: string, color: string, code: string): void;
-  onPractice(nick: string, color: string): void;
+  onPractice(nick: string, color: string, map: MapId): void;
   onSettings(): void;
 }
 
@@ -92,12 +92,17 @@ export class MainMenu {
         cb.onJoin(n, this.color, c);
       },
     });
+    const practiceMap = el(
+      'select',
+      { attrs: { 'aria-label': 'Mapa do treino' } },
+      (Object.keys(MAP_NAMES) as MapId[]).map((id) => el('option', { text: `Treino: ${MAP_NAMES[id]}`, attrs: { value: id } })),
+    );
     const practice = el('button', {
       class: 'btn ghost',
       text: 'Treino Offline (alvos)',
       onClick: () => {
         const n = validNick();
-        if (n) cb.onPractice(n, this.color);
+        if (n) cb.onPractice(n, this.color, practiceMap.value as MapId);
       },
     });
     const settingsBtn = el('button', { class: 'btn ghost', text: 'Configurações', onClick: () => cb.onSettings() });
@@ -118,7 +123,8 @@ export class MainMenu {
       this.swatches,
       create,
       el('div', { class: 'join-row' }, [this.code, join]),
-      el('div', { class: 'row2' }, [practice, settingsBtn]),
+      el('div', { class: 'row2' }, [practice, practiceMap]),
+      settingsBtn,
       this.status,
       this.error,
     ]);

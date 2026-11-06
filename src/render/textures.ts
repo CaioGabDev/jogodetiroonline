@@ -141,6 +141,37 @@ const painters: Record<MatKind, Painter> = {
       ctx.fill();
     }
   },
+  grass: (ctx, s, rnd) => {
+    ctx.fillStyle = '#4f6b35';
+    ctx.fillRect(0, 0, s, s);
+    noise(ctx, s, rnd, 0.14, 9000);
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = `rgba(30,50,20,${0.05 + rnd() * 0.08})`;
+      ctx.beginPath();
+      ctx.ellipse(rnd() * s, rnd() * s, 8 + rnd() * 24, 6 + rnd() * 14, rnd() * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  },
+  asphalt: (ctx, s, rnd) => {
+    ctx.fillStyle = '#3a3c40';
+    ctx.fillRect(0, 0, s, s);
+    noise(ctx, s, rnd, 0.16, 9000);
+  },
+  brick: (ctx, s, rnd) => {
+    ctx.fillStyle = '#6a6058';
+    ctx.fillRect(0, 0, s, s);
+    const rows = 10;
+    const h = s / rows;
+    for (let r = 0; r < rows; r++) {
+      const off = r % 2 ? h : 0;
+      for (let x = -h * 2; x < s; x += h * 2) {
+        const g = Math.floor(rnd() * 26);
+        ctx.fillStyle = `rgb(${138 + g},${72 + g / 2},${54 + g / 2})`;
+        ctx.fillRect(x + off + 1.5, r * h + 1.5, h * 2 - 3, h - 3);
+      }
+    }
+    noise(ctx, s, rnd, 0.08, 3000);
+  },
   red: (ctx, s, rnd) => {
     ctx.fillStyle = '#8c2a26';
     ctx.fillRect(0, 0, s, s);
@@ -161,6 +192,9 @@ const painters: Record<MatKind, Painter> = {
 export const TEX_SCALE: Record<MatKind, number> = {
   floor: 4,
   sand: 6,
+  grass: 6,
+  asphalt: 5,
+  brick: 2.5,
   wall: 4,
   concrete: 2,
   crate: 2,

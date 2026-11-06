@@ -24,6 +24,7 @@ import {
   SPAWN_PROTECT_MS,
   TEAM_NAMES,
   TEAM_SWITCH_COOLDOWN_MS,
+  type MapId,
   type MatchConfig,
   type Team,
   KILL_LIMITS,
@@ -220,9 +221,11 @@ export class HostServer {
   constructor(
     offline: boolean,
     private cb: HostCallbacks = {},
+    practiceMap: MapId = DEFAULT_CONFIG.map,
   ) {
     this.offline = offline;
-    this.config = offline ? { ...DEFAULT_CONFIG, killLimit: 0, timeLimit: 0 } : { ...DEFAULT_CONFIG };
+    this.config = offline ? { ...DEFAULT_CONFIG, map: practiceMap, killLimit: 0, timeLimit: 0 } : { ...DEFAULT_CONFIG };
+    this.map = MAPS[this.config.map];
   }
 
   /** Registers the room with PeerJS (retrying on code collisions). Returns the room code. */
@@ -416,14 +419,23 @@ export class HostServer {
   }
 
   private addBots(): void {
-    for (const d of BOT_DEFS) {
+    BOT_DEFS.forEach((d, i) => {
       const id = this.nextId++;
-      const bot: Bot = { ...d, phase: Math.random() * Math.PI * 2 };
+      const bot: Bot = { ...this.botSpot(d, i), phase: Math.random() * Math.PI * 2 };
       const p = this.createPlayer(id, d.name, null, bot);
       p.info.color = '#c9a227';
       p.info.team = 'blue';
       this.players.set(id, p);
-    }
+    });
+  }
+
+  /** BOT_DEFS were placed by hand on the Arena. Elsewhere targets use the spawns, which are clear on every map. */
+  private botSpot(d: (typeof BOT_DEFS)[number], i: number): (typeof BOT_DEFS)[number] {
+    if (this.config.map === 'arena') return d;
+    // Every other spawn, so targets spread over the whole map.
+    const s = this.map.ffaSpawns[(i * 3) % this.map.ffaSpawns.length];
+    const [ax, y, az] = s.pos;
+    return { ...d, ax, az, y, bx: ax + d.bx - d.ax, bz: az + d.bz - d.az };
   }
 
   private pickColor(requested: string): string {

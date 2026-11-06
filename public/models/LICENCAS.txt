@@ -5,3 +5,6 @@ guns/          "Ultimate Gun Pack" (julho de 2019), de Quaternius
                https://opengameart.org/content/low-poly-guns-pack
 soldier.fbx    "Animated Human", de Quaternius
                https://opengameart.org/content/animated-human-low-poly
+
+map/           Kits de Kenney (www.kenney.nl): City Kit Suburban, Commercial, Roads e Industrial, e Car Kit
+               https://opengameart.org/content/city-kit-suburban

@@ -2,7 +2,7 @@
 
 Jogo de tiro em primeira pessoa multiplayer (até 10 jogadores) que roda direto no navegador.
 Feito com **Vite + TypeScript + Three.js** e multiplayer **P2P via WebRTC (PeerJS)**. As armas e o soldado são modelos
-CC0 de Quaternius (créditos em `public/models/LICENCAS.txt`). Mapas, texturas e sons continuam gerados em código.
+CC0 de Quaternius, e os cenários usam os kits CC0 de Kenney (créditos em `public/models/LICENCAS.txt`). Texturas e sons continuam gerados em código.
 
 A jogabilidade segue a fórmula de FPS militar arcade: morte rápida, vida que regenera, corrida curta, slide e mantle.
 
@@ -19,7 +19,7 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 4. O host escolhe o modo, limite de kills, tempo e fogo amigo e clica em **Iniciar partida**.
 5. Clique na tela para capturar o mouse. `Esc` abre o menu de pausa (o jogo continua rodando).
 
-**Treino Offline** abre o mapa sozinho com alvos (parado, móvel, agachado e na plataforma) para testar armas e configurações.
+**Treino Offline** abre o mapa escolhido ao lado do botão, sozinho e com alvos, para testar armas, configurações e mapas.
 
 ### Controles padrão (todos podem ser alterados em Configurações → Controles)
 
@@ -87,6 +87,11 @@ O host escolhe o mapa no lobby:
 - **Arena:** equilibrado, com corredores e combate em média distância.
 - **Mirante:** grande (160 m). Dois fortes frente a frente, uma mesa elevada no centro e torres de sniper nos flancos. Feito para troca de tiro a distância.
 - **Galpão:** pequeno (48 m). Corredores apertados entre contêineres, passarela em volta e uma ponte no meio. Combate frenético o tempo todo.
+- **Vila:** pequeno (60 m). Rua, quintais e casas em quinas opostas, com casas de atravessar e um deck elevado para cada lado.
+- **Centro:** médio (84 m). Avenida com veículos, dois becos em zigue-zague e uma loja de atravessar com acesso ao telhado.
+- **Pátio:** médio (68 m). Corredores de contêineres, plataformas laterais e um pórtico central exposto, em três alturas.
+
+Vila, Centro e Pátio são simétricos por rotação de 180°, e `npm run check` mede o equilíbrio deles: área e tempo iguais para os dois times, cobertura perto de qualquer ponto, spawns sem visão um do outro e limite para linhas de visão. Para ver a planta em texto: `node scripts/check-maps.mjs vila`.
 
 ### Modos
 
@@ -119,7 +124,7 @@ Para testar o multiplayer na mesma máquina, abra duas abas (ou uma aba anônima
 ```bash
 npm run build      # checagem de tipos + build de produção em dist/
 npm run preview    # serve o build de dist/
-npm run check      # confere movimentação e balanceamento (slide, mantle, pulo, tiros para matar)
+npm run check      # confere movimentação, balanceamento das armas e equilíbrio dos mapas
 ```
 
 ---
