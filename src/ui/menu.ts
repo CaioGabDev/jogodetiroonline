@@ -183,7 +183,7 @@ export class MainMenu {
         el('div', { class: 'room-row' }, [
           el('div', { class: 'room-info' }, [
             el('b', { text: `Sala de ${r.host}` }),
-            el('small', { text: `${MAP_NAMES[r.map]} · ${ARSENAL_NAMES[r.arsenal]} · ${r.mode === 'tdm' ? 'Times' : 'FFA'}` }),
+            el('small', { text: `${MAP_NAMES[r.map]} · ${ARSENAL_NAMES[r.arsenal]} · ${r.mode === 'bomb' ? 'Bomba' : r.mode === 'tdm' ? 'Times' : 'FFA'}` }),
             el('small', { text: `${r.players}/${MAX_PLAYERS} · ${status[r.phase]}` }),
           ]),
           join,

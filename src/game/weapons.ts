@@ -5,7 +5,7 @@ import type { Arsenal } from './constants';
  * the clients, the HUD and the loadout screen follow.
  */
 
-export type WeaponCategory = 'primary' | 'pistol' | 'melee' | 'lethal' | 'tactical';
+export type WeaponCategory = 'primary' | 'pistol' | 'melee' | 'lethal' | 'tactical' | 'objective';
 
 export type ProjectileKind = 'bolt' | 'grenade' | 'knife' | 'bottle' | 'can';
 
@@ -94,6 +94,8 @@ export interface WeaponDef {
   fire?: { radius: number; ms: number; dps: number };
   /** Longest effect on whoever the blast reaches. `blind` blinds, and depends on looking at it; otherwise it slows. */
   stun?: { radius: number; ms: number; blind: boolean };
+  /** Fills the area with a cloud nobody sees through. Sold only in the bomb mode. */
+  smoke?: { radius: number; ms: number };
   /** No flash, no tracer and a sound that only carries a few meters. */
   silent?: boolean;
   /** Close-range swing: no ammo, no reload, no ADS. */
@@ -120,9 +122,12 @@ export const W = {
   MOLOTOV: 15,
   FLASHBANG: 16,
   CONCUSSION: 17,
+  SMOKE: 18,
+  /** Not a weapon: it's here so the kill feed can name it. */
+  BOMB: 19,
 } as const;
 
-type ThrownDef = Pick<WeaponDef, 'id' | 'name' | 'short' | 'category' | 'desc' | 'damage' | 'mag' | 'projectile'> & Partial<WeaponDef>;
+type ThrownDef = Pick<WeaponDef, 'id' | 'name' | 'short' | 'category' | 'desc' | 'damage' | 'mag'> & Partial<WeaponDef>;
 
 /** Thrown equipment lives in this table so ammo sync, projectiles and the kill feed work on it. What only guns use stays neutral. */
 function thrown(d: ThrownDef): WeaponDef {
@@ -674,6 +679,18 @@ export const WEAPONS: WeaponDef[] = [
     projectile: { speed: 20, gravity: 14, kind: 'can', fuse: 1.4, loft: 0.12 },
     stun: { radius: 10, ms: 5000, blind: false },
   }),
+  thrown({
+    id: W.SMOKE,
+    name: 'Fumaça',
+    short: 'FUMAÇA',
+    category: 'tactical',
+    desc: 'Cobre a passagem por 17 s e corta a visão',
+    damage: 0,
+    mag: 0,
+    projectile: { speed: 20, gravity: 14, kind: 'can', fuse: 1.6, loft: 0.12 },
+    smoke: { radius: 5.5, ms: 17000 },
+  }),
+  thrown({ id: W.BOMB, name: 'Bomba', short: 'BOMBA', category: 'objective', desc: '', damage: 0, mag: 0 }),
 ];
 
 export const WEAPON_COUNT = WEAPONS.length;
@@ -684,7 +701,7 @@ export const DEFAULT_LOADOUT: number[] = [W.RIFLE, W.SMG, W.PISTOL, W.FRAG, W.FL
 export const PRIMARIES = WEAPONS.filter((w) => w.category === 'primary');
 export const PISTOLS = WEAPONS.filter((w) => w.category === 'pistol');
 export const LETHALS = WEAPONS.filter((w) => w.category === 'lethal');
-export const TACTICALS = WEAPONS.filter((w) => w.category === 'tactical');
+export const TACTICALS = WEAPONS.filter((w) => w.category === 'tactical' && !w.smoke);
 
 /** Line on the loadout cards. */
 export function magLabel(w: WeaponDef): string {
@@ -728,6 +745,8 @@ export function allowedWeapons(arsenal: Arsenal, level: number, loadout: number[
       return [W.SNIPER, W.KNIFE];
     case 'shotgun':
       return [W.SHOTGUN, W.KNIFE];
+    case 'shop':
+      return [...loadout, W.KNIFE];
     case 'gungame': {
       const w = GUN_GAME_LADDER[Math.min(level, GUN_GAME_LADDER.length - 1)];
       return w === W.KNIFE ? [w] : [w, W.KNIFE];

@@ -9,6 +9,26 @@ const { CollisionWorld } = await vite.ssrLoadModule('/src/game/physics.ts');
 const { MOVE, PLAYER } = await vite.ssrLoadModule('/src/game/constants.ts');
 await vite.close();
 
+/** Bomb maps: seconds with a rifle in hand, and how a site has to play. */
+const BOMB = {
+  sight: 62,
+  attackerToSite: [15, 27],
+  defenderToSite: [4, 13],
+  /** Defenders set up before the first attacker can arrive. */
+  defenderLead: 6,
+  rotation: 17,
+  /** Routes into a site that don't go through the defenders' spawn. */
+  entrances: 2,
+  siteCover: 5,
+};
+/** Size of the empty belt around a site when counting the ways in. */
+const SITE_BELT = 7;
+/** Two arrivals closer than this are the same door. */
+const ENTRANCE_GAP = 16;
+/** The search walks in right angles, which runs longer than a person cutting corners. */
+const WALK_PATH = 0.82;
+const WALK_SPEED = MOVE.walk * 0.95;
+
 /** Limits per map. The older maps only need valid spawns: they were tuned by playing. */
 const LIMITS = {
   vila: { sight: 46, safe: 7 },
@@ -22,7 +42,7 @@ const SIGHT_WIDTH = 1;
 /** Cover hides a standing body. */
 const COVER_H = 1.1;
 
-function reachable(world, def, starts) {
+function reachable(world, def, starts, blocked = () => false) {
   const half = def.size / 2;
   const key = (x, z, y) => `${x},${z},${Math.round(y * 10)}`;
   const seen = new Map();
@@ -37,7 +57,7 @@ function reachable(world, def, starts) {
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const x = c.x + dx * STEP;
       const z = c.z + dz * STEP;
-      if (Math.abs(x) > half - 0.5 || Math.abs(z) > half - 0.5) continue;
+      if (Math.abs(x) > half - 0.5 || Math.abs(z) > half - 0.5 || blocked(x, z)) continue;
       for (const reach of [MOVE.step, MOVE.mantleReach]) {
         // groundHeight allows 5 cm over the feet, which the mantle in physics.ts doesn't.
         const y = world.groundHeight(x, z, c.y + reach - 0.05, 40);
@@ -113,8 +133,65 @@ function draw(def, world, cells, name) {
   }
 }
 
+const inside = ([x0, z0, x1, z1], x, z, grow = 0) => x >= x0 - grow && x <= x1 + grow && z >= z0 - grow && z <= z1 + grow;
+const seconds = (cells, rect) => (Math.min(...cells.filter((c) => inside(rect, c.x, c.z)).map((c) => c.d)) * WALK_PATH) / WALK_SPEED;
+
+/** Ways into the belt around a site: blocks the first arrival and looks for another, leaving the defenders' spawn out of it. */
+function entrances(world, def, site, attackStart, defendCenter) {
+  const plugs = [];
+  const blocked = (x, z) =>
+    inside(site, x, z, SITE_BELT) || Math.hypot(x - defendCenter[0], z - defendCenter[2]) < 15 || plugs.some((p) => Math.hypot(x - p.x, z - p.z) < ENTRANCE_GAP);
+  for (;;) {
+    const edge = reachable(world, def, attackStart, blocked).filter((c) => inside(site, c.x, c.z, SITE_BELT + 2));
+    if (!edge.length) return plugs.length;
+    plugs.push(edge.reduce((a, b) => (b.d < a.d ? b : a)));
+  }
+}
+
+function checkBomb(name, def, world, problems, bombTable) {
+  const attack = def.teamSpawns.red.map((s) => s.pos);
+  const defend = def.teamSpawns.blue.map((s) => s.pos);
+  const fromAttack = reachable(world, def, attack);
+  const fromDefend = reachable(world, def, defend);
+  if (only) draw(def, world, fromAttack, name);
+  assert.equal(fromAttack.length, fromDefend.length, `${name}: os lados não alcançam a mesma área`);
+  for (const a of attack) {
+    for (const b of defend) assert.ok(!world.lineOfSight(a[0], a[1] + EYE, a[2], b[0], b[1] + EYE, b[2]), `${name}: spawns se enxergam: ${a} e ${b}`);
+  }
+  for (const s of def.teamSpawns.red) assert.ok(inside(def.bomb.buy.attack, s.pos[0], s.pos[2]), `${name}: spawn de ataque fora da zona de compra`);
+  for (const s of def.teamSpawns.blue) assert.ok(inside(def.bomb.buy.defend, s.pos[0], s.pos[2]), `${name}: spawn de defesa fora da zona de compra`);
+
+  const row = { mapa: name };
+  const gaps = coverGaps(world, fromAttack);
+  for (const site of def.bomb.sites) {
+    const a = seconds(fromAttack, site.rect);
+    const d = seconds(fromDefend, site.rect);
+    const ways = entrances(world, def, site.rect, attack, defend[0]);
+    const [minA, maxA] = BOMB.attackerToSite;
+    const [minD, maxD] = BOMB.defenderToSite;
+    if (a < minA || a > maxA) problems.push(`${name} ${site.name}: ataque chega em ${a.toFixed(1)} s, fora de ${minA}-${maxA} s`);
+    if (d < minD || d > maxD) problems.push(`${name} ${site.name}: defesa chega em ${d.toFixed(1)} s, fora de ${minD}-${maxD} s`);
+    if (a - d < BOMB.defenderLead) problems.push(`${name} ${site.name}: defesa só chega ${(a - d).toFixed(1)} s antes`);
+    if (ways < BOMB.entrances) problems.push(`${name} ${site.name}: só ${ways} entrada(s) para o ataque`);
+    const inSite = fromAttack.map((c, i) => [c, gaps[i]]).filter(([c]) => c.y < 0.5 && inside(site.rect, c.x, c.z)).map(([, g]) => g).sort((p, q) => p - q);
+    const cover = inSite[Math.floor(inSite.length * 0.95)];
+    if (cover > BOMB.siteCover) problems.push(`${name} ${site.name}: 5% do bomb fica a mais de ${BOMB.siteCover} m de cobertura (${cover.toFixed(1)} m)`);
+    row[`ataque→${site.name} (s)`] = +a.toFixed(1);
+    row[`defesa→${site.name} (s)`] = +d.toFixed(1);
+    row[`entradas ${site.name}`] = ways;
+  }
+  const [first, second] = def.bomb.sites;
+  const start = fromDefend.find((c) => inside(first.rect, c.x, c.z));
+  const rotation = seconds(reachable(world, def, [[start.x, start.y, start.z]]), second.rect);
+  if (rotation > BOMB.rotation) problems.push(`${name}: rotação da defesa de ${rotation.toFixed(1)} s`);
+  const [sight, where] = longestSight(world, fromAttack);
+  if (sight > BOMB.sight) problems.push(`${name}: linha de visão de ${sight.toFixed(1)} m, ${where}`);
+  bombTable.push({ ...row, 'rotação (s)': +rotation.toFixed(1), 'maior visão (m)': +sight.toFixed(1), 'área (m²)': fromAttack.length });
+}
+
 const only = process.argv[2];
 const table = [];
+const bombTable = [];
 const problems = [];
 for (const [name, def] of Object.entries(MAPS)) {
   if (only && name !== only) continue;
@@ -124,6 +201,10 @@ for (const [name, def] of Object.entries(MAPS)) {
     const [x, y, z] = s.pos;
     assert.ok(!world.overlapsSolid(x, y + 0.05, z, PLAYER.height), `${name}: spawn dentro de sólido em ${x},${z}`);
     assert.ok(world.groundHeight(x, z, y + 0.1, 0.3) > -Infinity, `${name}: spawn sem chão em ${x},${z}`);
+  }
+  if (def.bomb) {
+    checkBomb(name, def, world, problems, bombTable);
+    continue;
   }
   const limit = LIMITS[name];
   if (!limit) continue;
@@ -169,5 +250,6 @@ for (const [name, def] of Object.entries(MAPS)) {
   if (p95 > limit.safe) problems.push(`${name}: 5% do mapa fica a mais de ${limit.safe} m de cobertura (${p95.toFixed(1)} m)`);
 }
 if (table.length) console.table(table);
+if (bombTable.length) console.table(bombTable);
 assert.deepEqual(problems, []);
 console.log('maps ok');

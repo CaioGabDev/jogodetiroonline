@@ -18,6 +18,8 @@ export type Action =
   | 'melee'
   | 'lethal'
   | 'tactical'
+  | 'smoke'
+  | 'use'
   | 'inventory'
   | 'scoreboard'
   | 'chat'
@@ -41,6 +43,8 @@ export const ACTION_LABELS: Record<Action, string> = {
   melee: 'Golpe rápido',
   lethal: 'Equipamento letal',
   tactical: 'Equipamento tático',
+  smoke: 'Fumaça',
+  use: 'Plantar / desarmar',
   inventory: 'Inventário',
   scoreboard: 'Placar',
   chat: 'Chat (todos)',
@@ -109,6 +113,8 @@ export const DEFAULT_SETTINGS: Settings = {
     melee: ['KeyV', ''],
     lethal: ['KeyG', ''],
     tactical: ['KeyQ', ''],
+    smoke: ['KeyX', ''],
+    use: ['KeyE', ''],
     inventory: ['KeyB', ''],
     scoreboard: ['Tab', ''],
     chat: ['Enter', ''],

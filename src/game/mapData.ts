@@ -55,6 +55,16 @@ export interface BaseMark {
   d: number;
 }
 
+/** [x0, z0, x1, z1]. */
+export type Rect = [number, number, number, number];
+
+/** What makes a map playable in the bomb mode. In `teamSpawns`, red starts on attack. */
+export interface BombDef {
+  sites: Array<{ name: string; rect: Rect }>;
+  /** Where each side can use the shop. */
+  buy: { attack: Rect; defend: Rect };
+}
+
 export interface MapDef {
   size: number;
   /** Distances where the fog starts and where it fully hides the view. */
@@ -66,6 +76,7 @@ export interface MapDef {
   teamSpawns: Record<Team, SpawnDef[]>;
   pickups: PickupDef[];
   baseMarks: BaseMark[];
+  bomb?: BombDef;
 }
 
 interface PropOpts {
@@ -87,6 +98,8 @@ function builder(): {
   B: (x0: number, z0: number, x1: number, z1: number, y0: number, y1: number, mat: MatKind) => void;
   C: (cx: number, cz: number, w: number, d: number, y0: number, h: number, mat: MatKind) => void;
   crate: (x: number, z: number, s?: number, h?: number, y0?: number) => void;
+  /** Solid block of buildings: a single collision box, with models only along the edges anyone can see. */
+  block: (x0: number, z0: number, x1: number, z1: number, h: number, models: string[]) => void;
   shell: (half: number, wallH: number, floor: MatKind) => void;
 } {
   const boxes: BoxDef[] = [];
@@ -121,6 +134,20 @@ function builder(): {
   const C = (cx: number, cz: number, w: number, d: number, y0: number, h: number, mat: MatKind): void =>
     B(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, y0, y0 + h, mat);
   const crate = (x: number, z: number, s = 2, h = s, y0 = 0): void => C(x, z, s, s, y0, h, 'crate');
+  const block = (x0: number, z0: number, x1: number, z1: number, h: number, models: string[]): void => {
+    boxes.push({ min: [x0, 0, z0], max: [x1, h, z1], mat: 'trim', hidden: true });
+    const nx = Math.max(1, Math.round((x1 - x0) / BLOCK_TILE));
+    const nz = Math.max(1, Math.round((z1 - z0) / BLOCK_TILE));
+    const w = (x1 - x0) / nx;
+    const d = (z1 - z0) / nz;
+    for (let i = 0; i < nx; i++) {
+      for (let j = 0; j < nz; j++) {
+        if (i > 0 && i < nx - 1 && j > 0 && j < nz - 1) continue;
+        const model = models[(i * 2 + j * 3 + Math.abs(Math.round(x0 + z0))) % models.length];
+        P(model, x0 + w * (i + 0.5), z0 + d * (j + 0.5), w, d, h - ((i + j) % 2), { solid: false, turn: (i + j) % 4 });
+      }
+    }
+  };
   /** Floor and the four outer walls. */
   const shell = (half: number, wallH: number, floor: MatKind): void => {
     B(-half - 1, -half - 1, half + 1, half + 1, -1, 0, floor);
@@ -129,7 +156,7 @@ function builder(): {
     B(-half - 1, -half, -half, half, 0, wallH, 'wall');
     B(half, -half, half + 1, half, 0, wallH, 'wall');
   };
-  return { boxes, props, P, fence, B, C, crate, shell };
+  return { boxes, props, P, fence, B, C, crate, block, shell };
 }
 
 /** Hides the body and leaves the head showing, and is just too tall to mantle onto. */
@@ -137,6 +164,8 @@ const PARAPET = 1.5;
 const FENCE_PANEL = 2;
 /** Stops a standing player's body but not a shot at their head, and a mantle clears it. */
 const FENCE_H = 1.25;
+/** Width of each building along the edge of a block. */
+const BLOCK_TILE = 13;
 
 /** Yaw that faces the map center from (x, z). */
 const faceCenter = (x: number, z: number): number => Math.atan2(x, z);
@@ -860,4 +889,277 @@ function patio(): MapDef {
   };
 }
 
-export const MAPS: Record<MapId, MapDef> = { arena: arena(), mirante: mirante(), galpao: galpao(), vila: vila(), centro: centro(), patio: patio() };
+/** Everyone starts on their own side, facing the other. */
+function bombSpawns(attack: SpawnDef[], defend: SpawnDef[]): Pick<MapDef, 'ffaSpawns' | 'teamSpawns' | 'pickups' | 'baseMarks'> {
+  return { ffaSpawns: [...attack, ...defend], teamSpawns: { red: attack, blue: defend }, pickups: [], baseMarks: [] };
+}
+
+const WAREHOUSES = ['industrial/building-f', 'industrial/building-l', 'commercial/building-g'];
+const BOX_H = 2.6;
+
+/** Two yards at the far end. Attackers reach them along the walls or through the exposed middle; defenders hold the corridor behind. */
+function usina(): MapDef {
+  const { boxes, props, B, C, P, block, crate, shell } = builder();
+  const HALF = 52;
+  const H = 9;
+  const ramps: RampDef[] = [];
+  const container = (i: number, x: number, z: number, alongX: boolean, level = 0): void =>
+    P(`industrial/shipping-container-${'abc'[i % 3]}`, x, z, alongX ? 6.2 : 2.5, alongX ? 2.5 : 6.2, BOX_H, { turn: alongX ? 1 : 0, y: level * BOX_H });
+  const stack = (i: number, x: number, z: number, alongX: boolean): void => {
+    container(i, x, z, alongX);
+    container(i + 1, x, z, alongX, 1);
+  };
+
+  shell(HALF, H, 'asphalt');
+
+  // Blocks between the three lanes.
+  block(-44, 26, -5, 42, H, WAREHOUSES);
+  block(5, 26, 44, 42, H, WAREHOUSES);
+  block(-44, 6, -5, 20, H, WAREHOUSES);
+  block(5, 6, 44, 20, H, WAREHOUSES);
+  block(-44, -8, -12, 6, H, WAREHOUSES);
+  block(12, -8, 44, 6, H, WAREHOUSES);
+  B(-22, -10, -12, -8, 0, H, 'concrete');
+  B(12, -10, 22, -8, 0, H, 'concrete');
+  block(-22, -42, -12, -16, H, WAREHOUSES);
+  block(12, -42, 22, -16, H, WAREHOUSES);
+  block(-12, -42, -4, -18, H, WAREHOUSES);
+  block(4, -42, 12, -18, H, WAREHOUSES);
+
+  // Back wall of the yards, with one door each.
+  B(-52, -44, -40, -42, 0, H, 'concrete');
+  B(-34, -44, -4, -42, 0, H, 'concrete');
+  B(4, -44, 34, -42, 0, H, 'concrete');
+  B(40, -44, 52, -42, 0, H, 'concrete');
+
+  // West lane ends in a tunnel, so B is taken from the dark.
+  B(-52, -8, -44, 20, 3.6, H, 'concrete');
+  B(-47.5, 0, -44, 2, 0, 3.6, 'concrete');
+  B(-52, 8, -48.5, 10, 0, 3.6, 'concrete');
+
+  // Bends: no lane is one long shot.
+  B(44, 14, 49, 16, 0, H, 'concrete');
+  B(47, 2, 52, 4, 0, H, 'concrete');
+  B(-49, 34, -44, 36, 0, H, 'concrete');
+  B(-52, 26, -47, 28, 0, H, 'concrete');
+  B(-31, 42, -29, 47.5, 0, H, 'concrete');
+  B(-37, 46.5, -35, 52, 0, H, 'concrete');
+  B(23, 42, 25, 47.5, 0, H, 'concrete');
+  B(29, 46.5, 31, 52, 0, H, 'concrete');
+  stack(0, -21, 50.7, true);
+  B(-20, 20, -18, 23.5, 0, H, 'concrete');
+  B(-28, 22.5, -26, 26, 0, H, 'concrete');
+  B(18, 22.5, 20, 26, 0, H, 'concrete');
+  B(26, 20, 28, 23.5, 0, H, 'concrete');
+  B(-24, -52, -22, -47.5, 0, H, 'concrete');
+  B(-30, -48.5, -28, -44, 0, H, 'concrete');
+  B(22, -52, 24, -47.5, 0, H, 'concrete');
+  B(28, -48.5, 30, -44, 0, H, 'concrete');
+
+  // Spawn cover.
+  stack(0, -8, 41, true);
+  stack(1, 8, 41, true);
+  stack(2, 0, -44.5, true);
+
+  // Mid lane: cover every few meters, and a wall that stops the door from seeing down it.
+  B(-5, 36, 1, 37.2, 0, H, 'concrete');
+  B(-1, 30, 5, 31.2, 0, H, 'concrete');
+  crate(-3.5, 33, 2, 1.3);
+  crate(-3, 15, 2, 1.3);
+  container(0, 2.5, 11, false);
+  C(0, -3, 11, 2.5, 0, 4.5, 'concrete');
+  crate(-9, -13, 2, 1.3);
+  crate(9, 3, 2, 1.3);
+  crate(-9, 2, 2, 2.6);
+  crate(8.5, -14, 2, 2.6);
+  C(0, -13, 4, 3, 0, 4.5, 'concrete');
+
+  C(25.5, -13, 2, 3, 0, 4.5, 'concrete');
+  C(28, -16.5, 3, 2, 0, 4.5, 'concrete');
+
+  // Yard A: open, with a platform along the east wall that reaches the whole site.
+  B(44, -42, 52, -26, 0, BOX_H, 'metal');
+  ramps.push({ minX: 45, maxX: 51, minZ: -26, maxZ: -14, y0: 0, y1: BOX_H, axis: 'z', rise: -1, mat: 'metal' });
+  B(44, -30, 44.3, -26, BOX_H, BOX_H + PARAPET, 'trim');
+  stack(0, 36, -13, true);
+  container(1, 30, -24, false);
+  container(2, 39, -25, true);
+  stack(1, 32, -35, true);
+  crate(42, -33, 2, 1.3);
+  crate(26, -18, 2, 2.6);
+  crate(26, -32, 2, 1.3);
+  crate(42, -17, 2, 1.3);
+  crate(35, -30, 2, 1.3);
+  container(0, 25, -39, true);
+  crate(48, -6, 2, 1.3);
+
+  // Yard B: tighter, the corner closed by a building and the site full of cover.
+  block(-52, -42, -41, -30, H, WAREHOUSES);
+  block(-30, -14, -22, -8, H, WAREHOUSES);
+  C(-28, -16.5, 3, 2, 0, 4.5, 'concrete');
+  stack(2, -34, -24, false);
+  container(0, -38, -14, true);
+  container(1, -28, -30, false);
+  crate(-40, -21, 2, 1.3);
+  crate(-30, -19, 2, 2.6);
+  crate(-36, -33, 2, 1.3);
+  crate(-46, -12, 2, 2.6);
+  crate(-26, -38, 2, 1.3);
+  crate(-46, -26, 2, 1.3);
+
+  // Skyline.
+  P('industrial/chimney-large', -30, 66, 7, 7, 30, { solid: false });
+  P('industrial/chimney-large', -18, 68, 7, 7, 26, { solid: false });
+  P('industrial/water-tower', 34, -66, 8, 8, 24, { solid: false });
+  P('industrial/building-l', 66, 10, 18, 30, 18, { solid: false });
+  P('industrial/building-f', -66, -10, 18, 30, 20, { solid: false });
+
+  const attack = facing([sp(-6, 0, 45), sp(0, 0, 45), sp(6, 0, 45), sp(-6, 0, 49), sp(0, 0, 49), sp(6, 0, 49), sp(-12, 0, 45), sp(12, 0, 45), sp(-12, 0, 49), sp(12, 0, 49)], 0);
+  const defend = facing([sp(-6, 0, -48), sp(0, 0, -48), sp(6, 0, -48), sp(-10, 0, -50), sp(-4, 0, -50), sp(4, 0, -50), sp(10, 0, -50), sp(-12, 0, -46), sp(12, 0, -46), sp(0, 0, -50)], Math.PI);
+  return {
+    size: HALF * 2,
+    fog: [90, 280],
+    boxes,
+    ramps,
+    props,
+    ...bombSpawns(attack, defend),
+    bomb: {
+      sites: [
+        { name: 'A', rect: [29, -36, 44, -18] },
+        { name: 'B', rect: [-41, -34, -27, -18] },
+      ],
+      buy: { attack: [-18, 40, 18, 52], defend: [-16, -52, 16, -44] },
+    },
+  };
+}
+
+const SHOPS = ['commercial/building-a', 'commercial/building-c', 'commercial/building-e', 'commercial/building-j', 'suburban/building-type-t'];
+
+/** Attackers start in one corner and the defenders in the opposite one, with a site on each side of them and a square that joins the two. */
+function mercado(): MapDef {
+  const { boxes, props, B, C, P, block, crate, shell } = builder();
+  const HALF = 46;
+  const H = 9;
+  const car = (model: string, x: number, z: number, alongX: boolean): void =>
+    P(`cars/${model}`, x, z, alongX ? 4.6 : 2.1, alongX ? 2.1 : 4.6, 1.7, { turn: alongX ? 1 : 0, col: [alongX ? 4.6 : 2.1, alongX ? 2.1 : 4.6, 1.35] });
+  const stall = (x: number, z: number, w: number, d: number): void => C(x, z, w, d, 0, 1.25, 'crate');
+
+  shell(HALF, H, 'asphalt');
+
+  block(-38, -36, -14, 22, H, SHOPS);
+  block(-38, 22, -30, 30, H, SHOPS);
+  block(-26, 30, -6, 38, H, SHOPS);
+  block(-6, 16, 36, 38, H, SHOPS);
+  block(-6, 10, 22, 16, H, SHOPS);
+  // Around the square: one gap north to A, one gap east to B.
+  block(-14, -20, -4, -14, H, SHOPS);
+  block(4, -20, 22, -14, H, SHOPS);
+  block(12, -14, 22, -4, H, SHOPS);
+  block(12, 4, 22, 10, H, SHOPS);
+  // The defenders' block, with a door to each site.
+  block(22, -34, 34, -16, H, SHOPS);
+  block(22, -46, 30, -42, H, SHOPS);
+  B(24, -42, 26, -38.5, 0, H, 'brick');
+  B(28, -36.5, 30, -34, 0, H, 'brick');
+  C(43, -44.6, 6, 2.8, 0, 2.6, 'crate');
+
+  // Bends.
+  B(-46, 14, -41, 16, 0, H, 'brick');
+  B(-43, -2, -38, 0, 0, H, 'brick');
+  B(-46, -18, -41, -16, 0, H, 'brick');
+  B(-30, -46, -28, -41, 0, H, 'brick');
+  B(-24, -41, -22, -36, 0, H, 'brick');
+  B(-16, -46, -14, -41.5, 0, H, 'brick');
+  B(-14, 38, -12, 43, 0, H, 'brick');
+  B(-8, 41, -6, 46, 0, H, 'brick');
+  B(14, 38, 16, 43, 0, H, 'brick');
+  B(20, 41, 22, 46, 0, H, 'brick');
+  B(36, 30, 41, 32, 0, H, 'brick');
+  B(41, 22, 46, 24, 0, H, 'brick');
+  B(-24, 22, -22, 26.5, 0, H, 'brick');
+  B(-19, 25.5, -17, 30, 0, H, 'brick');
+  B(-14, 12, -9.5, 13.5, 0, H, 'brick');
+  B(-10.5, 17.5, -6, 19, 0, H, 'brick');
+  B(-10.5, 7, -6, 8.5, 0, H, 'brick');
+  B(34, -26, 39, -24, 0, H, 'brick');
+  B(41, -20, 46, -18, 0, H, 'brick');
+  car('delivery', -42, 8, false);
+  car('sedan', 2, 42, true);
+  car('van', -20, 26, true);
+  crate(-30, 41, 2, 1.3);
+  crate(-34, 34, 2, 1.3);
+
+  // The square: wide open, broken up by a kiosk and parked cars.
+  C(-1, -2, 6, 4, 0, H - 4, 'brick');
+  car('taxi', -9, 3, false);
+  car('sedan', 7, 6, true);
+  car('suv', 8, -9, true);
+  stall(-9, -9, 3, 1.6);
+
+  // Site A: the market itself, rows of stalls in the open.
+  stall(-3, -30, 6, 1.6);
+  stall(5, -30, 6, 1.6);
+  stall(1, -36, 8, 1.6);
+  C(-6, -38, 2, 2, 0, 2.6, 'crate');
+  C(8, -38, 2, 2, 0, 2.6, 'crate');
+  C(-11, -25, 2.6, 2.6, 0, 2.6, 'crate');
+  C(14, -27, 3, 2, 0, 2.6, 'crate');
+  stall(16, -38, 1.6, 6);
+  stall(-11, -33, 1.6, 6);
+  car('truck', 18, -23, true);
+  stall(-6, -34, 1.6, 3);
+  stall(8, -34, 1.6, 3);
+  stall(1, -41, 5, 1.6);
+
+  C(24, 2.5, 2, 3, 0, 4.5, 'brick');
+
+  // Site B: a parking lot, tighter and lined with vans.
+  car('van', 29, -6, false);
+  car('delivery', 39, -6, false);
+  car('sedan', 34, 2, true);
+  car('truck', 27, 6, true);
+  C(34, -11, 2, 2, 0, 2.6, 'crate');
+  C(42, 3, 2, 2, 0, 2.6, 'crate');
+  crate(24.5, -2, 2, 1.3);
+  crate(39, 12, 2, 2.6);
+  car('suv', 30, 12, true);
+  crate(41, -1, 2, 1.3);
+  crate(27, 0, 2, 1.3);
+  crate(35, -3, 2, 1.3);
+  crate(40, 7, 2, 1.3);
+
+  // Skyline.
+  P('commercial/building-g', -58, 10, 20, 30, 22, { solid: false });
+  P('commercial/building-j', 10, -60, 30, 20, 24, { solid: false });
+  P('commercial/building-a', 60, 16, 20, 30, 20, { solid: false });
+  P('industrial/water-tower', 8, 60, 8, 8, 22, { solid: false });
+
+  const attack = facing([sp(-42, 0, 36), sp(-38, 0, 36), sp(-34, 0, 40), sp(-42, 0, 40), sp(-38, 0, 40), sp(-42, 0, 44), sp(-38, 0, 44), sp(-34, 0, 44), sp(-30, 0, 44), sp(-34, 0, 36)], -Math.PI / 4);
+  const defend = facing([sp(36, 0, -38), sp(40, 0, -38), sp(44, 0, -38), sp(36, 0, -34), sp(40, 0, -34), sp(44, 0, -34), sp(36, 0, -42), sp(40, 0, -42), sp(44, 0, -42), sp(32, 0, -38)], (3 * Math.PI) / 4);
+  return {
+    size: HALF * 2,
+    fog: [90, 280],
+    boxes,
+    ramps: [],
+    props,
+    ...bombSpawns(attack, defend),
+    bomb: {
+      sites: [
+        { name: 'A', rect: [-6, -42, 8, -28] },
+        { name: 'B', rect: [28, -8, 42, 8] },
+      ],
+      buy: { attack: [-46, 30, -26, 46], defend: [30, -46, 46, -30] },
+    },
+  };
+}
+
+export const MAPS: Record<MapId, MapDef> = {
+  arena: arena(),
+  mirante: mirante(),
+  galpao: galpao(),
+  vila: vila(),
+  centro: centro(),
+  patio: patio(),
+  usina: usina(),
+  mercado: mercado(),
+};

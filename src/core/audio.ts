@@ -240,6 +240,13 @@ class AudioEngine {
     this.tone(d, { type: 'sine', freq: 3000, dur: ms / 1000, gain: 0.05 });
   }
 
+  /** One tick of the planted bomb. */
+  beep(pos: Vec3Like): void {
+    const d = this.out('sfx', pos, 8);
+    if (!d) return;
+    this.tone(d, { type: 'square', freq: 1900, dur: 0.07, gain: 0.22 });
+  }
+
   dryFire(): void {
     const d = this.out('sfx');
     if (!d) return;

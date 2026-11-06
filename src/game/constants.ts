@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 13;
 /** Prefix added to the room code to form the host's PeerJS id (avoids collisions on the public server). */
 export const PEER_PREFIX = 'arenafps-v1-';
 
@@ -87,21 +87,37 @@ export const FFA_COLORS = [
   '#e0e0e0',
 ];
 
-export type GameMode = 'ffa' | 'tdm';
+export type GameMode = 'ffa' | 'tdm' | 'bomb';
+
+/** Modes where players fight in two teams. */
+export const teamMode = (mode: GameMode): boolean => mode !== 'ffa';
 
 /** Which weapons a match allows. Independent from the mode, except Gun Game, which is always FFA. */
-export type Arsenal = 'all' | 'sniper' | 'shotgun' | 'gungame';
+export type Arsenal = 'all' | 'sniper' | 'shotgun' | 'gungame' | 'shop';
 
 export const ARSENAL_NAMES: Record<Arsenal, string> = {
   all: 'Todas as armas',
   sniper: 'Só sniper',
   shotgun: 'Só doze',
   gungame: 'Gun Game',
+  shop: 'Compra por rodada',
 };
 
-export type MapId = 'arena' | 'mirante' | 'galpao' | 'vila' | 'centro' | 'patio';
+export type MapId = 'arena' | 'mirante' | 'galpao' | 'vila' | 'centro' | 'patio' | 'usina' | 'mercado';
 
-export const MAP_NAMES: Record<MapId, string> = { arena: 'Arena', mirante: 'Mirante', galpao: 'Galpão', vila: 'Vila', centro: 'Centro', patio: 'Pátio' };
+export const MAP_NAMES: Record<MapId, string> = {
+  arena: 'Arena',
+  mirante: 'Mirante',
+  galpao: 'Galpão',
+  vila: 'Vila',
+  centro: 'Centro',
+  patio: 'Pátio',
+  usina: 'Usina',
+  mercado: 'Mercado',
+};
+
+/** Built for attack and defense: the only maps of the bomb mode, which is the only mode they fit. */
+export const BOMB_MAPS: MapId[] = ['usina', 'mercado'];
 
 export const MAP_HINTS: Record<MapId, string> = {
   arena: 'equilibrado',
@@ -110,6 +126,8 @@ export const MAP_HINTS: Record<MapId, string> = {
   vila: 'pequeno, casas e quintais',
   centro: 'médio, três rotas',
   patio: 'contêineres, três alturas',
+  usina: 'bomba, dois pátios e meio exposto',
+  mercado: 'bomba, ataque na diagonal',
 };
 
 export interface MatchConfig {
@@ -121,9 +139,12 @@ export interface MatchConfig {
   /** Minutes; 0 = no limit. */
   timeLimit: number;
   friendlyFire: boolean;
+  /** Bomb mode: round wins that take the match. Sides swap halfway. */
+  rounds: number;
 }
 
 export const KILL_LIMITS = [10, 20, 30, 50];
 export const TIME_LIMITS = [5, 10, 15, 20];
+export const ROUND_WINS = [7, 9, 13];
 
-export const DEFAULT_CONFIG: MatchConfig = { map: 'arena', mode: 'ffa', arsenal: 'all', killLimit: 20, timeLimit: 10, friendlyFire: false };
+export const DEFAULT_CONFIG: MatchConfig = { map: 'arena', mode: 'ffa', arsenal: 'all', killLimit: 20, timeLimit: 10, friendlyFire: false, rounds: 13 };

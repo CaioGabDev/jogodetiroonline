@@ -1,4 +1,4 @@
-import { TEAM_COLORS, TEAM_NAMES, type GameMode } from '../game/constants';
+import { TEAM_COLORS, TEAM_NAMES, teamMode, type GameMode } from '../game/constants';
 import type { EndMsg } from '../net/protocol';
 import { clear, el, show } from './dom';
 
@@ -40,7 +40,7 @@ export class Results {
 
   render(m: EndMsg, mode: GameMode, localId: number, isHost: boolean, offline: boolean, myTeam: string): void {
     let won = false;
-    if (mode === 'tdm') {
+    if (teamMode(mode)) {
       if (m.winnerTeam) {
         won = m.winnerTeam === myTeam;
         this.banner.textContent = won ? 'VITÓRIA!' : 'DERROTA';
@@ -66,7 +66,7 @@ export class Results {
     if (mvp) {
       this.mvp.append(
         el('div', { class: 'mvp-label', text: '★ MVP' }),
-        el('div', { class: 'mvp-name', text: mvp.name, style: { color: mode === 'tdm' ? TEAM_COLORS[mvp.team] : mvp.color } }),
+        el('div', { class: 'mvp-name', text: mvp.name, style: { color: teamMode(mode) ? TEAM_COLORS[mvp.team] : mvp.color } }),
         el('div', { class: 'mvp-stats', text: `${mvp.kills} kills · ${mvp.deaths} mortes · ${mvp.damage} dano · ${mvp.headshots} HS` }),
       );
     }
@@ -78,7 +78,7 @@ export class Results {
     );
     m.results.forEach((r, i) => {
       const kd = r.deaths === 0 ? r.kills.toFixed(2) : (r.kills / r.deaths).toFixed(2);
-      const color = mode === 'tdm' ? TEAM_COLORS[r.team] : r.color;
+      const color = teamMode(mode) ? TEAM_COLORS[r.team] : r.color;
       t.append(
         el('tr', { class: r.id === localId ? 'me' : '' }, [
           el('td', { text: String(i + 1) }),

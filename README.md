@@ -32,11 +32,13 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 | Slide | Agachar enquanto corre |
 | Golpe rápido | V (saca a faca, golpeia e volta para a arma) |
 | Equipamento letal / tático | G / Q (arremessa sem trocar de arma) |
+| Fumaça (modo Bomba) | X |
+| Plantar / desarmar (modo Bomba) | E (segurar) |
 | Atirar | Botão esquerdo |
 | Mirar / luneta | Botão direito (segurar ou alternar) |
 | Recarregar | R |
 | Trocar arma | 1 e 2 primárias, 3 pistola, 4 faca, ou roda do mouse |
-| Inventário | B (nas partidas com todas as armas) |
+| Inventário | B (nas partidas com todas as armas). No modo Bomba, B abre a compra |
 | Placar | Tab (segurar) |
 | Chat (todos) / chat do time | Enter / Y |
 | Pausa | Esc |
@@ -112,6 +114,7 @@ Vila, Centro e Pátio são simétricos por rotação de 180°, e `npm run check`
 
 - **Mata-mata (FFA):** todos contra todos. Vence quem atingir o limite de kills ou tiver mais kills no fim do tempo.
 - **Mata-mata em equipe (TDM):** Vermelho × Azul, escolha de time no lobby, auto-balanceamento e fogo amigo configurável. Dá para trocar de time durante a partida pelo menu de pausa (`Esc`), uma vez a cada 10 s.
+- **Bomba:** ataque contra defesa em rodadas, com compra de armas. Tem regras próprias, descritas abaixo.
 
 O host também escolhe as **Armas** da partida:
 
@@ -122,6 +125,46 @@ O host também escolhe as **Armas** da partida:
 Quem abrir o link no meio da partida entra direto no jogo. Durante a tela de resultados, espera no lobby.
 
 No fim da partida aparece o placar com MVP; o host pode pedir **Revanche** ou **Voltar ao lobby**.
+
+### Modo Bomba
+
+Um time ataca, o outro defende, e cada um tem uma vida por rodada. O ataque vence plantando a bomba em um dos bombs (A ou B) e deixando explodir, ou eliminando a defesa. A defesa vence desarmando a bomba, eliminando o ataque antes do plant ou segurando até o tempo acabar. Na metade da partida os times trocam de lado e o dinheiro volta ao início. Vence quem chegar ao número de vitórias escolhido no lobby (7, 9 ou 13). Só existe nos mapas **Usina** e **Mercado**, feitos para ele. No **Treino Offline** com um desses mapas você joga no ataque, contra alvos parados.
+
+| Rodada | |
+| --- | --- |
+| Congelamento e compra | 15 s parado, e a compra segue por mais 20 s na sua zona |
+| Tempo de rodada | 1:55 |
+| Plantar | 3,2 s parado dentro do bomb, segurando `E` |
+| Bomba | Explode em 40 s, atravessa paredes e mata até cerca de 11 m |
+| Desarmar | 10 s segurando `E` ao lado da bomba, ou 5 s com o kit |
+
+Quem carrega a bomba e morre a deixa cair. Outro atacante pega passando por cima, e ela brilha através das paredes só para o ataque.
+
+| Dinheiro | |
+| --- | --- |
+| Início | $800, máximo de $16.000 |
+| Vitória | $3.250, ou $3.500 com bomba explodida ou desarmada |
+| Derrota | $1.400, subindo $500 por derrota até $3.400. Uma vitória desce um degrau |
+| Plantar ou desarmar | +$300 para quem fez |
+| Bomba plantada na derrota | +$800 para cada atacante |
+| Tempo esgotado | Atacante vivo não recebe nada |
+| Abate | $300, SMG $600, escopeta $900, sniper $100, faca $1.500 |
+| Abate de companheiro | -$300 |
+
+| Comprar (`B`) | |
+| --- | --- |
+| Pistolas | Automática $500, revólver $600, Desert Eagle $700 |
+| Primárias | Escopeta $1.100, SMG $1.250, besta $1.700, DMR $2.000, rifle $2.900, sniper $4.750, LMG $5.200 |
+| Granadas (até 4) | Flashbang $200 (até 2), fumaça $300, granada $300, molotov $400, concussão $200 |
+| Equipamento | Colete $650, capacete $350, kit de desarme $400 (só defesa) |
+
+Quem sobrevive à rodada fica com tudo o que tinha; quem morre volta com a pistola e deixa no chão a primária, ou a pistola se não tinha primária, com a munição que restava. Sem primária, passar por cima de uma já pega. Para trocar, encoste na arma e aperte `E`: a sua fica no lugar dela. Armas no chão somem na rodada seguinte.
+
+O **radar** fica no canto superior esquerdo, com o norte sempre para cima. Mostra seus companheiros, os inimigos que você ou um deles estiver vendo (paredes e fumaça escondem), e a bomba: para o ataque sempre, e para a defesa depois que alguém a vê plantada.
+
+O dinheiro do seu time aparece no placar (`Tab`) e no menu de compra. O do time inimigo fica escondido.
+
+A jogabilidade também muda nesse modo: sem regeneração de vida, sem corrida e sem slide, e só sniper e DMR miram. O tiro é preciso parado e ruim correndo. `Shift` anda devagar e sem barulho de passos. Headshot multiplica por 4 e passa por tudo sem capacete; colete e capacete cortam o dano conforme a arma. A faca leva 2 golpes. `X` joga a fumaça, que corta a visão por 17 s. Quem morre assiste um companheiro, e o clique troca de quem.
 
 ---
 
@@ -139,7 +182,7 @@ Para testar o multiplayer na mesma máquina, abra duas abas (ou uma aba anônima
 ```bash
 npm run build      # checagem de tipos + build de produção em dist/
 npm run preview    # serve o build de dist/
-npm run check      # confere movimentação, balanceamento, equilíbrio dos mapas e equipamentos
+npm run check      # confere movimentação, balanceamento, mapas, equipamentos e o modo Bomba
 ```
 
 ---

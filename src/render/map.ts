@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { MapDef, MatKind, PropDef, RampDef } from '../game/mapData';
+import type { MapDef, MatKind, PropDef, RampDef, Rect } from '../game/mapData';
 import { TEAM_COLORS } from '../game/constants';
 import { getTexture, makeGlowTexture, TEX_SCALE } from './textures';
 
@@ -164,8 +164,38 @@ export function buildMap(def: MapDef, anisotropy: number): { group: THREE.Group;
     m.position.set(mark.x, 0.02, mark.z);
     group.add(m);
   }
+  for (const site of def.bomb?.sites ?? []) group.add(siteMark(site.name, site.rect));
   addProps(def, group);
   return { group, materials };
+}
+
+/** Painted area of a bomb site, with its letter. */
+function siteMark(name: string, [x0, z0, x1, z1]: Rect): THREE.Group {
+  const mark = new THREE.Group();
+  mark.position.set((x0 + x1) / 2, 0.03, (z0 + z1) / 2);
+  const area = new THREE.Mesh(
+    new THREE.PlaneGeometry(x1 - x0, z1 - z0),
+    new THREE.MeshBasicMaterial({ color: 0xd8342a, transparent: true, opacity: 0.13, depthWrite: false }),
+  );
+  area.rotation.x = -Math.PI / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.font = 'bold 110px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillText(name, 64, 70);
+  }
+  const letter = new THREE.Mesh(
+    new THREE.PlaneGeometry(5, 5),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false }),
+  );
+  letter.rotation.x = -Math.PI / 2;
+  letter.position.y = 0.01;
+  mark.add(area, letter);
+  return mark;
 }
 
 export function buildSky(): THREE.Mesh {

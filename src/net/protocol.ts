@@ -59,6 +59,8 @@ export interface ScoreRow {
   pg: number;
   /** Gun Game level. */
   lv: number;
+  /** Bomb mode: money, sent only to the player's own team. */
+  m?: number;
 }
 
 export interface ResultRow {
@@ -98,6 +100,8 @@ export interface InputMsg {
   w: number;
   a: boolean;
   g: boolean;
+  /** Holding the key that plants or defuses. */
+  u: boolean;
 }
 
 export interface ShootMsg {
@@ -145,7 +149,13 @@ export interface LoadoutMsg {
   go: boolean;
 }
 
-export type ClientMsg = HelloMsg | InputMsg | ShootMsg | ReloadMsg | ChatSendMsg | PongMsg | SetTeamMsg | SetColorMsg | LoadoutMsg;
+/** Bomb mode: a weapon id or an ITEM. */
+export interface BuyMsg {
+  type: 'buy';
+  item: number;
+}
+
+export type ClientMsg = HelloMsg | InputMsg | ShootMsg | ReloadMsg | ChatSendMsg | PongMsg | SetTeamMsg | SetColorMsg | LoadoutMsg | BuyMsg;
 
 // ---------------------------------------------------------------------------
 // Host -> Client
@@ -196,6 +206,51 @@ export interface SpawnMsg {
   full: boolean;
   /** Weapons the player spawned with (full respawns). */
   ld?: number[];
+  /** What the player can throw (full respawns). */
+  eq?: number[];
+}
+
+export type RoundPhase = 'freeze' | 'live' | 'over';
+export type RoundEnd = 'elimination' | 'time' | 'exploded' | 'defused';
+
+/** Bomb mode: everything everyone needs to know about the round. Sent on every change, and once a second for the clock. */
+export interface RoundMsg {
+  type: 'round';
+  n: number;
+  phase: RoundPhase;
+  /** Ms left in the phase; with the bomb planted, until it goes off. */
+  left: number;
+  /** Ms left to buy. */
+  buy: number;
+  /** Team on attack. */
+  atk: Team;
+  /** Who carries the bomb, or -1. */
+  by: number;
+  /** Where the bomb lies, dropped or planted. */
+  spot: Vec3 | null;
+  planted: boolean;
+  /** Who is planting or defusing, or -1, and the ms left of it. */
+  act: number;
+  actLeft: number;
+  win: Team | null;
+  why: RoundEnd | null;
+}
+
+/** Bomb mode: weapons lying on the ground. */
+export interface DropsMsg {
+  type: 'drops';
+  list: Array<{ id: number; w: number; p: Vec3 }>;
+}
+
+/** Bomb mode: this player's wallet and gear. */
+export interface KitMsg {
+  type: 'kit';
+  money: number;
+  ld: number[];
+  eq: number[];
+  armor: number;
+  helmet: boolean;
+  defuseKit: boolean;
 }
 
 /** Opens the spawn screen. */
@@ -330,6 +385,9 @@ export type HostMsg =
   | ProjMsg
   | ProjEndMsg
   | StunMsg
+  | RoundMsg
+  | KitMsg
+  | DropsMsg
   | PickupMsg
   | ChatMsg
   | SysMsg
@@ -359,7 +417,8 @@ export function parseClientMsg(raw: unknown): ClientMsg | null {
         typeof m.c === 'boolean' &&
         isWeapon(m.w) &&
         typeof m.a === 'boolean' &&
-        typeof m.g === 'boolean'
+        typeof m.g === 'boolean' &&
+        typeof m.u === 'boolean'
         ? (m as unknown as InputMsg)
         : null;
     case 'shoot':
@@ -378,6 +437,8 @@ export function parseClientMsg(raw: unknown): ClientMsg | null {
       return isWeapon(m.w) ? (m as unknown as ReloadMsg) : null;
     case 'loadout':
       return Array.isArray(m.w) && m.w.length === 5 && m.w.every(isWeapon) && typeof m.go === 'boolean' ? (m as unknown as LoadoutMsg) : null;
+    case 'buy':
+      return isFiniteNum(m.item) ? (m as unknown as BuyMsg) : null;
     case 'chat':
       return isStr(m.text, CHAT_MAX) && typeof m.team === 'boolean' ? (m as unknown as ChatSendMsg) : null;
     case 'pong':

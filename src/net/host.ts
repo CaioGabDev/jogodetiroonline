@@ -1,6 +1,7 @@
 import type { DataConnection, Peer } from 'peerjs';
 import {
   ARSENAL_NAMES,
+  BOMB_MAPS,
   DEFAULT_CONFIG,
   MAP_NAMES,
   FFA_COLORS,
@@ -20,10 +21,12 @@ import {
   REGEN_DELAY_MS,
   REGEN_RATE,
   RESPAWN_MS,
+  ROUND_WINS,
   SNAPSHOT_RATE,
   SPAWN_PROTECT_MS,
   TEAM_NAMES,
   TEAM_SWITCH_COOLDOWN_MS,
+  teamMode,
   type MapId,
   type MatchConfig,
   type Team,
@@ -34,6 +37,7 @@ import { MAPS, type MapDef, type SpawnDef } from '../game/mapData';
 import { CollisionWorld, eyeHeight } from '../game/physics';
 import { PositionHistory, rayPlayer } from '../game/hitbox';
 import { DEFAULT_LOADOUT, GUN_GAME_LADDER, W, WEAPONS, allowedWeapons, blastDamage, damageAt, fullAmmo, spawnEquipment, stunMs, validLoadout } from '../game/weapons';
+import { ITEM, MAX_THROWN, ROUND, SHOP, gunHit, inRect, isThrowable, isWeaponItem, lossBonus, siteAt } from '../game/bomb';
 import { clamp, now, r2, r3, randomCode, sanitizeText } from '../core/util';
 import {
   F_ADS,
@@ -54,6 +58,9 @@ import {
   type Phase,
   type PlayerInfo,
   type ResultRow,
+  type RoundEnd,
+  type RoundPhase,
+  type ScoreRow,
   type ShootMsg,
   type SnapPlayer,
 } from './protocol';
@@ -129,7 +136,54 @@ interface SPlayer {
   equip: number[];
   /** On the spawn screen, waiting for the timer or a confirmation. */
   picking: boolean;
+  // Bomb mode.
+  money: number;
+  armor: number;
+  helmet: boolean;
+  defuseKit: boolean;
+  /** Holding the key that plants or defuses. */
+  using: boolean;
+  /** The same key on the last tick: swapping a weapon takes a new press. */
+  wasUsing: boolean;
 }
+
+/** A weapon on the ground, with the ammo it was left with. */
+interface Drop {
+  id: number;
+  w: number;
+  x: number;
+  y: number;
+  z: number;
+  mag: number;
+  reserve: number;
+}
+
+/** State of the bomb mode. */
+interface Round {
+  n: number;
+  phase: RoundPhase;
+  endsAt: number;
+  buyEndsAt: number;
+  attackers: Team;
+  /** Rounds lost, which set the size of the loss bonus. */
+  lossStreak: Record<Team, number>;
+  carrier: SPlayer | null;
+  /** Where the bomb lies, dropped or planted. */
+  spot: [number, number, number] | null;
+  planted: boolean;
+  planter: SPlayer | null;
+  explodeAt: number;
+  /** Who is planting or defusing, from where, and until when. */
+  worker: SPlayer | null;
+  workX: number;
+  workZ: number;
+  workEndsAt: number;
+  winner: Team | null;
+  why: RoundEnd | null;
+}
+
+const otherTeam = (t: Team): Team => (t === 'red' ? 'blue' : 'red');
+const scoreIndex = (t: Team): 0 | 1 => (t === 'red' ? 0 : 1);
 
 /** A bolt or grenade in flight. */
 interface Projectile {
@@ -233,6 +287,9 @@ export class HostServer {
   private projectiles: Projectile[] = [];
   private nextProjectile = 1;
   private fires: Fire[] = [];
+  private round: Round = this.newRound();
+  private drops: Drop[] = [];
+  private nextDrop = 1;
 
   constructor(
     offline: boolean,
@@ -240,8 +297,18 @@ export class HostServer {
     practiceMap: MapId = DEFAULT_CONFIG.map,
   ) {
     this.offline = offline;
-    this.config = offline ? { ...DEFAULT_CONFIG, map: practiceMap, killLimit: 0, timeLimit: 0 } : { ...DEFAULT_CONFIG };
+    // Practice on a bomb map is the real mode, against targets that stand in the defenders' spawn.
+    const practiceMode = MAPS[practiceMap].bomb ? ({ mode: 'bomb', arsenal: 'shop' } as const) : {};
+    this.config = offline ? { ...DEFAULT_CONFIG, map: practiceMap, killLimit: 0, timeLimit: 0, ...practiceMode } : { ...DEFAULT_CONFIG };
     this.map = MAPS[this.config.map];
+  }
+
+  private get bombMode(): boolean {
+    return this.config.mode === 'bomb';
+  }
+
+  private get frozen(): boolean {
+    return this.bombMode && this.round.phase === 'freeze';
   }
 
   /** Registers the room with PeerJS (retrying on code collisions). Returns the room code. */
@@ -432,6 +499,12 @@ export class HostServer {
       loadout: [...DEFAULT_LOADOUT],
       equip: [],
       picking: false,
+      money: ROUND.startMoney,
+      armor: 0,
+      helmet: false,
+      defuseKit: false,
+      using: false,
+      wasUsing: false,
     };
   }
 
@@ -449,6 +522,10 @@ export class HostServer {
   /** BOT_DEFS were placed by hand on the Arena. Elsewhere targets use the spawns, which are clear on every map. */
   private botSpot(d: (typeof BOT_DEFS)[number], i: number): (typeof BOT_DEFS)[number] {
     if (this.config.map === 'arena') return d;
+    if (this.map.bomb) {
+      const [ax, y, az] = this.map.teamSpawns.blue[i].pos;
+      return { ...d, ax, az, y, bx: ax, bz: az, speed: 0 };
+    }
     // Every other spawn, so targets spread over the whole map.
     const s = this.map.ffaSpawns[(i * 3) % this.map.ffaSpawns.length];
     const [ax, y, az] = s.pos;
@@ -480,6 +557,12 @@ export class HostServer {
     this.fires = this.fires.filter((f) => f.owner !== p);
     this.broadcast({ type: 'sys', text: `${p.info.name} saiu da partida` });
     this.broadcastLobby();
+    if (this.bombMode && this.phase === 'playing') {
+      if (this.round.carrier === p) this.dropBomb(p);
+      if (this.round.worker === p) this.stopWork();
+      if (p.alive) this.dropWeapon(p);
+      this.checkElimination();
+    }
   }
 
   // ---------------------------------------------------------------- messaging
@@ -549,6 +632,9 @@ export class HostServer {
       case 'loadout':
         this.onLoadout(p, m);
         break;
+      case 'buy':
+        this.onBuy(p, m.item);
+        break;
       case 'setColor':
         if (this.phase !== 'playing') {
           const used = [...this.players.values()].some((o) => o !== p && o.info.color === m.color);
@@ -564,8 +650,9 @@ export class HostServer {
   }
 
   private onSetTeam(p: SPlayer, team: Team): void {
-    if (this.config.mode !== 'tdm' || p.bot || p.info.team === team) return;
+    if (!teamMode(this.config.mode) || p.bot || p.info.team === team) return;
     const playing = this.phase === 'playing';
+    if (playing && this.bombMode) return;
     if (playing) {
       const t = now();
       if (t < p.teamLockUntil) {
@@ -600,7 +687,7 @@ export class HostServer {
       return;
     }
     p.slot.chatTimes.push(t);
-    const team = teamOnly && this.config.mode === 'tdm';
+    const team = teamOnly && teamMode(this.config.mode);
     for (const o of this.players.values()) {
       if (!o.slot) continue;
       if (team && o.info.team !== p.info.team) continue;
@@ -617,10 +704,19 @@ export class HostServer {
   setConfig(patch: Partial<MatchConfig>): void {
     if (this.phase === 'playing' || this.offline) return;
     const c = { ...this.config, ...patch };
-    if (c.mode !== 'ffa' && c.mode !== 'tdm') c.mode = 'ffa';
+    if (c.mode !== 'ffa' && c.mode !== 'tdm' && c.mode !== 'bomb') c.mode = 'ffa';
     if (!(c.arsenal in ARSENAL_NAMES)) c.arsenal = 'all';
     if (!Object.hasOwn(MAP_NAMES, c.map)) c.map = 'arena';
     if (c.arsenal === 'gungame') c.mode = 'ffa';
+    // The bomb mode brings its own weapons and maps, and they don't fit the other modes.
+    if (c.mode === 'bomb') {
+      c.arsenal = 'shop';
+      if (!BOMB_MAPS.includes(c.map)) c.map = BOMB_MAPS[0];
+      if (!ROUND_WINS.includes(c.rounds)) c.rounds = DEFAULT_CONFIG.rounds;
+    } else {
+      if (c.arsenal === 'shop') c.arsenal = 'all';
+      if (BOMB_MAPS.includes(c.map)) c.map = 'arena';
+    }
     if (!KILL_LIMITS.includes(c.killLimit)) c.killLimit = DEFAULT_CONFIG.killLimit;
     if (!TIME_LIMITS.includes(c.timeLimit)) c.timeLimit = DEFAULT_CONFIG.timeLimit;
     c.friendlyFire = !!c.friendlyFire;
@@ -641,7 +737,7 @@ export class HostServer {
     if (this.destroyed) return;
     this.phase = 'playing';
     this.teamScore = [0, 0];
-    this.endsAt = this.config.timeLimit > 0 ? now() + this.config.timeLimit * 60000 : 0;
+    this.endsAt = this.config.timeLimit > 0 && !this.bombMode ? now() + this.config.timeLimit * 60000 : 0;
     this.map = MAPS[this.config.map];
     this.world = new CollisionWorld(this.map);
     this.pickups = this.map.pickups.map(() => ({ active: true, respawnAt: 0 }));
@@ -658,6 +754,16 @@ export class HostServer {
     }
     this.broadcastLobby();
     this.broadcast({ type: 'start', match: this.matchInfo() });
+    if (this.bombMode) {
+      this.round = this.newRound();
+      for (const p of this.players.values()) {
+        p.money = ROUND.startMoney;
+        this.clearGear(p);
+      }
+      this.startRound();
+      this.sendScores();
+      return;
+    }
     // Spawn humans first (bots have fixed spots).
     const order = [...this.players.values()].sort(() => Math.random() - 0.5);
     for (const p of order) this.beginSpawn(p);
@@ -687,7 +793,8 @@ export class HostServer {
     if (p.bot) {
       return { pos: [p.bot.ax, p.bot.y, p.bot.az], yaw: Math.atan2(p.bot.ax, p.bot.az) };
     }
-    const list = this.config.mode === 'tdm' ? this.map.teamSpawns[p.info.team] : this.map.ffaSpawns;
+    const side = p.info.team === this.round.attackers ? this.map.teamSpawns.red : this.map.teamSpawns.blue;
+    const list = this.bombMode ? side : this.config.mode === 'tdm' ? this.map.teamSpawns[p.info.team] : this.map.ffaSpawns;
     const enemies = [...this.players.values()].filter((o) => o.alive && this.isEnemy(p, o));
     const others = [...this.players.values()].filter((o) => o.alive && o !== p);
     const scored = list.map((s) => {
@@ -702,6 +809,15 @@ export class HostServer {
 
   /** First spawn of a match: players choose weapons first when the mode lets them. */
   private beginSpawn(p: SPlayer): void {
+    if (this.bombMode) {
+      // Coming in mid-round means waiting for the next one.
+      this.clearGear(p);
+      if (this.frozen) this.spawnPlayer(p);
+      this.sendKit(p);
+      this.sendRound();
+      this.sendDrops();
+      return;
+    }
     if (p.bot || this.config.arsenal !== 'all') {
       this.spawnPlayer(p);
       return;
@@ -724,12 +840,14 @@ export class HostServer {
     p.crouch = p.bot?.crouch ?? false;
     p.hp = MAX_HP;
     p.alive = true;
-    p.protectedUntil = t + SPAWN_PROTECT_MS;
+    p.protectedUntil = this.bombMode ? 0 : t + SPAWN_PROTECT_MS;
     const ammo = fullAmmo();
+    // Grenades are bought, and the ones not thrown stay for the next round.
+    if (this.bombMode) WEAPONS.forEach((def, w) => isThrowable(def) && (ammo.mag[w] = p.mag[w]));
     p.mag = ammo.mag;
     p.reserve = ammo.reserve;
     p.reloadW = -1;
-    p.equip = spawnEquipment(this.config.arsenal, p.loadout);
+    p.equip = this.bombMode ? this.heldThrowables(p) : spawnEquipment(this.config.arsenal, p.loadout);
     p.weapon = this.allowed(p)[0];
     p.tp++;
     p.lastCt = -1;
@@ -739,8 +857,9 @@ export class HostServer {
     p.history.clear();
     p.history.push({ t, x: p.x, y: p.y, z: p.z, crouch: p.crouch });
     p.lastHistT = t;
-    this.send(p, { type: 'spawn', p: [p.x, p.y, p.z], yw: p.yaw, tp: p.tp, full: true, ld: p.loadout });
+    this.send(p, { type: 'spawn', p: [p.x, p.y, p.z], yw: p.yaw, tp: p.tp, full: true, ld: p.loadout, eq: p.equip });
     this.sendAmmo(p);
+    if (this.bombMode) this.sendKit(p);
   }
 
   private sendAmmo(p: SPlayer): void {
@@ -758,11 +877,12 @@ export class HostServer {
     p.yaw = m.yw;
     p.pitch = clamp(m.pt, -1.6, 1.6);
     p.ads = m.a;
+    p.using = m.u;
     if (m.w !== p.weapon && this.allowed(p).includes(m.w)) {
       p.weapon = m.w;
       p.reloadW = -1;
     }
-    if (!p.alive || this.phase !== 'playing') return;
+    if (!p.alive || this.phase !== 'playing' || this.frozen) return;
 
     // Movement is validated against the client's own simulation clock, so network
     // jitter (inputs arriving in bursts) never looks like speed hacking. A separate
@@ -875,6 +995,7 @@ export class HostServer {
       p.lastShotSeq = Math.max(p.lastShotSeq, m.s);
       this.sendAmmo(p);
     };
+    if (this.frozen) return reject();
     const eye = p.y + eyeHeight(p.crouch);
     if (Math.hypot(m.o[0] - p.x, m.o[1] - eye, m.o[2] - p.z) > 3) return reject();
     // Thrown with the gun still in hand. What limits it is the count, not a fire rate.
@@ -958,7 +1079,7 @@ export class HostServer {
         hk.push(2);
         n.push(0, 0, 0);
         const acc = dmgMap.get(best.pl) ?? { dmg: 0, hs: false };
-        acc.dmg += damageAt(def, maxT, best.head);
+        acc.dmg += this.bulletDamage(def, maxT, best.head, best.pl);
         acc.hs ||= best.head;
         dmgMap.set(best.pl, acc);
       } else if (wh) {
@@ -989,7 +1110,16 @@ export class HostServer {
       const killed = target.hp <= 0;
       if (killed) this.kill(p, target, w, hs);
       if (target !== p) this.send(p, { type: 'hit', dmg: amount, hs, kill: killed, p: this.overHead(target) });
+      if (this.bombMode) this.sendKit(target);
     }
+  }
+
+  /** In the bomb mode armor takes its share, and wears down doing it. */
+  private bulletDamage(def: (typeof WEAPONS)[number], dist: number, head: boolean, target: SPlayer): number {
+    if (!this.bombMode) return damageAt(def, dist, head);
+    const hit = gunHit(def, dist, head, target.armor, target.helmet);
+    target.armor = Math.max(0, target.armor - hit.armor);
+    return hit.hp;
   }
 
   private overHead(p: SPlayer): [number, number, number] {
@@ -1083,16 +1213,17 @@ export class HostServer {
     if (def.stun) this.stunBlast(pr, cx, cy, cz, def.stun.radius);
     const dmgMap: DamageMap = new Map();
     if (def.splash) {
-      for (const { pl, d } of this.blastHits(pr.owner, pr.w, cx, cy, cz, def.splash.radius)) dmgMap.set(pl, { dmg: blastDamage(def, d), hs: false });
+      const scale = this.bombMode ? (SHOP[pr.w]?.damage ?? def.damage) / def.damage : 1;
+      for (const { pl, d } of this.blastHits(pr.owner, pr.w, cx, cy, cz, def.splash.radius)) dmgMap.set(pl, { dmg: blastDamage(def, d) * scale, hs: false });
     } else if (hit) {
-      dmgMap.set(hit.pl, { dmg: damageAt(def, 0, hit.head), hs: hit.head });
+      dmgMap.set(hit.pl, { dmg: this.bulletDamage(def, 0, hit.head, hit.pl), hs: hit.head });
     }
     this.dealDamage(pr.owner, dmgMap, pr.w, def.splash ? [r2(cx), r2(cy), r2(cz)] : undefined);
   }
 
   /** Who a blast reaches: walls block it, and thrown equipment catches its thrower too. The launcher never hurts the shooter. */
   private blastHits(owner: SPlayer, w: number, x: number, y: number, z: number, radius: number): Array<{ pl: SPlayer; d: number }> {
-    const thrown = owner.equip.includes(w);
+    const thrown = isThrowable(WEAPONS[w]);
     const out: Array<{ pl: SPlayer; d: number }> = [];
     for (const o of this.players.values()) {
       if (!o.alive) continue;
@@ -1148,23 +1279,408 @@ export class HostServer {
     victim.alive = false;
     victim.deaths++;
     victim.reloadW = -1;
-    victim.respawnAt = now() + RESPAWN_MS;
+    victim.respawnAt = this.bombMode ? 0 : now() + RESPAWN_MS;
     const suicide = killer === victim;
-    const teamKill = this.config.mode === 'tdm' && killer.info.team === victim.info.team;
+    const teamKill = teamMode(this.config.mode) && killer.info.team === victim.info.team;
+    // In the bomb mode kills pay money, and it's rounds that score.
+    const point = this.bombMode ? 0 : 1;
     if (suicide) {
       // Only the death counts.
     } else if (teamKill) {
       killer.kills--;
-      this.teamScore[killer.info.team === 'red' ? 0 : 1]--;
+      this.teamScore[scoreIndex(killer.info.team)] -= point;
     } else {
       killer.kills++;
       if (hs) killer.headshots++;
       if (this.config.arsenal === 'gungame') this.gunGameKill(killer, victim, w);
-      this.teamScore[killer.info.team === 'red' ? 0 : 1]++;
+      this.teamScore[scoreIndex(killer.info.team)] += point;
+    }
+    if (this.bombMode) {
+      if (teamKill && !suicide) this.pay(killer, -ROUND.teamKillFine);
+      else if (!suicide) this.pay(killer, SHOP[w]?.reward ?? 0);
+      this.dropWeapon(victim);
+      this.clearGear(victim);
+      this.sendKit(victim);
+      if (this.round.carrier === victim) this.dropBomb(victim);
+      if (this.round.worker === victim) this.stopWork();
     }
     this.broadcast({ type: 'kill', k: killer.info.id, v: victim.info.id, w, hs });
     this.sendScores();
-    this.checkWin();
+    if (this.bombMode) this.checkElimination();
+    else this.checkWin();
+  }
+
+  // ---------------------------------------------------------------- bomb mode
+
+  private newRound(): Round {
+    return {
+      n: 0,
+      phase: 'freeze',
+      endsAt: 0,
+      buyEndsAt: 0,
+      attackers: 'red',
+      lossStreak: { red: 0, blue: 0 },
+      carrier: null,
+      spot: null,
+      planted: false,
+      planter: null,
+      explodeAt: 0,
+      worker: null,
+      workX: 0,
+      workZ: 0,
+      workEndsAt: 0,
+      winner: null,
+      why: null,
+    };
+  }
+
+  private heldThrowables(p: SPlayer): number[] {
+    return WEAPONS.filter((def) => isThrowable(def) && p.mag[def.id] > 0).map((def) => def.id);
+  }
+
+  /** Dying, and the swap at the half, take everything but the money. */
+  private clearGear(p: SPlayer): void {
+    p.loadout = [W.PISTOL];
+    p.armor = 0;
+    p.helmet = false;
+    p.defuseKit = false;
+    p.equip = [];
+    WEAPONS.forEach((def, w) => isThrowable(def) && (p.mag[w] = 0));
+  }
+
+  private pay(p: SPlayer, amount: number): void {
+    p.money = clamp(p.money + amount, 0, ROUND.maxMoney);
+    this.sendKit(p);
+  }
+
+  private sendKit(p: SPlayer): void {
+    this.send(p, { type: 'kit', money: p.money, ld: [...p.loadout], eq: this.heldThrowables(p), armor: Math.round(p.armor), helmet: p.helmet, defuseKit: p.defuseKit });
+  }
+
+  private sendRound(): void {
+    const r = this.round;
+    const t = now();
+    this.broadcast({
+      type: 'round',
+      n: r.n,
+      phase: r.phase,
+      left: Math.max(0, Math.round((r.planted && r.phase === 'live' ? r.explodeAt : r.endsAt) - t)),
+      buy: Math.max(0, Math.round(r.buyEndsAt - t)),
+      atk: r.attackers,
+      by: r.carrier?.info.id ?? -1,
+      spot: r.spot,
+      planted: r.planted,
+      act: r.worker?.info.id ?? -1,
+      actLeft: r.worker ? Math.max(0, Math.round(r.workEndsAt - t)) : 0,
+      win: r.winner,
+      why: r.why,
+    });
+  }
+
+  private startRound(): void {
+    const r = this.round;
+    const t = now();
+    r.n++;
+    r.phase = 'freeze';
+    r.endsAt = t + ROUND.freezeMs;
+    r.buyEndsAt = r.endsAt + ROUND.buyMs;
+    r.spot = null;
+    r.planted = false;
+    r.planter = null;
+    r.worker = null;
+    r.winner = null;
+    r.why = null;
+    this.projectiles = [];
+    this.fires = [];
+    this.drops = [];
+    this.sendDrops();
+    const players = [...this.players.values()];
+    for (const p of players) p.alive = false;
+    for (const p of players) this.spawnPlayer(p);
+    const attackers = players.filter((p) => p.info.team === r.attackers && !p.bot);
+    r.carrier = attackers[Math.floor(Math.random() * attackers.length)] ?? null;
+    this.sendRound();
+  }
+
+  private sideCount(team: Team): { all: number; alive: number } {
+    const side = [...this.players.values()].filter((p) => p.info.team === team);
+    return { all: side.length, alive: side.filter((p) => p.alive).length };
+  }
+
+  /** A side that never had anyone can't lose this way, so one person can walk through a round. */
+  private checkElimination(): void {
+    const r = this.round;
+    if (r.phase !== 'live') return;
+    const defenders = otherTeam(r.attackers);
+    const def = this.sideCount(defenders);
+    const atk = this.sideCount(r.attackers);
+    if (def.all > 0 && def.alive === 0) this.endRound(r.attackers, 'elimination');
+    else if (atk.all > 0 && atk.alive === 0 && !r.planted) this.endRound(defenders, 'elimination');
+  }
+
+  private endRound(winner: Team, why: RoundEnd): void {
+    const r = this.round;
+    if (r.phase === 'over') return;
+    r.phase = 'over';
+    r.endsAt = now() + ROUND.overMs;
+    r.winner = winner;
+    r.why = why;
+    r.worker = null;
+    this.teamScore[scoreIndex(winner)]++;
+    const loser = otherTeam(winner);
+    r.lossStreak[loser] = Math.min(ROUND.lossSteps, r.lossStreak[loser] + 1);
+    r.lossStreak[winner] = Math.max(0, r.lossStreak[winner] - 1);
+    const win = why === 'exploded' || why === 'defused' ? ROUND.winObjective : ROUND.winElimination;
+    const loss = lossBonus(r.lossStreak[loser]) + (loser === r.attackers && r.planted ? ROUND.plantedLossBonus : 0);
+    for (const p of this.players.values()) {
+      if (p.info.team === winner) this.pay(p, win);
+      // Attackers who sit out the clock alive don't get paid for it.
+      else if (!(why === 'time' && p.alive)) this.pay(p, loss);
+    }
+    this.sendScores();
+    this.sendRound();
+  }
+
+  private nextRound(): void {
+    const r = this.round;
+    const need = this.config.rounds;
+    if (this.teamScore[0] >= need || this.teamScore[1] >= need) return this.endMatch('kills');
+    // Practice has no one to swap with.
+    if (!this.offline) {
+      if (r.n >= (need - 1) * 2) return this.endMatch('kills');
+      if (r.n === need - 1) this.swapSides();
+    }
+    this.startRound();
+  }
+
+  private swapSides(): void {
+    const r = this.round;
+    r.attackers = otherTeam(r.attackers);
+    r.lossStreak = { red: 0, blue: 0 };
+    for (const p of this.players.values()) {
+      p.money = ROUND.startMoney;
+      this.clearGear(p);
+    }
+    this.broadcast({ type: 'sys', text: 'Metade da partida: os times trocam de lado, e o dinheiro volta ao início.' });
+  }
+
+  private sendDrops(): void {
+    this.broadcast({ type: 'drops', list: this.drops.map((d) => ({ id: d.id, w: d.w, p: [r2(d.x), r2(d.y), r2(d.z)] })) });
+  }
+
+  /** Puts a weapon down where the player stands. */
+  private leaveWeapon(p: SPlayer, w: number): void {
+    const ground = this.world.groundHeight(p.x, p.z, p.y + 0.1, 40);
+    this.drops.push({ id: this.nextDrop++, w, x: p.x, y: ground > -Infinity ? ground : p.y, z: p.z, mag: p.mag[w], reserve: p.reserve[w] });
+  }
+
+  /** Dying leaves the best weapon behind: the primary, or the pistol for someone without one. */
+  private dropWeapon(p: SPlayer): void {
+    this.leaveWeapon(p, p.loadout[0]);
+    this.sendDrops();
+  }
+
+  /** Whether the use key is busy with the bomb. The bomb always comes first. */
+  private usingForBomb(p: SPlayer): boolean {
+    const r = this.round;
+    const site = this.map.bomb;
+    if (r.carrier === p) return site !== undefined && siteAt(site, p.x, p.z) !== undefined;
+    return r.planted && p.info.team !== r.attackers && this.inDefuseReach(p);
+  }
+
+  private takeDrop(p: SPlayer, d: Drop): void {
+    const primary = WEAPONS[d.w].category === 'primary';
+    const empty = primary && p.loadout.length < 2;
+    const slot = primary ? 0 : p.loadout.length - 1;
+    this.drops = this.drops.filter((o) => o !== d);
+    if (empty) {
+      p.loadout = [d.w, ...p.loadout];
+    } else {
+      const old = p.loadout[slot];
+      this.leaveWeapon(p, old);
+      if (p.reloadW === old) p.reloadW = -1;
+      p.loadout = p.loadout.map((w, i) => (i === slot ? d.w : w));
+    }
+    p.mag[d.w] = d.mag;
+    p.reserve[d.w] = d.reserve;
+    this.sendAmmo(p);
+    this.sendKit(p);
+    this.sendDrops();
+  }
+
+  /** Walking over a primary takes it if the slot is free. Anything else takes a press of the use key, and swaps. */
+  private updateDrops(): void {
+    for (const p of this.players.values()) {
+      const pressed = p.using && !p.wasUsing;
+      p.wasUsing = p.using;
+      if (!p.alive || p.bot) continue;
+      const near = this.drops.filter((d) => Math.hypot(d.x - p.x, d.z - p.z) <= ROUND.dropReach && Math.abs(d.y - p.y) < 2 && !p.loadout.includes(d.w));
+      const free = near.find((d) => WEAPONS[d.w].category === 'primary' && p.loadout.length < 2);
+      if (free) this.takeDrop(p, free);
+      else if (pressed && near.length > 0 && !this.usingForBomb(p)) this.takeDrop(p, near[0]);
+    }
+  }
+
+  private dropBomb(from: SPlayer): void {
+    const r = this.round;
+    r.carrier = null;
+    const ground = this.world.groundHeight(from.x, from.z, from.y + 0.1, 40);
+    r.spot = [r2(from.x), r2(ground > -Infinity ? ground : from.y), r2(from.z)];
+    this.sendRound();
+  }
+
+  private stopWork(): void {
+    this.round.worker = null;
+    this.sendRound();
+  }
+
+  private startWork(p: SPlayer, ms: number, t: number): void {
+    const r = this.round;
+    r.worker = p;
+    r.workX = p.x;
+    r.workZ = p.z;
+    r.workEndsAt = t + ms;
+    this.sendRound();
+  }
+
+  private updateRound(t: number): void {
+    const r = this.round;
+    if (r.phase !== 'freeze') this.updateDrops();
+    if (r.phase === 'freeze') {
+      if (t < r.endsAt) return;
+      r.phase = 'live';
+      r.endsAt = t + ROUND.roundMs;
+      this.sendRound();
+      this.checkElimination();
+    } else if (r.phase === 'over') {
+      if (t >= r.endsAt) this.nextRound();
+    } else if (r.planted) {
+      if (t >= r.explodeAt) this.explode();
+      else this.updateDefuse(t);
+    } else if (t >= r.endsAt) {
+      this.endRound(otherTeam(r.attackers), 'time');
+    } else {
+      this.updatePickup();
+      this.updatePlant(t);
+    }
+  }
+
+  private updatePickup(): void {
+    const r = this.round;
+    const spot = r.spot;
+    if (!spot || r.carrier) return;
+    for (const p of this.players.values()) {
+      if (!p.alive || p.bot || p.info.team !== r.attackers) continue;
+      if (Math.hypot(p.x - spot[0], p.z - spot[2]) > ROUND.pickupReach || Math.abs(p.y - spot[1]) > 2) continue;
+      r.carrier = p;
+      r.spot = null;
+      this.sendRound();
+      return;
+    }
+  }
+
+  private updatePlant(t: number): void {
+    const r = this.round;
+    const c = r.carrier;
+    const site = this.map.bomb;
+    const able = c !== null && c.alive && c.using && c.onGround && site !== undefined && siteAt(site, c.x, c.z) !== undefined;
+    if (!able || !c) {
+      if (r.worker) this.stopWork();
+      return;
+    }
+    if (r.worker !== c) return this.startWork(c, ROUND.plantMs, t);
+    if (Math.hypot(c.x - r.workX, c.z - r.workZ) > 0.5) return this.stopWork();
+    if (t < r.workEndsAt) return;
+    r.planted = true;
+    r.planter = c;
+    r.spot = [r2(c.x), r2(c.y), r2(c.z)];
+    r.carrier = null;
+    r.worker = null;
+    r.explodeAt = t + ROUND.bombMs;
+    this.pay(c, ROUND.objectiveBonus);
+    this.sendRound();
+  }
+
+  private inDefuseReach(p: SPlayer): boolean {
+    const spot = this.round.spot;
+    return !!spot && p.alive && p.using && Math.hypot(p.x - spot[0], p.z - spot[2]) <= ROUND.defuseReach && Math.abs(p.y - spot[1]) < 2;
+  }
+
+  private updateDefuse(t: number): void {
+    const r = this.round;
+    if (r.worker) {
+      if (!this.inDefuseReach(r.worker)) return this.stopWork();
+      if (t < r.workEndsAt) return;
+      this.pay(r.worker, ROUND.objectiveBonus);
+      this.endRound(otherTeam(r.attackers), 'defused');
+      return;
+    }
+    for (const p of this.players.values()) {
+      if (p.info.team === r.attackers || !this.inDefuseReach(p)) continue;
+      this.startWork(p, p.defuseKit ? ROUND.defuseKitMs : ROUND.defuseMs, t);
+      return;
+    }
+  }
+
+  private explode(): void {
+    const r = this.round;
+    const spot = r.spot;
+    const planter = r.planter;
+    this.endRound(r.attackers, 'exploded');
+    if (!spot || !planter) return;
+    const dmgMap: DamageMap = new Map();
+    for (const p of this.players.values()) {
+      const d = Math.hypot(p.x - spot[0], p.y + 1 - spot[1], p.z - spot[2]);
+      if (p.alive && d < ROUND.blastRadius) dmgMap.set(p, { dmg: ROUND.blastDamage * (1 - d / ROUND.blastRadius), hs: false });
+    }
+    this.dealDamage(planter, dmgMap, W.BOMB, spot);
+  }
+
+  private onBuy(p: SPlayer, item: number): void {
+    const r = this.round;
+    const zone = this.map.bomb?.buy[p.info.team === r.attackers ? 'attack' : 'defend'];
+    if (!this.bombMode || this.phase !== 'playing' || !p.alive || !zone || !inRect(zone, p.x, p.z) || now() >= r.buyEndsAt) return;
+    const price = SHOP[item]?.price;
+    if (!price || price > p.money || !this.give(p, item)) return;
+    p.money -= price;
+    this.sendAmmo(p);
+    this.sendKit(p);
+  }
+
+  /** Returns false when the player can't take it. */
+  private give(p: SPlayer, item: number): boolean {
+    if (item === ITEM.KEVLAR) {
+      if (p.armor >= 100) return false;
+      p.armor = 100;
+      return true;
+    }
+    if (item === ITEM.HELMET) {
+      if (p.helmet || p.armor <= 0) return false;
+      p.helmet = true;
+      return true;
+    }
+    if (item === ITEM.KIT) {
+      if (p.defuseKit || p.info.team === this.round.attackers) return false;
+      p.defuseKit = true;
+      return true;
+    }
+    if (!isWeaponItem(item)) return false;
+    const def = WEAPONS[item];
+    if (isThrowable(def)) {
+      const carried = p.equip.reduce((sum, w) => sum + p.mag[w], 0);
+      if (p.mag[item] >= (SHOP[item]?.max ?? 0) || carried >= MAX_THROWN) return false;
+      p.mag[item]++;
+      p.equip = this.heldThrowables(p);
+      return true;
+    }
+    if (p.loadout.includes(item)) return false;
+    const pistol = p.loadout[p.loadout.length - 1];
+    if (def.category === 'primary') p.loadout = [item, pistol];
+    else if (def.category === 'pistol') p.loadout = [...p.loadout.slice(0, -1), item];
+    else return false;
+    p.mag[item] = def.mag;
+    p.reserve[item] = def.reserve;
+    return true;
   }
 
   /** Only the weapon of the current level moves a player up. The knife sends the victim back one instead. */
@@ -1209,7 +1725,7 @@ export class HostServer {
       headshots: p.headshots,
     }));
     let winnerTeam: Team | null = null;
-    if (this.config.mode === 'tdm') {
+    if (teamMode(this.config.mode)) {
       if (this.teamScore[0] > this.teamScore[1]) winnerTeam = 'red';
       else if (this.teamScore[1] > this.teamScore[0]) winnerTeam = 'blue';
     }
@@ -1231,18 +1747,18 @@ export class HostServer {
 
   private sendScores(): void {
     const t = now();
-    this.broadcast({
-      type: 'score',
-      ps: [...this.players.values()].map((p) => ({
-        i: p.info.id,
-        k: p.kills,
-        d: p.deaths,
-        lv: p.level,
-        pg: p.slot ? Math.round(p.slot.rtt) : 0,
-      })),
-      teams: [...this.teamScore] as [number, number],
-      tl: this.endsAt > 0 ? Math.max(0, Math.round(this.endsAt - t)) : -1,
-    });
+    const players = [...this.players.values()];
+    const row = (p: SPlayer): ScoreRow => ({ i: p.info.id, k: p.kills, d: p.deaths, lv: p.level, pg: p.slot ? Math.round(p.slot.rtt) : 0 });
+    const teams = [...this.teamScore] as [number, number];
+    const tl = this.endsAt > 0 ? Math.max(0, Math.round(this.endsAt - t)) : -1;
+    if (!this.bombMode) {
+      this.broadcast({ type: 'score', ps: players.map(row), teams, tl });
+      return;
+    }
+    // Everyone sees their own team's money, and nobody sees the other team's.
+    for (const to of players) {
+      this.send(to, { type: 'score', ps: players.map((p) => (p.info.team === to.info.team ? { ...row(p), m: p.money } : row(p))), teams, tl });
+    }
   }
 
   private updateBots(t: number): void {
@@ -1282,7 +1798,7 @@ export class HostServer {
     if (this.phase === 'playing') {
       for (const p of this.players.values()) {
         if (p.reloadW >= 0 && t >= p.reloadUntil) this.finishReload(p);
-        if (p.alive && p.hp < MAX_HP && t - p.lastHurtAt >= REGEN_DELAY_MS) p.hp = Math.min(MAX_HP, p.hp + REGEN_RATE / SNAPSHOT_RATE);
+        if (!this.bombMode && p.alive && p.hp < MAX_HP && t - p.lastHurtAt >= REGEN_DELAY_MS) p.hp = Math.min(MAX_HP, p.hp + REGEN_RATE / SNAPSHOT_RATE);
         if (!p.alive && p.respawnAt > 0 && t >= p.respawnAt) {
           p.respawnAt = 0;
           this.spawnPlayer(p);
@@ -1298,6 +1814,10 @@ export class HostServer {
       this.updateProjectiles(t);
       this.updateFires(t);
       if (this.endsAt > 0 && t >= this.endsAt) this.endMatch('time');
+      if (this.bombMode && this.phase === 'playing') {
+        this.updateRound(t);
+        if (this.tickCount % SNAPSHOT_RATE === 0) this.sendRound();
+      }
     }
 
     if (this.phase === 'playing') {
