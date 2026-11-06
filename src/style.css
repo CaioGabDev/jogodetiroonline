@@ -1525,14 +1525,14 @@ kbd {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 121px;
-  height: 121px;
-  margin: -60px 0 0 -60px;
+  width: 122px;
+  height: 122px;
+  margin: -61px 0 0 -61px;
   background:
-    linear-gradient(#000, #000) top center / 1px 46px no-repeat,
-    linear-gradient(#000, #000) bottom center / 1px 46px no-repeat,
-    linear-gradient(#000, #000) left center / 46px 1px no-repeat,
-    linear-gradient(#000, #000) right center / 46px 1px no-repeat;
+    linear-gradient(#000, #000) top center / 2px 46px no-repeat,
+    linear-gradient(#000, #000) bottom center / 2px 46px no-repeat,
+    linear-gradient(#000, #000) left center / 46px 2px no-repeat,
+    linear-gradient(#000, #000) right center / 46px 2px no-repeat;
 }
 
 .scope-lines::after {
@@ -1540,9 +1540,9 @@ kbd {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 3px;
-  height: 3px;
-  margin: -1.5px 0 0 -1.5px;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
   background: #ff3b3b;
   border-radius: 50%;
 }

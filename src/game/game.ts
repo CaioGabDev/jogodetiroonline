@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
 import { settings } from '../core/settings';
-import { clamp, damp, now, r2, r3 } from '../core/util';
+import { clamp, damp, now, r2, r3, r5 } from '../core/util';
 import { ARSENAL_NAMES, INPUT_RATE, MAX_HP, MOVE, RESPAWN_MS, TEAM_COLORS, type MatchConfig } from './constants';
 import { rayPlayer } from './hitbox';
 import { MAPS, type MapDef } from './mapData';
@@ -30,6 +30,15 @@ const LOOK_SCALE = 0.0005;
 const SWITCH_MS = 380;
 /** Longest wait after a shot before recoil starts to recover, whatever the weapon's fire rate. */
 const RECOVER_DELAY_MS = 300;
+/** A shot this long after the previous one counts as a first shot again: no base spread and no bloom. */
+const SPRAY_RESET_MS = 350;
+/** Below this (radians, well under a pixel) recoil snaps to zero, so the view returns exactly to where it was. */
+const RECOIL_EPSILON = 0.0003;
+const BLOOM_EPSILON = 0.0001;
+/** Recoil multiplier while crouched on the ground. */
+const CROUCH_RECOIL = 0.7;
+/** aimT above this shows the full-screen scope. */
+const SCOPE_IN = 0.85;
 const SLOT_ACTIONS = ['weapon1', 'weapon2', 'weapon3', 'weapon4'] as const;
 
 const _v1 = new THREE.Vector3();
@@ -477,43 +486,51 @@ export class Game {
   private currentSpread(): number {
     const def = WEAPONS[this.weapon];
     const speed = Math.hypot(this.me.vx, this.me.vz);
-    let s = def.spreadHip + (def.spreadAds - def.spreadHip) * this.aimT;
+    const spraying = this.simT - this.lastShot < SPRAY_RESET_MS;
+    // A first shot has no base spread, but scoped weapons only earn that through the scope,
+    // and shotgun pellets always open into a cone around the aim point.
+    const firstShot = !spraying && def.pellets === 1 && (!def.scoped || this.aimT > SCOPE_IN);
+    let s = firstShot ? 0 : def.spreadHip + (def.spreadAds - def.spreadHip) * this.aimT;
     s += Math.min(1, speed / 6) * def.spreadMove * (1 - this.aimT * 0.5);
     if (!this.me.onGround) s += def.spreadAir;
     if (this.me.crouch && this.me.onGround) s *= 0.75;
-    return s + this.bloom;
+    return spraying ? s + this.bloom : s;
   }
 
   private fire(): void {
     const w = this.weapon;
     const def = WEAPONS[w];
     const t = this.simT;
+    // Read before lastShot changes: this shot's spread depends on the time since the previous one.
+    const spread = this.currentSpread();
     this.lastShot = t;
     if (!def.melee) this.mag[w]--;
     if (this.burstLeft > 0) this.burstLeft--;
     this.sprinting = false;
 
-    const eye = this.me.y + this.eyeH;
-    const origin = _v1.set(this.me.x, eye, this.me.z);
-    const aimYaw = this.yaw + this.recoilY;
-    const aimPitch = this.pitch + this.recoilP;
+    // The ray leaves from the camera of the last rendered frame, so it matches what the player saw:
+    // bob, landing dip, shake and interpolated recoil included.
+    const cam = this.sm.camera;
+    const origin = _v1.copy(cam.position);
+    const aimYaw = cam.rotation.y;
+    const aimPitch = cam.rotation.x;
     this.viewDir(_fwd, aimYaw, aimPitch);
     _right.set(Math.cos(aimYaw), 0, -Math.sin(aimYaw));
     _up.crossVectors(_right, _fwd).normalize();
-    const spread = this.currentSpread();
     const dirs: number[] = [];
     const muzzleCam = this.viewmodel.muzzleCameraSpace(new THREE.Vector3());
     const muzzleWorld = this.sm.camera.localToWorld(muzzleCam.clone());
     const rt = this.net.renderTime();
     for (let i = 0; i < def.pellets; i++) {
       const a = Math.random() * Math.PI * 2;
-      const r = spread * Math.sqrt(Math.random());
+      // With several pellets, the first one marks the center of the cone.
+      const r = def.pellets > 1 && i === 0 ? 0 : spread * Math.sqrt(Math.random());
       const d = _v2
         .copy(_fwd)
         .addScaledVector(_right, Math.cos(a) * r)
         .addScaledVector(_up, Math.sin(a) * r)
         .normalize();
-      dirs.push(r3(d.x), r3(d.y), r3(d.z));
+      dirs.push(r5(d.x), r5(d.y), r5(d.z));
       // The host flies projectiles and tells everyone, the shooter included, what to draw.
       if (def.projectile) continue;
 
@@ -541,21 +558,22 @@ export class Game {
     }
     this.shotSeq++;
     this.pendingShots.push({ s: this.shotSeq, w });
-    this.net.send({ type: 'shoot', s: this.shotSeq, w, o: [r2(origin.x), r2(origin.y), r2(origin.z)], d: dirs, rt: Math.round(rt) });
+    this.net.send({ type: 'shoot', s: this.shotSeq, w, o: [r3(origin.x), r3(origin.y), r3(origin.z)], d: dirs, rt: Math.round(rt) });
 
     // Recoil
-    const adsMul = 1 - this.aimT * 0.35;
+    const stance = this.me.crouch && this.me.onGround ? CROUCH_RECOIL : 1;
+    const adsMul = (1 - this.aimT * 0.35) * stance;
     this.recoilP += def.kick * (0.85 + Math.random() * 0.3) * adsMul;
     const pat = RECOIL_PATTERN[this.burst % RECOIL_PATTERN.length];
     this.recoilY += (def.pattern ? pat : (Math.random() - 0.5) * 2) * def.kickYaw * adsMul;
     this.burst++;
-    this.bloom = Math.min(0.03, this.bloom + def.kick * 0.25);
+    this.bloom = Math.min(0.03, this.bloom + def.kick * 0.25 * stance);
 
     if (def.melee) {
       this.viewmodel.swing();
     } else {
-      this.viewmodel.fire(def.fireKick);
-      const scoped = def.scoped && this.aimT > 0.85;
+      this.viewmodel.fire(def.fireKick * stance);
+      const scoped = def.scoped && this.aimT > SCOPE_IN;
       if (!scoped && !def.silent) this.effects.muzzleFlash(muzzleWorld, 0.35, true);
     }
     audio.shot(def.sound);
@@ -574,9 +592,12 @@ export class Game {
       const k = damp(def.recover, dt);
       this.recoilP -= this.recoilP * k;
       this.recoilY -= this.recoilY * k;
+      if (Math.abs(this.recoilP) < RECOIL_EPSILON) this.recoilP = 0;
+      if (Math.abs(this.recoilY) < RECOIL_EPSILON) this.recoilY = 0;
       this.burst = 0;
     }
     this.bloom -= this.bloom * damp(5, dt);
+    if (this.bloom < BLOOM_EPSILON) this.bloom = 0;
 
     // Covers Gun Game level-ups and settings changed mid-match.
     const allowed = this.allowed();
@@ -814,7 +835,7 @@ export class Game {
 
     // Zoom & scope
     this.sm.zoom = 1 + (def.zoom - 1) * aimT;
-    const scoped = this.alive && def.scoped === true && aimT > 0.85;
+    const scoped = this.alive && def.scoped === true && aimT > SCOPE_IN;
     this.hud.setScope(scoped);
     this.sm.showViewmodel = this.alive && !scoped;
     this.hud.setCrosshairVisible(this.alive && !scoped && !this.ended);
