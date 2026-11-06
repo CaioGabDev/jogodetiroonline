@@ -1,8 +1,9 @@
 # Arena FPS Online
 
 Jogo de tiro em primeira pessoa multiplayer (até 10 jogadores) que roda direto no navegador.
-Feito com **Vite + TypeScript + Three.js**, multiplayer **P2P via WebRTC (PeerJS)** e sem nenhum asset externo:
-geometria feita em código, texturas geradas em canvas e sons sintetizados com a Web Audio API.
+Feito com **Vite + TypeScript + Three.js** e multiplayer **P2P via WebRTC (PeerJS)**.
+O mapa é geometria feita em código, as texturas são geradas em canvas e os sons são sintetizados com a Web Audio API.
+As armas são modelos glTF com licença livre (veja `CREDITS.md`), com a versão em código como reserva se um arquivo não carregar.
 
 Funciona como site estático (Vercel, Netlify, GitHub Pages…): não existe servidor de jogo.
 Quem cria a sala vira o **host** e roda a simulação oficial no próprio navegador.
@@ -71,6 +72,8 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 **Itens no chão** (reaparecem em 20 s): o kit médico enche a vida, e a munição recarrega por completo a arma em mãos.
 
 Headshot causa dano dobrado em todas as armas, exceto a explosão do lança-granadas. O lança-granadas não fere quem atirou.
+
+**Precisão:** parado e no chão, o primeiro tiro sai exatamente no centro da mira. Depois de 350 ms sem atirar, o tiro volta a contar como primeiro. Movimento, pulo e tiro contínuo abrem o spread. Sniper e DMR só têm esse primeiro tiro exato com a luneta aberta; sem mirar, dispersam sempre. Na escopeta, um pellet sai no centro e os outros abrem o cone em volta. Besta e lança-granadas saem no centro, mas o projétil cai com a distância. Agachado, o recuo cai 30%.
 
 ### Mapas
 
@@ -221,7 +224,7 @@ src/
   main.ts            orquestra telas, conexão e o loop
   style.css
   core/              loop (60 Hz fixo + render interpolado), input, settings, audio, utilidades
-  render/            cena/renderer, mapa, texturas procedurais, modelos, arma em 1ª pessoa, efeitos
+  render/            cena/renderer, mapa, texturas procedurais, modelos, arma em 1ª pessoa, carga dos GLB, efeitos
   game/              constantes, dados do mapa, física (AABB + rampas), armas, hitboxes, jogador remoto, partida (cliente)
   net/               protocol.ts (mensagens tipadas), peer (PeerJS + loopback), host (simulação autoritativa), client, iceConfig
   ui/                menu, lobby, HUD, placar, chat, configurações, pausa, resultados, toasts

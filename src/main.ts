@@ -10,6 +10,7 @@ import { NetClient, joinRemote, type DisconnectReason } from './net/client';
 import { describeError } from './net/peer';
 import type { HostMsg, LobbyState, MatchInfo, WelcomeMsg } from './net/protocol';
 import { SceneManager } from './render/scene';
+import { loadWeaponModels } from './render/weaponAssets';
 import { Chat } from './ui/chat';
 import { Hud } from './ui/hud';
 import { Inventory } from './ui/inventory';
@@ -52,6 +53,7 @@ class App {
     const viewport = document.getElementById('viewport')!;
     const ui = document.getElementById('ui')!;
     this.sm = new SceneManager(viewport);
+    loadWeaponModels();
     input.init(viewport);
     initToasts(ui);
 
