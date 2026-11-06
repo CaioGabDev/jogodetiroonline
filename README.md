@@ -1,8 +1,9 @@
 # Arena FPS Online
 
 Jogo de tiro em primeira pessoa multiplayer (até 10 jogadores) que roda direto no navegador.
-Feito com **Vite + TypeScript + Three.js**, multiplayer **P2P via WebRTC (PeerJS)** e sem nenhum asset externo:
-geometria feita em código, texturas geradas em canvas e sons sintetizados com a Web Audio API.
+Feito com **Vite + TypeScript + Three.js** e multiplayer **P2P via WebRTC (PeerJS)**.
+O mapa é geometria feita em código, as texturas são geradas em canvas e os sons são sintetizados com a Web Audio API.
+As armas são modelos glTF com licença livre (veja `CREDITS.md`), com a versão em código como reserva se um arquivo não carregar.
 
 Funciona como site estático (Vercel, Netlify, GitHub Pages…): não existe servidor de jogo.
 Quem cria a sala vira o **host** e roda a simulação oficial no próprio navegador.
@@ -223,7 +224,7 @@ src/
   main.ts            orquestra telas, conexão e o loop
   style.css
   core/              loop (60 Hz fixo + render interpolado), input, settings, audio, utilidades
-  render/            cena/renderer, mapa, texturas procedurais, modelos, arma em 1ª pessoa, efeitos
+  render/            cena/renderer, mapa, texturas procedurais, modelos, arma em 1ª pessoa, carga dos GLB, efeitos
   game/              constantes, dados do mapa, física (AABB + rampas), armas, hitboxes, jogador remoto, partida (cliente)
   net/               protocol.ts (mensagens tipadas), peer (PeerJS + loopback), host (simulação autoritativa), client, iceConfig
   ui/                menu, lobby, HUD, placar, chat, configurações, pausa, resultados, toasts

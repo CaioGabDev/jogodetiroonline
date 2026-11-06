@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { makeGlowTexture } from './textures';
+import { onWeaponAsset, type WeaponAsset } from './weaponAssets';
 
 const metal = new THREE.MeshStandardMaterial({ color: 0x30343a, roughness: 0.45, metalness: 0.6 });
 const dark = new THREE.MeshStandardMaterial({ color: 0x17191c, roughness: 0.6, metalness: 0.3 });
@@ -231,6 +232,23 @@ export interface ViewmodelState {
   crouch: boolean;
 }
 
+/** Swaps the procedural gun for the loaded model, keeping the hands. The muzzle stays where it was. */
+function applyModel(g: GunModel, asset: WeaponAsset): void {
+  const size = new THREE.Box3();
+  for (const child of g.group.children) {
+    if (!(child instanceof THREE.Mesh) || child.material === glove || child.material === skin) continue;
+    size.expandByObject(child);
+    child.visible = false;
+  }
+  const length = size.max.z - size.min.z;
+  const model = asset.instance();
+  model.scale.multiplyScalar(length);
+  model.position.copy(g.muzzle);
+  g.group.add(model);
+  // The camera sits on the line of the sights while aiming.
+  if (g.adsPos !== g.hipPos) g.adsPos.y = -(g.muzzle.y + asset.sightHeight * length);
+}
+
 /** First-person weapon rendered in its own scene so it never clips into walls. */
 export class Viewmodel {
   readonly root = new THREE.Group();
@@ -265,6 +283,7 @@ export class Viewmodel {
     this.guns.forEach((g, i) => {
       g.group.visible = i === 0;
       this.root.add(g.group);
+      onWeaponAsset(i, (asset) => applyModel(g, asset));
     });
     this.flash = new THREE.Sprite(
       new THREE.SpriteMaterial({
