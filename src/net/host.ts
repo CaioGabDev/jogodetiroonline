@@ -30,7 +30,7 @@ import {
 import { MAPS, type MapDef, type SpawnDef } from '../game/mapData';
 import { CollisionWorld, eyeHeight } from '../game/physics';
 import { PositionHistory, rayPlayer } from '../game/hitbox';
-import { DEFAULT_LOADOUT, GUN_GAME_LADDER, W, WEAPONS, allowedWeapons, damageAt, fullAmmo, validLoadout } from '../game/weapons';
+import { DEFAULT_LOADOUT, W, WEAPONS, allowedWeapons, damageAt, fullAmmo, gunGameLadder, validLoadout } from '../game/weapons';
 import { clamp, now, r2, r3, randomCode, sanitizeText } from '../core/util';
 import {
   F_ADS,
@@ -95,7 +95,7 @@ interface SPlayer {
   respawnAt: number;
   tp: number;
   kills: number;
-  /** Gun Game level: index in GUN_GAME_LADDER. */
+  /** Gun Game level: index in the match's ladder. */
   level: number;
   deaths: number;
   damage: number;
@@ -548,7 +548,7 @@ export class HostServer {
   }
 
   private onLoadout(p: SPlayer, m: LoadoutMsg): void {
-    if (!validLoadout(m.w)) return;
+    if (!validLoadout(m.w, this.config.grenades)) return;
     // Outside the spawn screen this is the inventory, which only exists with every weapon enabled.
     if (!p.picking && (this.phase !== 'playing' || this.config.arsenal !== 'all')) return;
     p.loadout = [...m.w];
@@ -589,6 +589,7 @@ export class HostServer {
     if (!KILL_LIMITS.includes(c.killLimit)) c.killLimit = DEFAULT_CONFIG.killLimit;
     if (!TIME_LIMITS.includes(c.timeLimit)) c.timeLimit = DEFAULT_CONFIG.timeLimit;
     c.friendlyFire = !!c.friendlyFire;
+    c.grenades = c.grenades !== false;
     this.config = c;
     this.broadcastLobby();
   }
@@ -638,7 +639,7 @@ export class HostServer {
   // ---------------------------------------------------------------- simulation
 
   private allowed(p: SPlayer): number[] {
-    return allowedWeapons(this.config.arsenal, p.level, p.loadout);
+    return allowedWeapons(this.config.arsenal, p.level, p.loadout, this.config.grenades);
   }
 
   private isEnemy(a: SPlayer, b: SPlayer): boolean {
@@ -1069,9 +1070,10 @@ export class HostServer {
 
   /** Only the weapon of the current level moves a player up. The knife sends the victim back one instead. */
   private gunGameKill(killer: SPlayer, victim: SPlayer, w: number): void {
-    if (w === GUN_GAME_LADDER[killer.level]) {
+    const ladder = gunGameLadder(this.config.grenades);
+    if (w === ladder[killer.level]) {
       killer.level++;
-      if (killer.level === GUN_GAME_LADDER.length - 1) this.broadcast({ type: 'sys', text: `${killer.info.name} chegou na faca!` });
+      if (killer.level === ladder.length - 1) this.broadcast({ type: 'sys', text: `${killer.info.name} chegou na faca!` });
     } else if (w === W.KNIFE) {
       victim.level = Math.max(0, victim.level - 1);
     }
@@ -1080,7 +1082,7 @@ export class HostServer {
   private checkWin(): void {
     if (this.phase !== 'playing') return;
     if (this.config.arsenal === 'gungame') {
-      if ([...this.players.values()].some((p) => !p.bot && p.level >= GUN_GAME_LADDER.length)) this.endMatch('kills');
+      if ([...this.players.values()].some((p) => !p.bot && p.level >= gunGameLadder(this.config.grenades).length)) this.endMatch('kills');
       return;
     }
     const lim = this.config.killLimit;

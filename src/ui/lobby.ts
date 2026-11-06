@@ -187,6 +187,19 @@ export class Lobby {
       sel<MapId>('Mapa', mapOptions, c.map, (v) => ({ map: v })),
       sel<Arsenal>('Armas', Object.entries(ARSENAL_NAMES) as Array<[Arsenal, string]>, c.arsenal, (v) => ({ arsenal: v })),
     );
+    if (c.arsenal === 'all' || gunGame) {
+      this.config.append(
+        sel<string>(
+          'Granadas',
+          [
+            ['on', 'Com lança-granadas'],
+            ['off', 'Sem granadas (só armas)'],
+          ],
+          c.grenades ? 'on' : 'off',
+          (v) => ({ grenades: v === 'on' }),
+        ),
+      );
+    }
     if (gunGame) {
       // Fixed by the rules: everyone for themselves, and the match ends at the last weapon.
       this.config.append(

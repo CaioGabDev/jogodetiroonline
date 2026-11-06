@@ -1,4 +1,4 @@
-import { PISTOLS, PRIMARIES, WEAPONS } from '../game/weapons';
+import { PISTOLS, PRIMARIES, W, WEAPONS } from '../game/weapons';
 import { clear, el, show } from './dom';
 
 /** Mid-match weapon screen: pick a slot, then the weapon that goes in it. Applies on every click. */
@@ -8,6 +8,7 @@ export class Inventory {
   private grid: HTMLElement;
   private loadout: number[] = [];
   private slot = 0;
+  private grenades = true;
 
   constructor(
     parent: HTMLElement,
@@ -30,7 +31,8 @@ export class Inventory {
     return !this.root.classList.contains('hidden');
   }
 
-  open(loadout: number[]): void {
+  open(loadout: number[], grenades: boolean): void {
+    this.grenades = grenades;
     this.loadout = [...loadout];
     this.slot = 0;
     this.render();
@@ -69,6 +71,7 @@ export class Inventory {
     });
     clear(this.grid);
     for (const w of this.slot < 2 ? PRIMARIES : PISTOLS) {
+      if (w.id === W.LAUNCHER && !this.grenades) continue;
       this.grid.append(
         el(
           'button',

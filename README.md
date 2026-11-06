@@ -94,6 +94,8 @@ O host também escolhe as **Armas** da partida:
 - **Só sniper / Só doze:** só essa arma e a faca, em FFA ou TDM.
 - **Gun Game:** sempre FFA. Cada kill com a arma do seu nível troca para a próxima, passando por todas. Todo mundo também tem a faca para se mover: matar com ela não sobe de nível, mas faz a vítima voltar uma arma. No último nível só resta a faca, e quem mata com ela vence.
 
+Em **Todas as armas** e **Gun Game**, o host também pode escolher **Sem granadas (só armas)**: o Lança-granadas sai da escolha de armas, do inventário e dos níveis do Gun Game.
+
 Quem abrir o link no meio da partida entra direto no jogo. Durante a tela de resultados, espera no lobby.
 
 No fim da partida aparece o placar com MVP; o host pode pedir **Revanche** ou **Voltar ao lobby**.

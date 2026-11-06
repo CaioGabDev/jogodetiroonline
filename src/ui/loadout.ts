@@ -1,4 +1,4 @@
-import { PISTOLS, PRIMARIES, fillLoadout, type WeaponDef } from '../game/weapons';
+import { PISTOLS, PRIMARIES, W, fillLoadout, type WeaponDef } from '../game/weapons';
 import { el, show } from './dom';
 
 /**
@@ -52,7 +52,8 @@ export class LoadoutPicker {
     return !this.root.classList.contains('hidden');
   }
 
-  open(ms: number): void {
+  open(ms: number, grenades: boolean): void {
+    this.cards.get(W.LAUNCHER)?.classList.toggle('hidden', !grenades);
     this.primaries = [];
     this.pistol = null;
     this.endsAt = performance.now() + ms;

@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 /** Prefix added to the room code to form the host's PeerJS id (avoids collisions on the public server). */
 export const PEER_PREFIX = 'arenafps-v1-';
 
@@ -112,9 +112,11 @@ export interface MatchConfig {
   /** Minutes; 0 = no limit. */
   timeLimit: number;
   friendlyFire: boolean;
+  /** False takes the grenade launcher out of the match: guns only. */
+  grenades: boolean;
 }
 
 export const KILL_LIMITS = [10, 20, 30, 50];
 export const TIME_LIMITS = [5, 10, 15, 20];
 
-export const DEFAULT_CONFIG: MatchConfig = { map: 'arena', mode: 'ffa', arsenal: 'all', killLimit: 20, timeLimit: 10, friendlyFire: false };
+export const DEFAULT_CONFIG: MatchConfig = { map: 'arena', mode: 'ffa', arsenal: 'all', killLimit: 20, timeLimit: 10, friendlyFire: false, grenades: true };

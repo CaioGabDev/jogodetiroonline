@@ -8,7 +8,7 @@ import { rayPlayer } from './hitbox';
 import { MAPS, type MapDef } from './mapData';
 import { CollisionWorld, eyeHeight, type PState } from './physics';
 import { RemotePlayer } from './player';
-import { DEFAULT_LOADOUT, GUN_GAME_LADDER, RECOIL_PATTERN, WEAPONS, WEAPON_COUNT, allowedWeapons, fullAmmo } from './weapons';
+import { DEFAULT_LOADOUT, RECOIL_PATTERN, WEAPONS, WEAPON_COUNT, allowedWeapons, fullAmmo, gunGameLadder } from './weapons';
 import type { NetClient } from '../net/client';
 import { F_PROTECTED, type HostMsg, type LobbyState, type MatchInfo, type PlayerInfo, type ProjEndMsg, type ProjMsg } from '../net/protocol';
 import type { SceneManager } from '../render/scene';
@@ -427,7 +427,8 @@ export class Game {
   private announceLevel(before: number | undefined): void {
     const now = this.scores.get(this.localId)?.lv;
     if (this.config.arsenal !== 'gungame' || before === undefined || now === undefined || now === before) return;
-    const weapon = WEAPONS[GUN_GAME_LADDER[Math.min(now, GUN_GAME_LADDER.length - 1)]].name.toUpperCase();
+    const ladder = gunGameLadder(this.config.grenades);
+    const weapon = WEAPONS[ladder[Math.min(now, ladder.length - 1)]].name.toUpperCase();
     this.hud.notify(now > before ? `SUBIU: ${weapon}` : `VOLTOU PARA: ${weapon}`);
   }
 
@@ -438,7 +439,7 @@ export class Game {
 
   /** Weapons in number key order: 1 and 2 primaries, 3 pistol, 4 knife. The host enforces the same list. */
   private keySlots(): number[] {
-    return allowedWeapons(this.config.arsenal, this.scores.get(this.localId)?.lv ?? 0, this.ld);
+    return allowedWeapons(this.config.arsenal, this.scores.get(this.localId)?.lv ?? 0, this.ld, this.config.grenades);
   }
 
   /** Same weapons in the order of the player's wheel, which only applies with every weapon enabled. */
@@ -931,10 +932,11 @@ export class Game {
     const { arsenal, killLimit } = this.config;
     const killsText = killLimit > 0 ? `Limite: ${killLimit} kills` : 'Treino livre';
     const gunGame = arsenal === 'gungame';
-    const levels = GUN_GAME_LADDER.length;
+    const ladder = gunGameLadder(this.config.grenades);
+    const levels = ladder.length;
     const myLevel = this.scores.get(this.localId)?.lv ?? 0;
     const level = Math.min(myLevel + 1, levels);
-    const next = GUN_GAME_LADDER[myLevel + 1];
+    const next = ladder[myLevel + 1];
     const goal = next === undefined ? 'mate com a faca para vencer' : `próxima: ${WEAPONS[next].name}`;
     const limit =
       gunGame

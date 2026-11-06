@@ -341,7 +341,7 @@ class App {
         this.closeInventory(false);
         input.exitLock();
         this.pause.show(false);
-        this.loadout.open(m.ms);
+        this.loadout.open(m.ms, this.lobbyState?.config.grenades !== false);
         break;
       case 'spawn':
         this.game?.onMessage(m);
@@ -390,7 +390,7 @@ class App {
   }
 
   private openInventory(loadout: number[]): void {
-    this.inventory.open(loadout);
+    this.inventory.open(loadout, this.lobbyState?.config.grenades !== false);
     input.releaseMouse();
     this.unhookInventory = input.addKeyHook((code, e) => {
       if (code !== 'KeyB' && code !== 'Escape') return false;

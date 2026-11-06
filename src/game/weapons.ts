@@ -541,8 +541,9 @@ export const DEFAULT_LOADOUT: number[] = [W.RIFLE, W.SMG, W.PISTOL];
 export const PRIMARIES = WEAPONS.filter((w) => w.category === 'primary');
 export const PISTOLS = WEAPONS.filter((w) => w.category === 'pistol');
 
-export function validLoadout(l: number[]): boolean {
+export function validLoadout(l: number[], grenades = true): boolean {
   const [a, b, c] = l;
+  if (!grenades && l.includes(W.LAUNCHER)) return false;
   return l.length === 3 && a !== b && WEAPONS[a]?.category === 'primary' && WEAPONS[b]?.category === 'primary' && WEAPONS[c]?.category === 'pistol';
 }
 
@@ -554,7 +555,7 @@ export function fillLoadout(primaries: number[], pistol: number | null): number[
 }
 
 /** Gun Game levels: every weapon, one kill each, from the easiest to the hardest. A kill on the last one wins. */
-export const GUN_GAME_LADDER: number[] = [
+const GUN_GAME_LADDER: number[] = [
   W.RIFLE,
   W.SMG,
   W.LMG,
@@ -570,15 +571,21 @@ export const GUN_GAME_LADDER: number[] = [
   W.KNIFE,
 ];
 
+/** Levels of a match. Without grenades the launcher's level is skipped. */
+export function gunGameLadder(grenades: boolean): number[] {
+  return grenades ? GUN_GAME_LADDER : GUN_GAME_LADDER.filter((w) => w !== W.LAUNCHER);
+}
+
 /** Weapons a player may use. `level` is the Gun Game level. Every mode keeps the knife for movement. */
-export function allowedWeapons(arsenal: Arsenal, level: number, loadout: number[]): number[] {
+export function allowedWeapons(arsenal: Arsenal, level: number, loadout: number[], grenades = true): number[] {
   switch (arsenal) {
     case 'sniper':
       return [W.SNIPER, W.KNIFE];
     case 'shotgun':
       return [W.SHOTGUN, W.KNIFE];
     case 'gungame': {
-      const w = GUN_GAME_LADDER[Math.min(level, GUN_GAME_LADDER.length - 1)];
+      const ladder = gunGameLadder(grenades);
+      const w = ladder[Math.min(level, ladder.length - 1)];
       return w === W.KNIFE ? [w] : [w, W.KNIFE];
     }
     default:
