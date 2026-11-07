@@ -4,13 +4,14 @@ import { input } from './core/input';
 import { GameLoop } from './core/loop';
 import { normalizeCode } from './core/util';
 import { Game } from './game/game';
+import { rankOf } from './game/ranks';
 import { HostServer } from './net/host';
 import { RoomBrowser } from './net/directory';
 import { NetClient, joinRemote, type DisconnectReason } from './net/client';
 import { account } from './net/account';
 import { describeError } from './net/peer';
 import { initSettingsSync } from './net/profile';
-import { beginMatch, submitMatch } from './net/ranking';
+import { beginMatch, loadMyRating, submitMatch, type MatchResult } from './net/ranking';
 import type { EndMsg, HostMsg, LobbyState, MatchInfo, WelcomeMsg } from './net/protocol';
 import { SceneManager } from './render/scene';
 import { AuthScreen } from './ui/auth';
@@ -57,6 +58,8 @@ class App {
   private busy = false;
   /** This match was opened on the ranking and still has to be reported. */
   private ranked = false;
+  /** Last known rating of the logged-in player. */
+  private rating: number | null = null;
   private idleT = 0;
 
   constructor() {
@@ -117,7 +120,10 @@ class App {
     this.auth = new AuthScreen(ui);
     this.profile = new ProfileScreen(ui);
     this.ranking = new RankingScreen(ui);
-    account.onChange(() => this.menu.setAccount(account.profile, account.available));
+    account.onChange(() => {
+      this.menu.setAccount(account.profile, account.available);
+      void this.refreshRating();
+    });
     this.menu.setAccount(null, account.available);
     initSettingsSync();
     account.init();
@@ -422,9 +428,29 @@ class App {
     this.ranked = false;
     if (!counts) return;
     const mode = lobby.config.arsenal === 'gungame' ? 'gungame' : lobby.config.mode;
-    void submitMatch(row.kills, row.deaths, mode)
-      .catch(() => false)
-      .then((ok) => toast(ok ? `Ranking atualizado: +${row.kills} kills` : 'Esta partida não entrou no ranking.', ok ? 'ok' : 'warn'));
+    const result = matchResult(m, localId, lobby.config.mode);
+    void submitMatch(row.kills, row.deaths, mode, result)
+      .catch(() => null)
+      .then((rating) => this.showRating(rating));
+  }
+
+  private showRating(rating: number | null): void {
+    if (rating === null) {
+      toast('Esta partida não entrou no ranking.', 'warn');
+      return;
+    }
+    const before = this.rating ?? 0;
+    const rank = rankOf(rating);
+    const delta = rating - before;
+    const promoted = delta > 0 && rankOf(before).label !== rank.label;
+    toast(promoted ? `Subiu para ${rank.label}! (+${delta})` : `${delta >= 0 ? '+' : ''}${delta} pontos · ${rank.label}`, delta >= 0 ? 'ok' : 'warn', 6000);
+    this.rating = rating;
+    this.menu.setRating(rating);
+  }
+
+  private async refreshRating(): Promise<void> {
+    this.rating = await loadMyRating().catch(() => null);
+    this.menu.setRating(this.rating);
   }
 
   private openInventory(loadout: number[]): void {
@@ -493,6 +519,17 @@ class App {
     this.settingsUI.close();
     this.showScreen('menu');
   }
+}
+
+/** In a free-for-all the top half of the table wins, so a good match still pays when someone else came first. */
+function matchResult(m: EndMsg, localId: number, mode: 'ffa' | 'tdm'): MatchResult {
+  if (mode === 'tdm') {
+    if (m.winnerTeam === null) return 'draw';
+    return m.results.find((r) => r.id === localId)?.team === m.winnerTeam ? 'win' : 'loss';
+  }
+  const place = m.results.findIndex((r) => r.id === localId) + 1;
+  const middle = (m.results.length + 1) / 2;
+  return place < middle ? 'win' : place === middle ? 'draw' : 'loss';
 }
 
 const app = new App();

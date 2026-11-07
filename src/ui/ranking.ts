@@ -1,9 +1,11 @@
+import { rankOf } from '../game/ranks';
 import { account } from '../net/account';
 import { loadRanking, type RankRow } from '../net/ranking';
 import { avatar } from './avatar';
 import { clear, el, show } from './dom';
+import { rankBadge } from './rankBadge';
 
-/** Top players by kills, plus the logged-in player's own place when it falls outside the list. */
+/** Top players by rating, plus the logged-in player's own place when it falls outside the list. */
 export class RankingScreen {
   readonly root: HTMLElement;
   private list: HTMLElement;
@@ -18,12 +20,13 @@ export class RankingScreen {
       el('div', { class: 'rank-row rank-head' }, [
         el('span', { text: '#' }),
         el('span', { text: 'Jogador' }),
+        el('span', { text: 'Elo' }),
+        el('span', { class: 'rank-num', text: 'Pontos' }),
         el('span', { class: 'rank-num', text: 'Kills' }),
-        el('span', { class: 'rank-num', text: 'Mortes' }),
       ]),
       this.list,
       this.mine,
-      el('p', { class: 'hint', text: 'Contam as partidas online com outro jogador, jogadas até o fim com uma conta.' }),
+      el('p', { class: 'hint', text: 'Vitória sobe e derrota desce. Contam as partidas online com outro jogador, jogadas até o fim com uma conta.' }),
       el('button', { class: 'btn ghost', text: 'Fechar', onClick: () => this.close() }),
     ]);
     this.root = el('div', { class: 'overlay ranking hidden' }, [panel]);
@@ -41,11 +44,13 @@ export class RankingScreen {
 
   private row(r: RankRow): HTMLElement {
     const me = r.user_id === account.profile?.id;
+    const rank = rankOf(r.rating);
     return el('div', { class: 'rank-row' + (me ? ' me' : '') }, [
       el('span', { class: 'rank-place', text: String(r.place) }),
       el('span', { class: 'rank-player' }, [avatar(r.username, r.avatar_url), el('span', { class: 'pname', text: r.username })]),
+      el('span', { class: 'rank-tier' }, [rankBadge(rank), el('span', { text: rank.label })]),
+      el('span', { class: 'rank-num', text: String(r.rating) }),
       el('span', { class: 'rank-num', text: String(r.kills) }),
-      el('span', { class: 'rank-num', text: String(r.deaths) }),
     ]);
   }
 

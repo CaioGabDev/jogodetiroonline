@@ -6,6 +6,7 @@ export interface RankRow {
   user_id: string;
   username: string;
   avatar_url: string | null;
+  rating: number;
   kills: number;
   deaths: number;
   matches: number;
@@ -37,9 +38,21 @@ export async function beginMatch(): Promise<void> {
 
 export type RankedMode = 'ffa' | 'tdm' | 'gungame';
 
-export async function submitMatch(kills: number, deaths: number, mode: RankedMode): Promise<boolean> {
-  if (!supabase) return false;
-  const { error } = await supabase.rpc('submit_match', { p_kills: kills, p_deaths: deaths, p_mode: mode });
+export type MatchResult = 'win' | 'draw' | 'loss';
+
+/** Returns the player's new rating, or null when the match was refused. */
+export async function submitMatch(kills: number, deaths: number, mode: RankedMode, result: MatchResult): Promise<number | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc('submit_match', { p_kills: kills, p_deaths: deaths, p_mode: mode, p_result: result });
   if (error) console.warn('Partida recusada pelo ranking', error.message);
-  return !error;
+  return error ? null : (data as number);
+}
+
+/** A player without matches starts at 0. Null when it couldn't be read. */
+export async function loadMyRating(): Promise<number | null> {
+  const id = account.profile?.id;
+  if (!supabase || !id) return null;
+  const { data, error } = await supabase.from('player_stats').select('rating').eq('user_id', id).maybeSingle();
+  if (error) console.warn('Falha ao carregar o elo', error.message);
+  return error ? null : ((data?.rating as number | undefined) ?? 0);
 }

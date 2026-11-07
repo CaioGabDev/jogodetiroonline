@@ -1771,7 +1771,7 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: min(520px, calc(100vw - 32px));
+  width: min(600px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
 }
 
@@ -1787,7 +1787,7 @@ kbd {
 
 .rank-row {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 60px 60px;
+  grid-template-columns: 36px minmax(0, 1fr) 124px 56px 48px;
   gap: 8px;
   align-items: center;
   padding: 6px 8px;
@@ -1834,4 +1834,51 @@ kbd {
 .rank-open {
   width: 100%;
   margin-top: 8px;
+}
+
+.account-name b {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.account-rank {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.account-rank:empty {
+  display: none;
+}
+
+.rank-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 24px;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  color: #10141c;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.account-rank .rank-badge {
+  width: 15px;
+  height: 17px;
+  font-size: 7px;
+}
+
+.rank-tier {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
 }

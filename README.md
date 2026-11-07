@@ -167,12 +167,20 @@ O `/**` é necessário porque o login com Google volta para o mesmo endereço, m
 **4. Google.** No Google Cloud, crie um cliente OAuth do tipo *Aplicativo da Web* com a URI de redirecionamento
 `https://SEU-PROJETO.supabase.co/auth/v1/callback`. Coloque o Client ID e o Secret em *Supabase → Authentication → Providers → Google*.
 
+### Elos
+
+O ranking é ordenado por pontos, que sobem na vitória e caem na derrota. Os elos são Ferro, Bronze, Prata, Ouro, Platina,
+Diamante e Mestre, com divisões I, II e III de 100 pontos cada, e Lenda no topo, a partir de 2100 pontos.
+
+Vitória dá de 15 a 30 pontos, derrota tira de 10 a 25 e empate vale só o desempenho (kills menos mortes, de -5 a +10).
+Em FFA e Gun Game, a metade de cima do placar conta como vitória. Os elos ficam em `src/game/ranks.ts`.
+
 ### Limitação do ranking
 
-O jogo é P2P e nenhum servidor vê a partida, então as kills são informadas pelo navegador do jogador e **não dá para provar
+O jogo é P2P e nenhum servidor vê a partida, então as kills e o resultado são informados pelo navegador do jogador e **não dá para provar
 que são reais**. As funções `begin_match` e `submit_match` limitam o estrago, usando o relógio do banco: ninguém escreve na
 tabela direto, a partida precisa durar de 30 s a 30 min, as kills têm teto por modo (50, ou 60 no Gun Game) e por tempo
-(1 a cada 1,5 s), e há um intervalo mínimo de 30 s entre envios. Quem trapacear ainda chega até esses tetos. Só um servidor
+(1 a cada 1,5 s), e há um intervalo mínimo de 30 s entre envios. Quem trapacear ainda chega até esses tetos, e ganha no máximo 30 pontos por partida. Só um servidor
 dedicado rodando a partida resolveria isso de verdade.
 
 Só contam partidas online, com outro jogador humano, jogadas até o fim com uma conta. O Treino Offline não conta.

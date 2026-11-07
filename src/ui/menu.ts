@@ -1,10 +1,12 @@
 import { loadColor, loadNick, saveColor, saveNick } from '../core/settings';
 import { normalizeCode, sanitizeText } from '../core/util';
 import { ARSENAL_NAMES, FFA_COLORS, MAP_NAMES, MAX_PLAYERS, NAME_MAX } from '../game/constants';
+import { rankOf } from '../game/ranks';
 import type { Profile } from '../net/account';
 import type { RoomInfo } from '../net/directory';
 import { avatar } from './avatar';
 import { clear, el, show } from './dom';
+import { rankBadge } from './rankBadge';
 
 export interface MenuCallbacks {
   onCreate(nick: string, color: string): void;
@@ -33,6 +35,7 @@ export class MainMenu {
   private busy = false;
   private accountBox: HTMLElement;
   private rankingBtn: HTMLButtonElement;
+  private rankLine = el('small', { class: 'account-rank' });
 
   constructor(
     parent: HTMLElement,
@@ -180,10 +183,19 @@ export class MainMenu {
     }
     this.accountBox.append(
       avatar(profile.username, profile.avatar_url),
-      el('span', { class: 'account-name', text: profile.username }),
+      el('span', { class: 'account-name' }, [el('b', { text: profile.username }), this.rankLine]),
       el('button', { class: 'btn small', text: 'Perfil', onClick: () => this.cb.onProfile() }),
       el('button', { class: 'btn small ghost', text: 'Sair', onClick: () => this.cb.onLogout() }),
     );
+  }
+
+  /** Null hides the line, when the rating couldn't be read. */
+  setRating(rating: number | null): void {
+    clear(this.rankLine);
+    if (rating === null) return;
+    const rank = rankOf(rating);
+    const points = rank.goal === null ? `${rank.points} pts` : `${rank.points}/${rank.goal}`;
+    this.rankLine.append(rankBadge(rank), ` ${rank.label} · ${points}`);
   }
 
   /** Redraws only when something changed, so a refresh can't swallow a click on a row. */
