@@ -38,6 +38,9 @@ export class AuthScreen {
       onClick: () => void this.run(() => account.signInWithGoogle()),
     });
 
+    // Stays off until the Google provider is set up, or the button would only lead to an error.
+    show(this.google, import.meta.env.VITE_GOOGLE_LOGIN === 'true');
+
     const form = el('form', { class: 'auth-form' }, [
       this.usernameRow,
       el('label', { class: 'field-label', text: 'E-mail' }),

@@ -153,6 +153,7 @@ Convidados continuam jogando normalmente mesmo com o Supabase ligado.
 | --- | --- |
 | `VITE_SUPABASE_URL` | URL do projeto (`https://SEU-PROJETO.supabase.co`) |
 | `VITE_SUPABASE_ANON_KEY` | chave anon/publishable |
+| `VITE_GOOGLE_LOGIN` | `true` para mostrar o botão do Google (só depois do passo 4) |
 
 Tudo que começa com `VITE_` fica visível no navegador. **Nunca** use a chave `service_role` aqui.
 Depois faça um novo deploy: essas variáveis entram no build.
@@ -164,8 +165,8 @@ Depois faça um novo deploy: essas variáveis entram no build.
 
 O `/**` é necessário porque o login com Google volta para o mesmo endereço, mantendo o `?sala=` de um convite.
 
-**4. Google.** No Google Cloud, crie um cliente OAuth do tipo *Aplicativo da Web* com a URI de redirecionamento
-`https://SEU-PROJETO.supabase.co/auth/v1/callback`. Coloque o Client ID e o Secret em *Supabase → Authentication → Providers → Google*.
+**4. Google (opcional).** Sem isso, o login por e-mail e senha funciona normalmente. No Google Cloud, crie um cliente OAuth do tipo *Aplicativo da Web* com a URI de redirecionamento
+`https://SEU-PROJETO.supabase.co/auth/v1/callback`. Coloque o Client ID e o Secret em *Supabase → Authentication → Providers → Google*. Depois defina `VITE_GOOGLE_LOGIN=true` e faça um novo deploy.
 
 ### Elos
 
