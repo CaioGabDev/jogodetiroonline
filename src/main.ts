@@ -10,7 +10,8 @@ import { NetClient, joinRemote, type DisconnectReason } from './net/client';
 import { account } from './net/account';
 import { describeError } from './net/peer';
 import { initSettingsSync } from './net/profile';
-import type { HostMsg, LobbyState, MatchInfo, WelcomeMsg } from './net/protocol';
+import { beginMatch, submitMatch } from './net/ranking';
+import type { EndMsg, HostMsg, LobbyState, MatchInfo, WelcomeMsg } from './net/protocol';
 import { SceneManager } from './render/scene';
 import { AuthScreen } from './ui/auth';
 import { Chat } from './ui/chat';
@@ -21,6 +22,7 @@ import { Lobby } from './ui/lobby';
 import { MainMenu } from './ui/menu';
 import { PauseMenu } from './ui/pause';
 import { ProfileScreen } from './ui/profile';
+import { RankingScreen } from './ui/ranking';
 import { Results } from './ui/results';
 import { Scoreboard } from './ui/scoreboard';
 import { SettingsUI } from './ui/settingsUI';
@@ -40,6 +42,7 @@ class App {
   private settingsUI: SettingsUI;
   private auth: AuthScreen;
   private profile: ProfileScreen;
+  private ranking: RankingScreen;
   private roomBrowser: RoomBrowser;
   private loadout: LoadoutPicker;
   private inventory: Inventory;
@@ -52,6 +55,8 @@ class App {
   private game: Game | null = null;
   private lobbyState: LobbyState | null = null;
   private busy = false;
+  /** This match was opened on the ranking and still has to be reported. */
+  private ranked = false;
   private idleT = 0;
 
   constructor() {
@@ -72,6 +77,7 @@ class App {
       onLogin: () => this.auth.open(),
       onLogout: () => void account.signOut(),
       onProfile: () => this.profile.open(),
+      onRanking: () => this.ranking.open(),
     });
     this.lobby = new Lobby(ui, {
       onStart: () => {
@@ -110,6 +116,7 @@ class App {
     this.settingsUI = new SettingsUI(ui);
     this.auth = new AuthScreen(ui);
     this.profile = new ProfileScreen(ui);
+    this.ranking = new RankingScreen(ui);
     account.onChange(() => this.menu.setAccount(account.profile, account.available));
     this.menu.setAccount(null, account.available);
     initSettingsSync();
@@ -377,6 +384,7 @@ class App {
         this.results.show(true);
         const won = mode === 'tdm' ? m.winnerTeam === this.game.myTeam : m.winnerId === net.localId;
         audio.matchEnd(won);
+        this.reportMatch(m, net.localId);
         break;
       }
       case 'sys':
@@ -399,9 +407,24 @@ class App {
       match,
     );
     this.showScreen('game');
+    this.ranked = account.profile !== null && !this.lobbyState.offline;
+    if (this.ranked) void beginMatch();
     this.game.onInventory = (loadout) => this.openInventory(loadout);
     this.syncTeamButton();
     if (!input.locked) this.pause.show(true, true);
+  }
+
+  /** Practice targets and empty rooms don't count: a ranked match needs another human. */
+  private reportMatch(m: EndMsg, localId: number): void {
+    const lobby = this.lobbyState;
+    const row = m.results.find((r) => r.id === localId);
+    const counts = this.ranked && lobby && row && lobby.players.filter((p) => !p.bot).length >= 2;
+    this.ranked = false;
+    if (!counts) return;
+    const mode = lobby.config.arsenal === 'gungame' ? 'gungame' : lobby.config.mode;
+    void submitMatch(row.kills, row.deaths, mode)
+      .catch(() => false)
+      .then((ok) => toast(ok ? `Ranking atualizado: +${row.kills} kills` : 'Esta partida não entrou no ranking.', ok ? 'ok' : 'warn'));
   }
 
   private openInventory(loadout: number[]): void {

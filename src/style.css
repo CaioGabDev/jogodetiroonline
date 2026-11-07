@@ -1766,3 +1766,67 @@ kbd {
   height: 72px;
   font-size: 28px;
 }
+
+.rank-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+}
+
+.rank-panel h2 {
+  margin: 0;
+}
+
+.rank-list {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+}
+
+.rank-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 60px 60px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.rank-row.me {
+  background: rgba(255, 176, 32, 0.14);
+}
+
+.rank-head {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rank-place {
+  color: var(--accent-2);
+  font-weight: 700;
+}
+
+.rank-player {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.rank-player .pname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-mine:not(:empty) {
+  border-top: 1px solid var(--panel-border);
+  padding-top: 6px;
+}

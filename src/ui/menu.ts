@@ -14,6 +14,7 @@ export interface MenuCallbacks {
   onLogin(): void;
   onLogout(): void;
   onProfile(): void;
+  onRanking(): void;
 }
 
 export class MainMenu {
@@ -31,6 +32,7 @@ export class MainMenu {
   private joinRoom: (code: string) => void;
   private busy = false;
   private accountBox: HTMLElement;
+  private rankingBtn: HTMLButtonElement;
 
   constructor(
     parent: HTMLElement,
@@ -111,6 +113,7 @@ export class MainMenu {
       },
     });
     const settingsBtn = el('button', { class: 'btn ghost', text: 'Configurações', onClick: () => cb.onSettings() });
+    this.rankingBtn = el('button', { class: 'btn ghost hidden', text: 'Ranking', onClick: () => cb.onRanking() });
     this.buttons = [create, join, practice, settingsBtn];
     this.code.addEventListener('keydown', (e) => {
       if (e.code === 'Enter' || e.code === 'NumpadEnter') join.click();
@@ -131,6 +134,7 @@ export class MainMenu {
       create,
       el('div', { class: 'join-row' }, [this.code, join]),
       el('div', { class: 'row2' }, [practice, settingsBtn]),
+      this.rankingBtn,
       this.status,
       this.error,
     ]);
@@ -163,6 +167,7 @@ export class MainMenu {
   /** Logged in, the profile name is the nickname. Without Supabase configured the box stays hidden. */
   setAccount(profile: Profile | null, available: boolean): void {
     show(this.accountBox, available);
+    show(this.rankingBtn, available);
     clear(this.accountBox);
     this.nick.readOnly = profile !== null;
     this.nick.value = profile ? profile.username : loadNick();
