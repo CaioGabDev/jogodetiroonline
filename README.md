@@ -4,7 +4,7 @@ Jogo de tiro em primeira pessoa multiplayer (até 10 jogadores) que roda direto 
 Feito com **Vite + TypeScript + Three.js**, multiplayer **P2P via WebRTC (PeerJS)** e sem nenhum asset externo:
 geometria feita em código, texturas geradas em canvas e sons sintetizados com a Web Audio API.
 
-Funciona como site estático (Vercel, Netlify, GitHub Pages…): não existe servidor de jogo.
+Funciona como site estático (Vercel, Netlify, GitHub Pages…): não existe servidor de jogo. Contas, perfil e ranking são opcionais e usam o Supabase.
 Quem cria a sala vira o **host** e roda a simulação oficial no próprio navegador.
 
 ---
@@ -136,7 +136,46 @@ vercel          # primeiro deploy (preview)
 vercel --prod   # produção
 ```
 
-Não há variáveis de ambiente nem backend: o site é 100% estático.
+O site é 100% estático e funciona sem nenhuma variável de ambiente. Para ter contas e ranking, veja a seção abaixo.
+
+---
+
+## Contas, perfil e ranking (Supabase)
+
+É opcional: sem as variáveis abaixo, o menu esconde login e ranking e todo mundo joga como convidado.
+Convidados continuam jogando normalmente mesmo com o Supabase ligado.
+
+**1. Banco.** Aplique os arquivos de `supabase/migrations/` em ordem, com `supabase db push` ou colando cada um no SQL Editor.
+
+**2. Variáveis.** Em *Vercel → Settings → Environment Variables* (ou no `.env` local):
+
+| Variável | Valor |
+| --- | --- |
+| `VITE_SUPABASE_URL` | URL do projeto (`https://SEU-PROJETO.supabase.co`) |
+| `VITE_SUPABASE_ANON_KEY` | chave anon/publishable |
+
+Tudo que começa com `VITE_` fica visível no navegador. **Nunca** use a chave `service_role` aqui.
+Depois faça um novo deploy: essas variáveis entram no build.
+
+**3. URLs de redirect.** Em *Supabase → Authentication → URL Configuration*:
+
+- **Site URL:** o domínio de produção da Vercel.
+- **Redirect URLs:** `http://localhost:5173/**` e `https://SEU-DOMINIO.vercel.app/**`.
+
+O `/**` é necessário porque o login com Google volta para o mesmo endereço, mantendo o `?sala=` de um convite.
+
+**4. Google.** No Google Cloud, crie um cliente OAuth do tipo *Aplicativo da Web* com a URI de redirecionamento
+`https://SEU-PROJETO.supabase.co/auth/v1/callback`. Coloque o Client ID e o Secret em *Supabase → Authentication → Providers → Google*.
+
+### Limitação do ranking
+
+O jogo é P2P e nenhum servidor vê a partida, então as kills são informadas pelo navegador do jogador e **não dá para provar
+que são reais**. As funções `begin_match` e `submit_match` limitam o estrago, usando o relógio do banco: ninguém escreve na
+tabela direto, a partida precisa durar de 30 s a 30 min, as kills têm teto por modo (50, ou 60 no Gun Game) e por tempo
+(1 a cada 1,5 s), e há um intervalo mínimo de 30 s entre envios. Quem trapacear ainda chega até esses tetos. Só um servidor
+dedicado rodando a partida resolveria isso de verdade.
+
+Só contam partidas online, com outro jogador humano, jogadas até o fim com uma conta. O Treino Offline não conta.
 
 ---
 
@@ -208,6 +247,7 @@ o PeerJS passa a registrar tudo no console.
 
 Ficam salvas no `localStorage` e são aplicadas na hora:
 
+- Com uma conta, as configurações também ficam salvas nela e acompanham o jogador em outros dispositivos.
 - **Controles:** sensibilidade (0,1–10, slider + campo numérico), sensibilidade de mira (escalada pelo zoom),
   inverter Y, remapear todas as teclas (2 por ação, inclusive botões do mouse), segurar/alternar para mirar e agachar.
 - **Vídeo:** FOV (70–110), qualidade baixa/média/alta (sombras, pixel ratio, antialias), sombras liga/desliga,
@@ -228,8 +268,10 @@ src/
   core/              loop (60 Hz fixo + render interpolado), input, settings, audio, utilidades
   render/            cena/renderer, mapa, texturas procedurais, modelos, arma em 1ª pessoa, efeitos
   game/              constantes, dados do mapa, física (AABB + rampas), armas, hitboxes, jogador remoto, partida (cliente)
-  net/               protocol.ts (mensagens tipadas), peer (PeerJS + loopback), host (simulação autoritativa), client, iceConfig
-  ui/                menu, lobby, HUD, placar, chat, configurações, pausa, resultados, toasts
+  net/               protocol.ts (mensagens tipadas), peer (PeerJS + loopback), host (simulação autoritativa), client, iceConfig,
+                     supabase, account (login), profile (nome, foto, configurações), ranking
+  ui/                menu, lobby, HUD, placar, chat, configurações, pausa, resultados, toasts, login, perfil, ranking
+supabase/migrations/ tabelas, RLS, bucket de avatares e funções do ranking
 ```
 
 Todo texto vindo de jogadores (nicks com até 16 caracteres e chat com até 120) é sanitizado e exibido via

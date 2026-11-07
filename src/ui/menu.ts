@@ -113,7 +113,7 @@ export class MainMenu {
       },
     });
     const settingsBtn = el('button', { class: 'btn ghost', text: 'Configurações', onClick: () => cb.onSettings() });
-    this.rankingBtn = el('button', { class: 'btn ghost hidden', text: 'Ranking', onClick: () => cb.onRanking() });
+    this.rankingBtn = el('button', { class: 'btn ghost rank-open hidden', text: 'Ranking', onClick: () => cb.onRanking() });
     this.buttons = [create, join, practice, settingsBtn];
     this.code.addEventListener('keydown', (e) => {
       if (e.code === 'Enter' || e.code === 'NumpadEnter') join.click();

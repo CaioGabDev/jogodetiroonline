@@ -1830,3 +1830,8 @@ kbd {
   border-top: 1px solid var(--panel-border);
   padding-top: 6px;
 }
+
+.rank-open {
+  width: 100%;
+  margin-top: 8px;
+}
