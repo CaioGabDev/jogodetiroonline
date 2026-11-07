@@ -184,6 +184,9 @@ class AudioEngine {
         this.noiseBurst(d, { type: 'bandpass', freq: 900, freqEnd: 300, q: 1.5, dur: 0.1, gain: 0.25 });
         this.tone(d, { type: 'triangle', freq: 300, freqEnd: 120, dur: 0.09, gain: 0.15 });
         break;
+      case 'throw':
+        this.noiseBurst(d, { type: 'bandpass', freq: 500, freqEnd: 1500, q: 1, dur: 0.14, gain: 0.22 * v });
+        break;
       case 'launcher':
         this.noiseBurst(d, { type: 'lowpass', freq: 700, freqEnd: 150, q: 0.6, dur: 0.22, gain: 0.8 * v });
         this.tone(d, { type: 'sine', freq: 170, freqEnd: 60, dur: 0.18, gain: 0.8 * v });
@@ -200,6 +203,48 @@ class AudioEngine {
     if (!d) return;
     this.noiseBurst(d, { type: 'lowpass', freq: 1100, freqEnd: 90, q: 0.5, dur: 0.8, gain: 1.2 });
     this.tone(d, { type: 'sine', freq: 70, freqEnd: 25, dur: 0.6, gain: 1 });
+  }
+
+  /** Something thrown hitting the ground. */
+  clink(pos: Vec3Like): void {
+    const d = this.out('sfx', pos, 3);
+    if (!d) return;
+    this.tone(d, { type: 'triangle', freq: 2300, freqEnd: 1500, dur: 0.06, gain: 0.25 });
+  }
+
+  /** Glass breaking, then the flames catching. */
+  ignite(pos: Vec3Like): void {
+    const d = this.out('sfx', pos, 7);
+    if (!d) return;
+    this.noiseBurst(d, { type: 'highpass', freq: 3200, dur: 0.1, gain: 0.5 });
+    this.noiseBurst(d, { type: 'lowpass', freq: 1000, freqEnd: 180, dur: 0.8, gain: 0.8, delay: 0.04 });
+  }
+
+  /** The crack of a flashbang or concussion going off. */
+  bang(pos: Vec3Like): void {
+    const d = this.out('sfx', pos, 12);
+    if (!d) return;
+    this.noiseBurst(d, { type: 'highpass', freq: 1400, dur: 0.14, gain: 1 });
+    this.tone(d, { type: 'sine', freq: 200, freqEnd: 60, dur: 0.16, gain: 0.7 });
+  }
+
+  /** Ringing ears: the world goes quiet and comes back over `ms`. */
+  stunned(ms: number): void {
+    const d = this.out('ui');
+    if (!d) return;
+    const t = this.ctx!.currentTime;
+    const volume = settings.get().sfxVolume;
+    this.sfx.gain.cancelScheduledValues(t);
+    this.sfx.gain.setValueAtTime(volume * 0.1, t);
+    this.sfx.gain.linearRampToValueAtTime(volume, t + ms / 1000);
+    this.tone(d, { type: 'sine', freq: 3000, dur: ms / 1000, gain: 0.05 });
+  }
+
+  /** One tick of the planted bomb. */
+  beep(pos: Vec3Like): void {
+    const d = this.out('sfx', pos, 8);
+    if (!d) return;
+    this.tone(d, { type: 'square', freq: 1900, dur: 0.07, gain: 0.22 });
   }
 
   dryFire(): void {
@@ -278,10 +323,10 @@ class AudioEngine {
     this.noiseBurst(d, { type: 'lowpass', freq: 400, dur: 0.5, gain: 0.4 });
   }
 
-  pickup(kind: 'health' | 'ammo'): void {
+  pickup(): void {
     const d = this.out('ui');
     if (!d) return;
-    const base = kind === 'health' ? 660 : 520;
+    const base = 520;
     [0, 0.06, 0.12].forEach((delay, i) =>
       this.tone(d, { type: 'triangle', freq: base * (1 + i * 0.25), dur: 0.12, gain: 0.18, delay }),
     );

@@ -1,9 +1,21 @@
 import * as THREE from 'three';
+import type { ProjectileKind } from '../game/weapons';
+import { gunAssets } from './assets';
+import { WEAPONS } from '../game/weapons';
 import { makeDecalTexture, makeGlowTexture } from './textures';
 
 const MAX_TRACERS = 48;
 const MAX_DECALS = 160;
 const MAX_PARTICLES = 600;
+/** Flames drawn per molotov. */
+const FIRE_FLAMES = 44;
+/** Seconds a fire takes to die down at the end. */
+const FIRE_FADE = 0.6;
+const SMOKE_PUFFS = 46;
+const SMOKE_OPACITY = 0.96;
+/** Seconds a smoke takes to fill out and to thin away. */
+const SMOKE_GROW = 1.2;
+const SMOKE_FADE = 2;
 
 interface Tracer {
   mesh: THREE.Mesh;
@@ -21,6 +33,17 @@ interface Projectile {
   mesh: THREE.Mesh;
   vel: THREE.Vector3;
   gravity: number;
+  life: number;
+}
+
+interface Fire {
+  group: THREE.Group;
+  life: number;
+}
+
+interface Smoke {
+  group: THREE.Group;
+  material: THREE.SpriteMaterial;
   life: number;
 }
 
@@ -43,10 +66,42 @@ export class Effects {
   private light: THREE.PointLight;
   private lightLife = 0;
   private projectiles = new Map<number, Projectile>();
-  private boltGeo = new THREE.BoxGeometry(0.03, 0.03, 0.55);
-  private grenadeGeo = new THREE.SphereGeometry(0.11, 10, 8);
-  private boltMat = new THREE.MeshBasicMaterial({ color: 0xc9b98a });
-  private grenadeMat = new THREE.MeshBasicMaterial({ color: 0x3a4030 });
+  private projectileLook: Record<ProjectileKind, [THREE.BufferGeometry, THREE.Material]> = {
+    bolt: [new THREE.BoxGeometry(0.03, 0.03, 0.55), new THREE.MeshBasicMaterial({ color: 0xc9b98a })],
+    grenade: [new THREE.SphereGeometry(0.11, 10, 8), new THREE.MeshBasicMaterial({ color: 0x3a4030 })],
+    knife: [new THREE.BoxGeometry(0.02, 0.05, 0.32), new THREE.MeshBasicMaterial({ color: 0xc8ccd0 })],
+    bottle: [new THREE.CylinderGeometry(0.045, 0.065, 0.26, 8), new THREE.MeshBasicMaterial({ color: 0x4f7a3a })],
+    can: [new THREE.CylinderGeometry(0.055, 0.055, 0.16, 8), new THREE.MeshBasicMaterial({ color: 0xa8acb0 })],
+  };
+  private fires: Fire[] = [];
+  /** Marks the ground that burns, so the danger reads from far away. */
+  private scorchGeo = new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2);
+  private scorchMat = new THREE.MeshBasicMaterial({ color: 0x140a04, transparent: true, opacity: 0.72, depthWrite: false });
+  private smokes: Smoke[] = [];
+  private smokeMat = new THREE.SpriteMaterial({
+    map: makeGlowTexture('rgba(205,205,205,1)', 'rgba(185,185,185,0.95)'),
+    transparent: true,
+    depthWrite: false,
+  });
+  /** Weapons on the ground, by id. */
+  private drops = new Map<number, THREE.Group>();
+  private dropGlow = new THREE.SpriteMaterial({
+    map: makeGlowTexture('rgba(255,255,255,0.55)', 'rgba(255,220,140,0.15)'),
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  private dropFallback = new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.6 });
+  /** The bomb on the ground. A single one exists per round. */
+  private bomb = new THREE.Group();
+  private bombBlink: THREE.Sprite;
+  private bombGlow: THREE.Sprite;
+  private flameMat = new THREE.SpriteMaterial({
+    map: makeGlowTexture('rgba(255,225,130,1)', 'rgba(255,90,15,0.75)'),
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
 
   constructor() {
     const tracerGeo = new THREE.BoxGeometry(0.025, 0.025, 1);
@@ -107,6 +162,99 @@ export class Effects {
 
     this.light = new THREE.PointLight(0xffb050, 0, 9, 2);
     this.group.add(this.light);
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.14, 0.3), new THREE.MeshStandardMaterial({ color: 0x3b3f2c, roughness: 0.7 }));
+    body.position.y = 0.07;
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.02, 0.16), new THREE.MeshBasicMaterial({ color: 0x111111 }));
+    panel.position.y = 0.15;
+    const blink = makeGlowTexture('rgba(255,70,50,1)', 'rgba(255,0,0,0.5)');
+    this.bombBlink = new THREE.Sprite(new THREE.SpriteMaterial({ map: blink, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.bombBlink.scale.setScalar(0.5);
+    this.bombBlink.position.y = 0.2;
+    // Shows through walls: the attackers' way of finding a dropped bomb.
+    this.bombGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: blink, transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.bombGlow.scale.setScalar(1.4);
+    this.bombGlow.position.y = 1;
+    this.bomb.add(body, panel, this.bombBlink, this.bombGlow);
+    this.bomb.visible = false;
+    this.group.add(this.bomb);
+  }
+
+  /** `spot` is null while someone carries it. */
+  setBomb(spot: THREE.Vector3 | null, planted: boolean, glow: boolean): void {
+    this.bomb.visible = spot !== null;
+    if (spot) this.bomb.position.copy(spot);
+    this.bombBlink.visible = planted;
+    this.bombGlow.visible = glow;
+  }
+
+  /** Keeps what's on the ground in step with the host's list. */
+  setDrops(list: Array<{ id: number; w: number; p: [number, number, number] }>): void {
+    for (const [id, group] of this.drops) {
+      if (list.some((d) => d.id === id)) continue;
+      group.removeFromParent();
+      this.drops.delete(id);
+    }
+    for (const d of list) {
+      if (this.drops.has(d.id)) continue;
+      const group = this.dropModel(d.w);
+      group.position.set(d.p[0], d.p[1], d.p[2]);
+      group.rotation.y = d.id * 2.4;
+      this.group.add(group);
+      this.drops.set(d.id, group);
+    }
+  }
+
+  /** The gun on its side, with a faint glow so it can be found on a dark floor. */
+  private dropModel(w: number): THREE.Group {
+    const group = new THREE.Group();
+    const { len, h } = WEAPONS[w].shape;
+    const asset = gunAssets.get(w);
+    if (asset) {
+      const model = asset.object.clone();
+      model.scale.setScalar(len / asset.len);
+      model.position.set(0, 0.06, len / 2);
+      model.rotation.z = Math.PI / 2;
+      group.add(model);
+    } else {
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.09, h, len), this.dropFallback);
+      box.position.y = h / 2;
+      group.add(box);
+    }
+    const glow = new THREE.Sprite(this.dropGlow);
+    glow.scale.setScalar(0.7);
+    glow.position.y = 0.25;
+    group.add(glow);
+    return group;
+  }
+
+  smoke(pos: THREE.Vector3, radius: number, ms: number): void {
+    const group = new THREE.Group();
+    group.position.copy(pos);
+    const material = this.smokeMat.clone();
+    for (let i = 0; i < SMOKE_PUFFS; i++) {
+      const puff = new THREE.Sprite(material);
+      const a = Math.random() * Math.PI * 2;
+      const r = radius * Math.cbrt(Math.random()) * 0.85;
+      puff.position.set(Math.cos(a) * r, 0.5 + Math.random() * radius * 0.85, Math.sin(a) * r);
+      puff.scale.setScalar(radius * 0.95);
+      group.add(puff);
+    }
+    this.group.add(group);
+    this.smokes.push({ group, material, life: ms / 1000 });
+  }
+
+  /** A new round starts on a clean map. */
+  clearRound(): void {
+    for (const f of this.fires) f.group.removeFromParent();
+    this.fires = [];
+    for (const s of this.smokes) {
+      s.group.removeFromParent();
+      s.material.dispose();
+    }
+    this.smokes = [];
+    for (const id of [...this.projectiles.keys()]) this.removeProjectile(id);
+    this.setBomb(null, false, false);
   }
 
   tracer(from: THREE.Vector3, to: THREE.Vector3, color: number): void {
@@ -122,8 +270,10 @@ export class Effects {
     t.max = t.life = 0.07;
   }
 
-  addProjectile(id: number, pos: THREE.Vector3, vel: THREE.Vector3, gravity: number, kind: 'bolt' | 'grenade'): void {
-    const mesh = new THREE.Mesh(kind === 'bolt' ? this.boltGeo : this.grenadeGeo, kind === 'bolt' ? this.boltMat : this.grenadeMat);
+  /** Calling it again with the same id replaces that one: the host does that when it bounces. */
+  addProjectile(id: number, pos: THREE.Vector3, vel: THREE.Vector3, gravity: number, kind: ProjectileKind): void {
+    this.removeProjectile(id);
+    const mesh = new THREE.Mesh(...this.projectileLook[kind]);
     mesh.position.copy(pos);
     this.group.add(mesh);
     this.projectiles.set(id, { mesh, vel, gravity, life: 9 });
@@ -140,6 +290,24 @@ export class Effects {
     this.muzzleFlash(pos, radius * 1.3, true, 0.18);
     this.muzzleFlash(pos, radius * 0.8, false, 0.28);
     this.impact(pos, null, 'world', 45);
+  }
+
+  fire(pos: THREE.Vector3, radius: number, ms: number): void {
+    const group = new THREE.Group();
+    group.position.copy(pos);
+    const scorch = new THREE.Mesh(this.scorchGeo, this.scorchMat);
+    scorch.scale.setScalar(radius);
+    scorch.position.y = 0.03;
+    group.add(scorch);
+    for (let i = 0; i < FIRE_FLAMES; i++) {
+      const flame = new THREE.Sprite(this.flameMat);
+      const a = Math.random() * Math.PI * 2;
+      const r = radius * Math.sqrt(Math.random());
+      flame.position.set(Math.cos(a) * r, 0.35, Math.sin(a) * r);
+      group.add(flame);
+    }
+    this.group.add(group);
+    this.fires.push({ group, life: ms / 1000 });
   }
 
   muzzleFlash(pos: THREE.Vector3, scale = 0.6, light = true, life = 0.05): void {
@@ -224,6 +392,34 @@ export class Effects {
       p.mesh.position.addScaledVector(p.vel, dt);
       p.mesh.lookAt(Effects.tmpN.copy(p.mesh.position).add(p.vel));
     }
+    this.fires = this.fires.filter((f) => {
+      f.life -= dt;
+      if (f.life <= 0) {
+        f.group.removeFromParent();
+        return false;
+      }
+      const size = Math.min(1, f.life / FIRE_FADE);
+      const clock = performance.now() / 90;
+      f.group.children.forEach((flame, i) => {
+        if (!(flame instanceof THREE.Sprite)) return;
+        const flicker = 0.75 + 0.35 * Math.sin(clock + i * 2.1);
+        flame.scale.set(0.6 * size, 1.25 * size * flicker, 1);
+      });
+      return true;
+    });
+    this.smokes = this.smokes.filter((s) => {
+      s.life -= dt;
+      if (s.life <= 0) {
+        s.group.removeFromParent();
+        s.material.dispose();
+        return false;
+      }
+      s.material.opacity = SMOKE_OPACITY * Math.min(1, s.life / SMOKE_FADE);
+      const grown = Math.min(1, s.group.scale.x + dt / SMOKE_GROW);
+      s.group.scale.setScalar(Math.max(0.2, grown));
+      return true;
+    });
+    if (this.bombBlink.visible) this.bombBlink.material.opacity = Math.sin(performance.now() / 110) > 0 ? 1 : 0.15;
     for (const t of this.tracers) {
       if (!t.mesh.visible) continue;
       t.life -= dt;

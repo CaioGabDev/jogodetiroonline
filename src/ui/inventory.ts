@@ -1,5 +1,13 @@
-import { PISTOLS, PRIMARIES, W, WEAPONS } from '../game/weapons';
+import { LETHALS, PISTOLS, PRIMARIES, TACTICALS, W, WEAPONS, magLabel } from '../game/weapons';
 import { clear, el, show } from './dom';
+
+const SLOTS = [
+  { name: 'Slot 1 (primária)', items: PRIMARIES },
+  { name: 'Slot 2 (primária)', items: PRIMARIES },
+  { name: 'Slot 3 (pistola)', items: PISTOLS },
+  { name: 'Letal (ao renascer)', items: LETHALS },
+  { name: 'Tática (ao renascer)', items: TACTICALS },
+];
 
 /** Mid-match weapon screen: pick a slot, then the weapon that goes in it. Applies on every click. */
 export class Inventory {
@@ -55,6 +63,8 @@ export class Inventory {
   private render(): void {
     clear(this.slotsEl);
     this.loadout.forEach((id, i) => {
+      // Slots past the pistol hold equipment, which a guns-only match doesn't have.
+      if (i > 2 && !this.grenades) return;
       this.slotsEl.append(
         el(
           'button',
@@ -65,18 +75,18 @@ export class Inventory {
               this.render();
             },
           },
-          [el('small', { text: i < 2 ? `Slot ${i + 1} (primária)` : 'Slot 3 (pistola)' }), el('b', { text: WEAPONS[id].name })],
+          [el('small', { text: SLOTS[i].name }), el('b', { text: WEAPONS[id].name })],
         ),
       );
     });
     clear(this.grid);
-    for (const w of this.slot < 2 ? PRIMARIES : PISTOLS) {
+    for (const w of SLOTS[this.slot].items) {
       if (w.id === W.LAUNCHER && !this.grenades) continue;
       this.grid.append(
         el(
           'button',
           { class: 'loadout-card' + (this.loadout[this.slot] === w.id ? ' active' : ''), onClick: () => this.assign(w.id) },
-          [el('b', { text: w.name }), el('small', { text: w.desc }), el('small', { class: 'loadout-mag', text: `Pente: ${w.mag}` })],
+          [el('b', { text: w.name }), el('small', { text: w.desc }), el('small', { class: 'loadout-mag', text: magLabel(w) })],
         ),
       );
     }

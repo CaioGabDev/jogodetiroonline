@@ -3,6 +3,7 @@ import { audio } from './core/audio';
 import { input } from './core/input';
 import { GameLoop } from './core/loop';
 import { normalizeCode } from './core/util';
+import { teamMode, type GameMode, type MapId } from './game/constants';
 import { Game } from './game/game';
 import { rankOf } from './game/ranks';
 import { HostServer } from './net/host';
@@ -17,6 +18,7 @@ import { SceneManager } from './render/scene';
 import { AuthScreen } from './ui/auth';
 import { Chat } from './ui/chat';
 import { Hud } from './ui/hud';
+import { BuyMenu } from './ui/buyMenu';
 import { Inventory } from './ui/inventory';
 import { LoadoutPicker } from './ui/loadout';
 import { Lobby } from './ui/lobby';
@@ -47,6 +49,7 @@ class App {
   private roomBrowser: RoomBrowser;
   private loadout: LoadoutPicker;
   private inventory: Inventory;
+  private buyMenu: BuyMenu;
   private unhookInventory: (() => void) | null = null;
   private loop: GameLoop;
 
@@ -75,7 +78,7 @@ class App {
     this.menu = new MainMenu(ui, {
       onCreate: (n, c) => void this.createRoom(n, c),
       onJoin: (n, c, code) => void this.joinRoom(n, c, code),
-      onPractice: (n, c) => void this.practice(n, c),
+      onPractice: (n, c, map) => void this.practice(n, c, map),
       onSettings: () => this.settingsUI.open(),
       onLogin: () => this.auth.open(),
       onLogout: () => void account.signOut(),
@@ -141,6 +144,12 @@ class App {
         this.game?.setLoadout(w);
       },
       () => this.closeInventory(true),
+    );
+
+    this.buyMenu = new BuyMenu(
+      ui,
+      (item) => this.net?.send({ type: 'buy', item }),
+      () => this.closeBuyMenu(true),
     );
 
     this.chat.onClose = () => this.updateGameInput();
@@ -236,7 +245,7 @@ class App {
       } else {
         this.chat.close();
         this.game?.resetInputState();
-        if (!this.results.visible && !this.settingsUI.isOpen && !this.loadout.visible && !this.inventory.visible) this.pause.show(true);
+        if (!this.results.visible && !this.settingsUI.isOpen && !this.loadout.visible && !this.inventory.visible && !this.buyMenu.visible) this.pause.show(true);
       }
     }
     this.updateGameInput();
@@ -272,11 +281,11 @@ class App {
     this.busy = false;
   }
 
-  private async practice(nick: string, color: string): Promise<void> {
+  private async practice(nick: string, color: string, map: MapId): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     audio.unlock();
-    const host = new HostServer(true);
+    const host = new HostServer(true, {}, map);
     await host.start();
     this.host = host;
     const ok = await this.connectLocal(host, nick, color);
@@ -382,13 +391,14 @@ class App {
         if (!this.game) break;
         this.game.end();
         this.closeInventory(false);
+        this.closeBuyMenu(false);
         input.exitLock();
         const mode = this.lobbyState?.config.mode ?? 'ffa';
         const isHost = this.lobbyState?.hostId === net.localId;
         this.pause.show(false);
         this.results.render(m, mode, net.localId, isHost, !!this.lobbyState?.offline, this.game.myTeam);
         this.results.show(true);
-        const won = mode === 'tdm' ? m.winnerTeam === this.game.myTeam : m.winnerId === net.localId;
+        const won = teamMode(mode) ? m.winnerTeam === this.game.myTeam : m.winnerId === net.localId;
         audio.matchEnd(won);
         this.reportMatch(m, net.localId);
         break;
@@ -396,6 +406,15 @@ class App {
       case 'sys':
         toast(m.text, 'info');
         this.game?.onMessage(m);
+        break;
+      case 'kit':
+      case 'round':
+      case 'score':
+        this.game?.onMessage(m);
+        if (this.buyMenu.visible && this.game) {
+          if (this.game.canBuy()) this.buyMenu.update(this.game.buyState());
+          else this.closeBuyMenu(true);
+        }
         break;
       default:
         this.game?.onMessage(m);
@@ -416,6 +435,7 @@ class App {
     this.ranked = account.profile !== null && !this.lobbyState.offline;
     if (this.ranked) void beginMatch();
     this.game.onInventory = (loadout) => this.openInventory(loadout);
+    this.game.onBuyMenu = () => this.openBuyMenu();
     this.syncTeamButton();
     if (!input.locked) this.pause.show(true, true);
   }
@@ -464,6 +484,27 @@ class App {
     });
   }
 
+  private openBuyMenu(): void {
+    if (!this.game) return;
+    this.buyMenu.open(this.game.buyState());
+    input.releaseMouse();
+    this.unhookInventory = input.addKeyHook((code, e) => {
+      if (code !== 'KeyB' && code !== 'Escape') return false;
+      e.preventDefault();
+      this.closeBuyMenu(code === 'KeyB');
+      return true;
+    });
+  }
+
+  private closeBuyMenu(resume: boolean): void {
+    if (!this.buyMenu.visible) return;
+    this.buyMenu.close();
+    this.unhookInventory?.();
+    this.unhookInventory = null;
+    if (resume) input.requestLock();
+    else if (this.screen === 'game' && !this.results.visible) this.pause.show(true);
+  }
+
   /** The match goes on while it's open. Esc closes it and lands on the pause menu instead of the game. */
   private closeInventory(resume: boolean): void {
     if (!this.inventory.visible) return;
@@ -488,6 +529,7 @@ class App {
   private stopGame(): void {
     this.loadout.close();
     this.closeInventory(false);
+    this.closeBuyMenu(false);
     if (this.game) {
       this.game.dispose();
       this.game = null;
@@ -522,8 +564,8 @@ class App {
 }
 
 /** In a free-for-all the top half of the table wins, so a good match still pays when someone else came first. */
-function matchResult(m: EndMsg, localId: number, mode: 'ffa' | 'tdm'): MatchResult {
-  if (mode === 'tdm') {
+function matchResult(m: EndMsg, localId: number, mode: GameMode): MatchResult {
+  if (teamMode(mode)) {
     if (m.winnerTeam === null) return 'draw';
     return m.results.find((r) => r.id === localId)?.team === m.winnerTeam ? 'win' : 'loss';
   }

@@ -1,11 +1,13 @@
 import * as THREE from 'three';
+import { W } from '../game/weapons';
+import { assetsReady, gunAssets } from './assets';
 import { makeGlowTexture } from './textures';
 
 const metal = new THREE.MeshStandardMaterial({ color: 0x30343a, roughness: 0.45, metalness: 0.6 });
 const dark = new THREE.MeshStandardMaterial({ color: 0x17191c, roughness: 0.6, metalness: 0.3 });
 const wood = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.8 });
 const accent = new THREE.MeshStandardMaterial({ color: 0x5c6b3a, roughness: 0.7 });
-const skin = new THREE.MeshStandardMaterial({ color: 0xc99a74, roughness: 0.8 });
+const sleeve = new THREE.MeshStandardMaterial({ color: 0x3b4230, roughness: 0.9 });
 const glove = new THREE.MeshStandardMaterial({ color: 0x24272b, roughness: 0.9 });
 const lens = new THREE.MeshStandardMaterial({ color: 0x113355, emissive: 0x0a2244, roughness: 0.2, metalness: 0.8 });
 const steel = new THREE.MeshStandardMaterial({ color: 0xe4e8ee, roughness: 0.35, metalness: 0.2 });
@@ -37,9 +39,9 @@ interface GunModel {
 
 function hands(group: THREE.Group, gripZ: number, foreZ: number, foreY = -0.02): void {
   group.add(box(glove, 0.06, 0.08, 0.08, 0, -0.07, gripZ));
-  group.add(box(skin, 0.055, 0.05, 0.16, 0.0, -0.08, gripZ + 0.11));
+  group.add(box(sleeve, 0.055, 0.05, 0.16, 0.0, -0.08, gripZ + 0.11));
   group.add(box(glove, 0.07, 0.06, 0.08, -0.01, foreY - 0.03, foreZ));
-  group.add(box(skin, 0.05, 0.05, 0.18, -0.05, foreY - 0.05, foreZ + 0.1));
+  group.add(box(sleeve, 0.05, 0.05, 0.18, -0.05, foreY - 0.05, foreZ + 0.1));
 }
 
 function buildRifle(): GunModel {
@@ -67,7 +69,7 @@ function buildPistol(): GunModel {
   g.add(grip);
   g.add(box(dark, 0.01, 0.015, 0.01, 0, 0.032, -0.14));
   g.add(box(glove, 0.06, 0.07, 0.08, 0, -0.1, 0.03));
-  g.add(box(skin, 0.055, 0.05, 0.16, 0, -0.12, 0.14));
+  g.add(box(sleeve, 0.055, 0.05, 0.16, 0, -0.12, 0.14));
   g.add(box(glove, 0.06, 0.06, 0.07, -0.035, -0.1, 0.02));
   return { group: g, muzzle: new THREE.Vector3(0, 0.0, -0.16), hipPos: new THREE.Vector3(0.17, -0.17, -0.45), adsPos: new THREE.Vector3(0, -0.04, -0.36), mag: grip };
 }
@@ -125,7 +127,7 @@ function buildKnife(): GunModel {
   tilt.add(twist);
   g.add(tilt);
 
-  const forearm = box(skin, 0.06, 0.055, 0.22, 0.015, -0.05, 0.14);
+  const forearm = box(sleeve, 0.06, 0.055, 0.22, 0.015, -0.05, 0.14);
   forearm.rotation.x = 0.25;
   g.add(forearm);
   const pos = new THREE.Vector3(0.2, -0.2, -0.46);
@@ -201,7 +203,7 @@ function pistolGrip(g: THREE.Group): THREE.Mesh {
   grip.rotation.x = 0.25;
   g.add(grip);
   g.add(box(glove, 0.06, 0.07, 0.08, 0, -0.1, 0.03));
-  g.add(box(skin, 0.055, 0.05, 0.16, 0, -0.12, 0.14));
+  g.add(box(sleeve, 0.055, 0.05, 0.16, 0, -0.12, 0.14));
   g.add(box(glove, 0.06, 0.06, 0.07, -0.035, -0.1, 0.02));
   return grip;
 }
@@ -297,6 +299,25 @@ export class Viewmodel {
     this.flash.visible = false;
     this.root.add(this.flash);
     scene.add(this.root);
+    void assetsReady.then(() => this.useAssets());
+  }
+
+  /** Swaps the guns built in code for the loaded models. Only the hands stay. */
+  private useAssets(): void {
+    this.guns.forEach((g, w) => {
+      const asset = gunAssets.get(w);
+      // The knife keeps its own model: in first person the blade has to show past the hand.
+      if (!asset || w === W.KNIFE) return;
+      const old = g.group.children.filter((c) => c instanceof THREE.Mesh && c.material !== glove && c.material !== sleeve);
+      g.group.remove(...old);
+      const model = asset.object.clone();
+      model.position.copy(g.muzzle);
+      g.group.add(model);
+      if (g.adsPos === g.hipPos) return;
+      g.adsPos.y = -(g.muzzle.y + asset.sightY);
+      // These models are bulkier at the back: further out, they cover less of the screen.
+      g.adsPos.z -= 0.12;
+    });
   }
 
   setWeapon(w: number): void {

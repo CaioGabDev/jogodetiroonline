@@ -36,7 +36,7 @@ export async function beginMatch(): Promise<void> {
   if (res?.error) console.warn('Partida fora do ranking', res.error.message);
 }
 
-export type RankedMode = 'ffa' | 'tdm' | 'gungame';
+export type RankedMode = 'ffa' | 'tdm' | 'bomb' | 'gungame';
 
 export type MatchResult = 'win' | 'draw' | 'loss';
 

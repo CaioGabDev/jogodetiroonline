@@ -1,4 +1,6 @@
-import { TEAM_COLORS, TEAM_NAMES, type GameMode, type Team } from '../game/constants';
+import { TEAM_COLORS, TEAM_NAMES, teamMode, type GameMode, type Team } from '../game/constants';
+
+const MODE_TITLES: Record<GameMode, string> = { ffa: 'MATA-MATA', tdm: 'MATA-MATA EM EQUIPE', bomb: 'BOMBA' };
 import { clear, el, show } from './dom';
 
 export interface ScoreEntry {
@@ -9,6 +11,8 @@ export interface ScoreEntry {
   kills: number;
   deaths: number;
   ping: number;
+  /** Null when it isn't known: the other team's money is secret. */
+  money: number | null;
   bot: boolean;
   host: boolean;
   alive: boolean;
@@ -36,9 +40,9 @@ export class Scoreboard {
 
   render(mode: GameMode, entries: ScoreEntry[], localId: number, teams: [number, number], subtitle: string): void {
     clear(this.body);
-    this.title.textContent = (mode === 'tdm' ? 'MATA-MATA EM EQUIPE' : 'MATA-MATA') + (subtitle ? ` — ${subtitle}` : '');
+    this.title.textContent = MODE_TITLES[mode] + (subtitle ? ` — ${subtitle}` : '');
     const sorted = [...entries].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || a.id - b.id);
-    if (mode === 'tdm') {
+    if (teamMode(mode)) {
       for (const team of ['red', 'blue'] as Team[]) {
         const score = team === 'red' ? teams[0] : teams[1];
         const head = el('div', { class: 'sb-team', style: { borderColor: TEAM_COLORS[team] } }, [
@@ -54,10 +58,12 @@ export class Scoreboard {
 
   private table(rows: ScoreEntry[], localId: number): HTMLElement {
     const t = el('table', { class: 'sb-table' });
+    const money = rows.some((r) => r.money !== null);
     t.append(
       el('tr', {}, [
         el('th', { text: '#' }),
         el('th', { text: 'Jogador', class: 'left' }),
+        money ? el('th', { text: 'Dinheiro' }) : null,
         el('th', { text: 'Kills' }),
         el('th', { text: 'Mortes' }),
         el('th', { text: 'K/D' }),
@@ -77,6 +83,7 @@ export class Scoreboard {
             el('span', { text: r.name }),
             ...tags.map((tg) => el('span', { class: 'tag', text: tg })),
           ]),
+          money ? el('td', { text: r.money === null ? '—' : `$${r.money}` }) : null,
           el('td', { text: String(r.kills) }),
           el('td', { text: String(r.deaths) }),
           el('td', { text: kd }),

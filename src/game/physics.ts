@@ -21,6 +21,16 @@ interface Ramp extends RampDef {
   planes: Plane[];
 }
 
+/** Something in flight that bounces. */
+export interface Thrown {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+}
+
 export interface RayHit {
   dist: number;
   nx: number;
@@ -34,6 +44,17 @@ const EPS = 1e-4;
  * ends up a hair under the platform they lead to. Covers the height lag at top speed on the steepest ramp.
  */
 const LEDGE_SKIN = 0.15;
+/** How far ahead of the player a mantle looks for a ledge, and ends up standing. */
+const MANTLE_PROBE = 0.55;
+/** Lower ledges are just jumped onto. */
+const MANTLE_MIN = 0.3;
+/** Share of the mantle spent going up. */
+const MANTLE_RISE = 0.6;
+/** Speed a thrown object keeps off a surface, and along it. */
+const BOUNCE = 0.4;
+const BOUNCE_GRIP = 0.6;
+/** Slower than this on the ground, it stops. */
+const REST_SPEED = 1.5;
 
 /** Ray vs AABB (slab method). Returns entry distance and face normal. */
 export function rayBox(
@@ -156,6 +177,20 @@ export interface PState {
   vz: number;
   onGround: boolean;
   crouch: boolean;
+  /** Seconds of slide left. */
+  slide: number;
+  mantle: Mantle | null;
+}
+
+/** Climb onto a ledge: straight up, then forward onto it. `k` goes from 0 to 1. */
+export interface Mantle {
+  k: number;
+  x0: number;
+  y0: number;
+  z0: number;
+  x1: number;
+  y1: number;
+  z1: number;
 }
 
 export interface PInput {
@@ -164,6 +199,9 @@ export interface PInput {
   jump: boolean;
   crouch: boolean;
   sprint: boolean;
+  /** Starts a slide this step. */
+  slide: boolean;
+  /** Knife in hand, outside the bomb mode. */
   knife: boolean;
   /** Speed multiplier of the weapon in hand. */
   speedMul: number;
@@ -175,6 +213,8 @@ export interface StepResult {
   jumped: boolean;
   landed: boolean;
   fallSpeed: number;
+  slid: boolean;
+  mantled: boolean;
 }
 
 export class CollisionWorld {
@@ -275,6 +315,29 @@ export class CollisionWorld {
     return this.raycast(ax, ay, az, dx / len, dy / len, dz / len, len) === null;
   }
 
+  /** Advances a thrown object by dt. Returns true when it bounced, which changes its path. */
+  stepThrown(o: Thrown, gravity: number, dt: number): boolean {
+    if (o.vx === 0 && o.vy === 0 && o.vz === 0) return false;
+    o.vy -= gravity * dt;
+    const speed = Math.hypot(o.vx, o.vy, o.vz);
+    const dx = o.vx / speed;
+    const dy = o.vy / speed;
+    const dz = o.vz / speed;
+    const len = speed * dt;
+    const hit = this.raycast(o.x, o.y, o.z, dx, dy, dz, len);
+    const dist = hit ? Math.max(0, hit.dist - 0.03) : len;
+    o.x += dx * dist;
+    o.y += dy * dist;
+    o.z += dz * dist;
+    if (!hit) return false;
+    const into = o.vx * hit.nx + o.vy * hit.ny + o.vz * hit.nz;
+    o.vx = (o.vx - hit.nx * into) * BOUNCE_GRIP - hit.nx * into * BOUNCE;
+    o.vy = (o.vy - hit.ny * into) * BOUNCE_GRIP - hit.ny * into * BOUNCE;
+    o.vz = (o.vz - hit.nz * into) * BOUNCE_GRIP - hit.nz * into * BOUNCE;
+    if (hit.ny > 0.5 && Math.hypot(o.vx, o.vy, o.vz) < REST_SPEED) o.vx = o.vy = o.vz = 0;
+    return true;
+  }
+
   private moveAxis(s: PState, axis: 'x' | 'z', d: number, h: number): void {
     if (d === 0) return;
     const r = PLAYER.radius;
@@ -315,15 +378,69 @@ export class CollisionWorld {
     }
   }
 
+  /** Starts a mantle when a low enough ledge with room on top is straight ahead. */
+  private tryMantle(s: PState, fx: number, fz: number, reach: number): boolean {
+    const px = s.x + fx * MANTLE_PROBE;
+    const pz = s.z + fz * MANTLE_PROBE;
+    const r = PLAYER.radius;
+    let top = -Infinity;
+    // Boxes only: a ramp is walked, not climbed.
+    for (const b of this.boxes) {
+      const reachable = b.maxY >= s.y + MANTLE_MIN && b.maxY <= s.y + reach && b.maxY > top;
+      if (reachable && px - r < b.maxX && px + r > b.minX && pz - r < b.maxZ && pz + r > b.minZ) top = b.maxY;
+    }
+    if (top === -Infinity || this.overlapsSolid(px, top + 0.02, pz, PLAYER.height)) return false;
+    s.mantle = { k: 0, x0: s.x, y0: s.y, z0: s.z, x1: px, y1: top + 0.01, z1: pz };
+    s.vx = s.vy = s.vz = 0;
+    s.crouch = false;
+    s.slide = 0;
+    return true;
+  }
+
+  private stepMantle(s: PState, m: Mantle, dt: number): void {
+    m.k = Math.min(1, m.k + dt / MOVE.mantleTime);
+    const up = Math.min(1, m.k / MANTLE_RISE);
+    const forward = Math.max(0, (m.k - MANTLE_RISE) / (1 - MANTLE_RISE));
+    s.x = m.x0 + (m.x1 - m.x0) * forward;
+    s.y = m.y0 + (m.y1 - m.y0) * up;
+    s.z = m.z0 + (m.z1 - m.z0) * forward;
+    s.onGround = m.k >= 1;
+    if (s.onGround) s.mantle = null;
+  }
+
   /** Advances player movement by dt with collision. Shared by client prediction and bots. */
   step(s: PState, inp: PInput, dt: number): StepResult {
-    const res: StepResult = { jumped: false, landed: false, fallSpeed: 0 };
-    if (inp.crouch) s.crouch = true;
+    const res: StepResult = { jumped: false, landed: false, fallSpeed: 0, slid: false, mantled: false };
+    if (s.mantle) {
+      this.stepMantle(s, s.mantle, dt);
+      return res;
+    }
+    if (inp.slide && s.onGround && !s.crouch) {
+      const sp = Math.hypot(s.vx, s.vz);
+      if (sp > 0) {
+        // Faster than the slide already, as with the knife, the speed stays.
+        const k = Math.max(1, MOVE.slideSpeed / sp);
+        s.vx *= k;
+        s.vz *= k;
+        s.slide = MOVE.slideTime;
+        res.slid = true;
+      }
+    }
+    const sliding = s.slide > 0;
+    s.slide = s.onGround ? Math.max(0, s.slide - dt) : 0;
+    if (inp.crouch || sliding) s.crouch = true;
     else if (s.crouch && !this.overlapsSolid(s.x, s.y + 0.01, s.z, PLAYER.height)) s.crouch = false;
     const h = s.crouch ? PLAYER.crouchHeight : PLAYER.height;
 
     const sin = Math.sin(inp.yaw);
     const cos = Math.cos(inp.yaw);
+    if (inp.fwd > 0 && (inp.jump || !s.onGround)) {
+      const reach = s.onGround ? MOVE.mantleReach : MOVE.mantleAirReach;
+      if (this.tryMantle(s, -sin, -cos, reach)) {
+        res.mantled = true;
+        return res;
+      }
+    }
     let wx = -sin * inp.fwd + cos * inp.side;
     let wz = -cos * inp.fwd - sin * inp.side;
     const wl = Math.hypot(wx, wz);
@@ -331,20 +448,12 @@ export class CollisionWorld {
       wx /= wl;
       wz /= wl;
     }
-    const maxSpeed = s.crouch
-      ? MOVE.crouch
-      : inp.knife
-        ? inp.sprint && inp.fwd > 0
-          ? MOVE.knifeSprint
-          : MOVE.knifeWalk
-      : inp.ads
-        ? MOVE.ads
-        : inp.sprint && inp.fwd > 0
-          ? MOVE.sprint
-          : MOVE.walk;
-    const wishSpeed = wl > 1e-4 ? maxSpeed * inp.speedMul : 0;
+    const running = inp.sprint && inp.fwd > 0;
+    const maxSpeed = s.crouch ? MOVE.crouch : inp.knife ? (running ? MOVE.knifeSprint : MOVE.knifeWalk) : inp.ads ? MOVE.ads : running ? MOVE.sprint : MOVE.walk;
+    // A slide keeps its direction until it runs out.
+    const wishSpeed = wl > 1e-4 && !sliding ? maxSpeed * inp.speedMul : 0;
+    const friction = sliding ? MOVE.slideFriction : inp.knife ? MOVE.knifeFriction : MOVE.friction;
     const accel = inp.knife ? MOVE.knifeAccel : MOVE.accel;
-    const friction = inp.knife ? MOVE.knifeFriction : MOVE.friction;
     const airAccel = inp.knife ? MOVE.knifeAirAccel : inp.sprint ? MOVE.sprintAirAccel : MOVE.airAccel;
 
     const wasOnGround = s.onGround;
@@ -360,6 +469,7 @@ export class CollisionWorld {
       if (inp.jump) {
         s.vy = MOVE.jump;
         s.onGround = false;
+        s.slide = 0;
         res.jumped = true;
         if (inp.sprint) {
           const run = Math.hypot(s.vx, s.vz);

@@ -1,16 +1,19 @@
-import { PISTOLS, PRIMARIES, W, fillLoadout, type WeaponDef } from '../game/weapons';
+import { LETHALS, PISTOLS, PRIMARIES, TACTICALS, W, fillLoadout, magLabel, type WeaponDef } from '../game/weapons';
 import { el, show } from './dom';
 
 /**
- * Timed spawn screen: two primaries and a pistol. Every click is sent to the host right away,
+ * Timed spawn screen: two primaries, a pistol, a lethal and a tactical. Every click is sent to the host right away,
  * so whatever is selected when the time runs out is what the player gets.
  */
 export class LoadoutPicker {
   readonly root: HTMLElement;
   private timer: HTMLElement;
   private cards = new Map<number, HTMLElement>();
+  private equipment: HTMLElement;
   private primaries: number[] = [];
   private pistol: number | null = null;
+  private lethal: number | null = null;
+  private tactical: number | null = null;
   private endsAt = 0;
   private interval = 0;
 
@@ -19,28 +22,32 @@ export class LoadoutPicker {
     private onChange: (weapons: number[], confirmed: boolean) => void,
   ) {
     this.timer = el('div', { class: 'loadout-timer' });
-    const column = (title: string, weapons: WeaponDef[], pick: (id: number) => void): HTMLElement =>
-      el('div', { class: 'loadout-col' }, [
-        el('h3', { text: title }),
-        el(
-          'div',
-          { class: 'loadout-grid' },
-          weapons.map((w) => {
-            const card = el('button', { class: 'loadout-card', onClick: () => pick(w.id) }, [
-              el('b', { text: w.name }),
-              el('small', { text: w.desc }),
-              el('small', { class: 'loadout-mag', text: `Pente: ${w.mag}` }),
-            ]);
-            this.cards.set(w.id, card);
-            return card;
-          }),
-        ),
-      ]);
+    const section = (title: string, weapons: WeaponDef[], pick: (id: number) => void): HTMLElement[] => [
+      el('h3', { text: title }),
+      el(
+        'div',
+        { class: 'loadout-grid' },
+        weapons.map((w) => {
+          const card = el('button', { class: 'loadout-card', onClick: () => pick(w.id) }, [
+            el('b', { text: w.name }),
+            el('small', { text: w.desc }),
+            el('small', { class: 'loadout-mag', text: magLabel(w) }),
+          ]);
+          this.cards.set(w.id, card);
+          return card;
+        }),
+      ),
+    ];
+    this.equipment = el('div', { class: 'loadout-col' }, [
+      ...section('Letal (escolha 1)', LETHALS, (id) => this.pickLethal(id)),
+      ...section('Tática (escolha 1)', TACTICALS, (id) => this.pickTactical(id)),
+    ]);
     const panel = el('div', { class: 'panel loadout-panel' }, [
       el('div', { class: 'loadout-head' }, [el('h2', { text: 'Escolha suas armas' }), this.timer]),
       el('div', { class: 'loadout-body' }, [
-        column('Primárias (escolha 2)', PRIMARIES, (id) => this.pickPrimary(id)),
-        column('Pistola (escolha 1)', PISTOLS, (id) => this.pickPistol(id)),
+        el('div', { class: 'loadout-col' }, section('Primárias (escolha 2)', PRIMARIES, (id) => this.pickPrimary(id))),
+        el('div', { class: 'loadout-col' }, section('Pistola (escolha 1)', PISTOLS, (id) => this.pickPistol(id))),
+        this.equipment,
       ]),
       el('button', { class: 'btn primary big', text: 'Confirmar', onClick: () => this.onChange(this.current(), true) }),
     ]);
@@ -54,8 +61,11 @@ export class LoadoutPicker {
 
   open(ms: number, grenades: boolean): void {
     this.cards.get(W.LAUNCHER)?.classList.toggle('hidden', !grenades);
+    show(this.equipment, grenades);
     this.primaries = [];
     this.pistol = null;
+    this.lethal = null;
+    this.tactical = null;
     this.endsAt = performance.now() + ms;
     this.refresh();
     this.tick();
@@ -70,7 +80,7 @@ export class LoadoutPicker {
   }
 
   private current(): number[] {
-    return fillLoadout(this.primaries, this.pistol);
+    return fillLoadout(this.primaries, this.pistol, this.lethal, this.tactical);
   }
 
   private tick(): void {
@@ -93,6 +103,16 @@ export class LoadoutPicker {
     this.changed();
   }
 
+  private pickLethal(id: number): void {
+    this.lethal = this.lethal === id ? null : id;
+    this.changed();
+  }
+
+  private pickTactical(id: number): void {
+    this.tactical = this.tactical === id ? null : id;
+    this.changed();
+  }
+
   private changed(): void {
     this.refresh();
     this.onChange(this.current(), false);
@@ -100,7 +120,7 @@ export class LoadoutPicker {
 
   private refresh(): void {
     this.cards.forEach((card, id) => {
-      card.classList.toggle('active', this.primaries.includes(id) || this.pistol === id);
+      card.classList.toggle('active', this.primaries.includes(id) || [this.pistol, this.lethal, this.tactical].includes(id));
     });
   }
 }

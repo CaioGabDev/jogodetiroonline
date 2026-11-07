@@ -41,6 +41,16 @@ export class Hud {
   private reloadBar: HTMLElement;
   private reloadFill: HTMLElement;
   private slots: HTMLElement[] = [];
+  private equip: HTMLElement[] = [];
+  private flashWhite: HTMLElement;
+  private daze: HTMLElement;
+  private smokeIn: HTMLElement;
+  private gear: HTMLElement;
+  private money: HTMLElement;
+  private gearLine: HTMLElement;
+  private prompt: HTMLElement;
+  private workBar: HTMLElement;
+  private workFill: HTMLElement;
   private timer: HTMLElement;
   private scoreL: HTMLElement;
   private scoreR: HTMLElement;
@@ -104,7 +114,9 @@ export class Hud {
       this.slots.push(s);
       slotsEl.append(s);
     });
+    this.equip = Array.from({ length: 5 }, () => el('div', { class: 'slot' }));
     const ammoBox = el('div', { class: 'hud-ammo' }, [
+      el('div', { class: 'weapon-slots' }, this.equip),
       slotsEl,
       this.weaponName,
       el('div', { class: 'ammo-line' }, [this.ammoMag, this.ammoRes]),
@@ -124,6 +136,15 @@ export class Hud {
     this.dmgWrap = el('div', { class: 'dmg-wrap' });
     this.dmgFlash = el('div', { class: 'dmg-flash' });
     this.lowHp = el('div', { class: 'low-hp' });
+    this.flashWhite = el('div', { class: 'flash-white' });
+    this.daze = el('div', { class: 'daze' });
+    this.smokeIn = el('div', { class: 'smoke-in' });
+    this.money = el('div', { class: 'gear-money' });
+    this.gearLine = el('div', { class: 'gear-line' });
+    this.gear = el('div', { class: 'hud-gear hidden' }, [this.money, this.gearLine]);
+    this.prompt = el('div', { class: 'hud-prompt hidden' });
+    this.workFill = el('div', { class: 'work-fill' });
+    this.workBar = el('div', { class: 'work-bar hidden' }, [this.workFill]);
     this.deathBy = el('div', { class: 'death-by' });
     this.deathTimer = el('div', { class: 'death-timer' });
     this.death = el('div', { class: 'death hidden' }, [
@@ -140,12 +161,17 @@ export class Hud {
     this.root = el('div', { class: 'hud hidden' }, [
       this.scope,
       this.lowHp,
+      this.smokeIn,
+      this.daze,
       this.dmgFlash,
       this.dmgWrap,
       this.damageLayer,
       this.crosshair,
       this.hitmarkerEl,
       hpBox,
+      this.gear,
+      this.prompt,
+      this.workBar,
       ammoBox,
       top,
       this.feed,
@@ -153,6 +179,7 @@ export class Hud {
       this.notice,
       this.stats,
       this.death,
+      this.flashWhite,
     ]);
     parent.append(this.root);
     this.redrawCrosshair(0);
@@ -196,6 +223,59 @@ export class Hud {
     this.slots.forEach((s, i) => s.classList.toggle('active', i === weapon));
     show(this.reloadBar, reload >= 0);
     if (reload >= 0) this.width(this.reloadFill, Math.round(reload * 100));
+  }
+
+  /** One chip per thing to throw, with the key that throws it. */
+  setEquipment(items: Array<{ key: string; name: string; left: number }>): void {
+    this.equip.forEach((e, i) => {
+      const item = items[i];
+      show(e, item !== undefined);
+      if (!item) return;
+      this.text(e, `${item.key}  ${item.name} ×${item.left}`);
+      e.classList.toggle('active', item.left > 0);
+    });
+  }
+
+  /** Bomb mode: wallet and gear, over the health bar. */
+  setGear(money: number, line: string): void {
+    show(this.gear, true);
+    this.text(this.money, `$${money}`);
+    this.text(this.gearLine, line);
+  }
+
+  /** Text under the crosshair, and the bar of a plant or defuse in progress (0 to 1, or negative for none). */
+  setPrompt(text: string | null, work = -1): void {
+    show(this.prompt, text !== null);
+    if (text !== null) this.text(this.prompt, text);
+    show(this.workBar, work >= 0);
+    if (work >= 0) this.width(this.workFill, Math.round(work * 100));
+  }
+
+  setTimerText(text: string): void {
+    this.text(this.timer, text);
+    this.timer.classList.add('urgent');
+  }
+
+  setInsideSmoke(v: boolean): void {
+    this.smokeIn.style.opacity = v ? '1' : '0';
+  }
+
+  /** Full strength at first, then fades: a flashbang stays white for a while, a concussion lets go sooner. */
+  stun(blind: boolean, ms: number): void {
+    const e = blind ? this.flashWhite : this.daze;
+    const hold = blind ? 0.45 : 0.2;
+    e.style.transition = 'none';
+    e.style.opacity = '1';
+    void e.offsetWidth;
+    e.style.transition = `opacity ${ms * (1 - hold)}ms ease-in ${ms * hold}ms`;
+    e.style.opacity = '0';
+  }
+
+  clearStun(): void {
+    for (const e of [this.flashWhite, this.daze]) {
+      e.style.transition = 'none';
+      e.style.opacity = '0';
+    }
   }
 
   /** Shows the weapons the player has, in wheel order, each with the number key that selects it. */
@@ -346,14 +426,14 @@ export class Hud {
     show(this.scope, v);
   }
 
-  notify(text: string): void {
+  notify(text: string, ms = 1600): void {
     this.notice.textContent = text;
     show(this.notice, true);
     this.notice.classList.remove('pop');
     void this.notice.offsetWidth;
     this.notice.classList.add('pop');
     clearTimeout(this.noticeTimer);
-    this.noticeTimer = window.setTimeout(() => show(this.notice, false), 1600);
+    this.noticeTimer = window.setTimeout(() => show(this.notice, false), ms);
   }
 
   reset(): void {
@@ -363,6 +443,10 @@ export class Hud {
     this.setScope(false);
     this.setProtected(false);
     this.dmgFlash.style.opacity = '0';
+    this.clearStun();
+    show(this.gear, false);
+    this.setPrompt(null);
+    this.setInsideSmoke(false);
     this.damageNumbers.forEach((n) => n.el.remove());
     this.damageNumbers = [];
   }
