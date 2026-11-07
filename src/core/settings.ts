@@ -233,6 +233,13 @@ class SettingsStore {
     this.listeners.forEach((l) => l(this.current));
   }
 
+  /** Replaces everything with settings from outside this browser, such as the player's account. */
+  apply(raw: unknown): void {
+    this.current = sanitize(raw);
+    this.save();
+    this.listeners.forEach((l) => l(this.current));
+  }
+
   reset(): void {
     this.current = cloneDefaults();
     this.save();

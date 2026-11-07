@@ -1754,3 +1754,15 @@ kbd {
   color: var(--muted);
   cursor: default;
 }
+
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar.big {
+  width: 72px;
+  height: 72px;
+  font-size: 28px;
+}

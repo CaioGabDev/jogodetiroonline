@@ -9,6 +9,7 @@ import { RoomBrowser } from './net/directory';
 import { NetClient, joinRemote, type DisconnectReason } from './net/client';
 import { account } from './net/account';
 import { describeError } from './net/peer';
+import { initSettingsSync } from './net/profile';
 import type { HostMsg, LobbyState, MatchInfo, WelcomeMsg } from './net/protocol';
 import { SceneManager } from './render/scene';
 import { AuthScreen } from './ui/auth';
@@ -19,6 +20,7 @@ import { LoadoutPicker } from './ui/loadout';
 import { Lobby } from './ui/lobby';
 import { MainMenu } from './ui/menu';
 import { PauseMenu } from './ui/pause';
+import { ProfileScreen } from './ui/profile';
 import { Results } from './ui/results';
 import { Scoreboard } from './ui/scoreboard';
 import { SettingsUI } from './ui/settingsUI';
@@ -37,6 +39,7 @@ class App {
   private results: Results;
   private settingsUI: SettingsUI;
   private auth: AuthScreen;
+  private profile: ProfileScreen;
   private roomBrowser: RoomBrowser;
   private loadout: LoadoutPicker;
   private inventory: Inventory;
@@ -68,6 +71,7 @@ class App {
       onSettings: () => this.settingsUI.open(),
       onLogin: () => this.auth.open(),
       onLogout: () => void account.signOut(),
+      onProfile: () => this.profile.open(),
     });
     this.lobby = new Lobby(ui, {
       onStart: () => {
@@ -105,8 +109,10 @@ class App {
     });
     this.settingsUI = new SettingsUI(ui);
     this.auth = new AuthScreen(ui);
+    this.profile = new ProfileScreen(ui);
     account.onChange(() => this.menu.setAccount(account.profile, account.available));
     this.menu.setAccount(null, account.available);
+    initSettingsSync();
     account.init();
     this.roomBrowser = new RoomBrowser((rooms) => this.menu.setRooms(rooms));
     this.loadout = new LoadoutPicker(ui, (w, go) => {

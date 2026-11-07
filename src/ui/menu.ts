@@ -13,6 +13,7 @@ export interface MenuCallbacks {
   onSettings(): void;
   onLogin(): void;
   onLogout(): void;
+  onProfile(): void;
 }
 
 export class MainMenu {
@@ -175,6 +176,7 @@ export class MainMenu {
     this.accountBox.append(
       avatar(profile.username, profile.avatar_url),
       el('span', { class: 'account-name', text: profile.username }),
+      el('button', { class: 'btn small', text: 'Perfil', onClick: () => this.cb.onProfile() }),
       el('button', { class: 'btn small ghost', text: 'Sair', onClick: () => this.cb.onLogout() }),
     );
   }
