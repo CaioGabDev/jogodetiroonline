@@ -31,8 +31,6 @@ export const PLAYER = {
 };
 
 export const HITBOX = {
-  bodyHalf: 0.34,
-  headHalf: 0.21,
   standBodyTop: 1.45,
   standHeadTop: 1.87,
   crouchBodyTop: 1.0,

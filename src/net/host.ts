@@ -701,7 +701,7 @@ export class HostServer {
     p.ctOff = null;
     p.lastMoveT = t;
     p.history.clear();
-    p.history.push({ t, x: p.x, y: p.y, z: p.z, crouch: p.crouch });
+    p.history.push({ t, x: p.x, y: p.y, z: p.z, yaw: p.yaw, crouch: p.crouch });
     p.lastHistT = t;
     this.send(p, { type: 'spawn', p: [p.x, p.y, p.z], yw: p.yaw, tp: p.tp, full: true, ld: p.loadout });
     this.sendAmmo(p);
@@ -778,7 +778,7 @@ export class HostServer {
     p.ctOff = p.ctOff === null ? off : Math.min(p.ctOff + realDt * 0.01, off);
     const sampleT = Math.max(p.lastHistT + 1, Math.min(t, m.ct + p.ctOff));
     p.lastHistT = sampleT;
-    p.history.push({ t: sampleT, x: nx, y: ny, z: nz, crouch: m.c });
+    p.history.push({ t: sampleT, x: nx, y: ny, z: nz, yaw: m.yw, crouch: m.c });
     this.checkPickups(p);
   }
 
@@ -881,11 +881,11 @@ export class HostServer {
     const minT = t - Math.min(HISTORY_MS, rtt + MAX_INTERP_DELAY + SNAP_SAMPLE_DELAY + 200);
     const rewindT = clamp(m.rt - SNAP_SAMPLE_DELAY, minT, t);
 
-    const targets: Array<{ pl: SPlayer; pos: { x: number; y: number; z: number; crouch: boolean } }> = [];
+    const targets: Array<{ pl: SPlayer; pos: { x: number; y: number; z: number; yaw: number; crouch: boolean } }> = [];
     for (const o of this.players.values()) {
       if (o === p || !o.alive) continue;
       if (!this.isEnemy(p, o) && !this.config.friendlyFire) continue;
-      const pos = o.history.at(rewindT) ?? { x: o.x, y: o.y, z: o.z, crouch: o.crouch };
+      const pos = o.history.at(rewindT) ?? { x: o.x, y: o.y, z: o.z, yaw: o.yaw, crouch: o.crouch };
       targets.push({ pl: o, pos });
     }
 
@@ -1169,7 +1169,7 @@ export class HostServer {
         }
       }
       if (best) p.yaw = Math.atan2(-(best.x - p.x), -(best.z - p.z));
-      p.history.push({ t, x: p.x, y: p.y, z: p.z, crouch: p.crouch });
+      p.history.push({ t, x: p.x, y: p.y, z: p.z, yaw: p.yaw, crouch: p.crouch });
       p.lastHistT = t;
     }
   }
