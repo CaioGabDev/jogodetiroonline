@@ -7,9 +7,11 @@ import { Game } from './game/game';
 import { HostServer } from './net/host';
 import { RoomBrowser } from './net/directory';
 import { NetClient, joinRemote, type DisconnectReason } from './net/client';
+import { account } from './net/account';
 import { describeError } from './net/peer';
 import type { HostMsg, LobbyState, MatchInfo, WelcomeMsg } from './net/protocol';
 import { SceneManager } from './render/scene';
+import { AuthScreen } from './ui/auth';
 import { Chat } from './ui/chat';
 import { Hud } from './ui/hud';
 import { Inventory } from './ui/inventory';
@@ -34,6 +36,7 @@ class App {
   private pause: PauseMenu;
   private results: Results;
   private settingsUI: SettingsUI;
+  private auth: AuthScreen;
   private roomBrowser: RoomBrowser;
   private loadout: LoadoutPicker;
   private inventory: Inventory;
@@ -63,6 +66,8 @@ class App {
       onJoin: (n, c, code) => void this.joinRoom(n, c, code),
       onPractice: (n, c) => void this.practice(n, c),
       onSettings: () => this.settingsUI.open(),
+      onLogin: () => this.auth.open(),
+      onLogout: () => void account.signOut(),
     });
     this.lobby = new Lobby(ui, {
       onStart: () => {
@@ -99,6 +104,10 @@ class App {
       },
     });
     this.settingsUI = new SettingsUI(ui);
+    this.auth = new AuthScreen(ui);
+    account.onChange(() => this.menu.setAccount(account.profile, account.available));
+    this.menu.setAccount(null, account.available);
+    account.init();
     this.roomBrowser = new RoomBrowser((rooms) => this.menu.setRooms(rooms));
     this.loadout = new LoadoutPicker(ui, (w, go) => {
       this.net?.send({ type: 'loadout', w, go });
