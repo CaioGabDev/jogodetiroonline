@@ -252,7 +252,7 @@ Convidados continuam jogando normalmente mesmo com o Supabase ligado.
 | Variável | Valor |
 | --- | --- |
 | `VITE_SUPABASE_URL` | URL do projeto (`https://SEU-PROJETO.supabase.co`) |
-| `VITE_SUPABASE_ANON_KEY` | chave anon/publishable |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | chave publishable (`sb_publishable_…`). O nome antigo `VITE_SUPABASE_ANON_KEY` também funciona |
 | `VITE_GOOGLE_LOGIN` | `true` para mostrar o botão do Google (só depois do passo 4) |
 
 Tudo que começa com `VITE_` fica visível no navegador. **Nunca** use a chave `service_role` aqui.

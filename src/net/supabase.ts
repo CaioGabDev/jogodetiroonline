@@ -1,7 +1,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 const url = import.meta.env.VITE_SUPABASE_URL?.replace(/\/+$/, '');
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// The dashboard now calls it the publishable key (sb_publishable_…); the old anon key name still works.
+const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 /** Null when the site was built without Supabase: everything keeps working, with guests only. */
 export const supabase: SupabaseClient | null = url && key ? createClient(url, key, { auth: { flowType: 'pkce' } }) : null;
