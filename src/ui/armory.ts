@@ -1,6 +1,8 @@
 import { progress } from '../core/progress';
 import { account } from '../net/account';
-import { RANKS, SKINS, rankFor, type Rank, type SkinDef } from '../game/progression';
+import { RANKS, SKINS, rankFor, skinById, type InspectStyle, type Rank, type SkinDef } from '../game/progression';
+import { W, WEAPONS } from '../game/weapons';
+import { SkinPreview } from '../render/skinPreview';
 import { clear, el, show } from './dom';
 import { toast } from './toast';
 
@@ -130,6 +132,11 @@ export function xpBar(into: number, need: number): HTMLElement {
   ]);
 }
 
+const INSPECT_NAMES: Record<InspectStyle, string> = { default: 'normal', spin: 'giro no cano', flip: 'arremesso', twirl: 'rodopio' };
+
+/** Guns the showcase can show, all with a loaded model. */
+const SHOWCASE_GUNS = [W.RIFLE, W.SMG, W.SNIPER, W.SHOTGUN, W.DEAGLE, W.PISTOL];
+
 function nextRank(level: number): Rank | null {
   return RANKS.find((r) => r.level > level) ?? null;
 }
@@ -139,7 +146,14 @@ export class Armory {
   readonly root: HTMLElement;
   private head: HTMLElement;
   private grid: HTMLElement;
+  private premiumGrid: HTMLElement;
   private where: HTMLElement;
+  private preview = new SkinPreview();
+  private showcaseInfo: HTMLElement;
+  private gunChips: HTMLElement;
+  /** Skin and gun in the showcase. */
+  private selected = '';
+  private gun: number = W.RIFLE;
   /** A purchase or equip is on its way to the account. */
   private busy = false;
   private onClose: (() => void) | null = null;
@@ -147,19 +161,32 @@ export class Armory {
   constructor(parent: HTMLElement) {
     this.head = el('div', { class: 'armory-head' });
     this.grid = el('div', { class: 'skin-grid' });
+    this.premiumGrid = el('div', { class: 'skin-grid premium' });
     this.where = el('p', { class: 'hint' });
+    this.showcaseInfo = el('div', { class: 'showcase-info' });
+    this.gunChips = el('div', { class: 'gun-chips' });
+    const showcase = el('div', { class: 'showcase' }, [
+      el('div', { class: 'showcase-stage' }, [this.preview.canvas, this.gunChips]),
+      this.showcaseInfo,
+    ]);
     const close = el('button', { class: 'btn primary', text: 'Fechar', onClick: () => this.close() });
     const panel = el('div', { class: 'panel armory-panel' }, [
       el('h2', { text: 'Arsenal' }),
       this.head,
-      el('h3', { text: 'Skins de arma' }),
+      showcase,
+      el('h3', { text: 'Coleção premium' }),
+      el('p', { class: 'hint', text: 'Mudam o formato da arma, a cor dos tiros, têm efeito de abate que todo mundo vê e inspeção própria (Y).' }),
+      this.premiumGrid,
+      el('h3', { text: 'Skins' }),
       el('p', { class: 'hint', text: 'A skin vale para todas as suas armas, e os outros jogadores também a veem. As de patente são grátis ao chegar no nível; as outras se compram com moedas.' }),
       this.grid,
       el('div', { class: 'armory-foot' }, [this.where, close]),
     ]);
     this.root = el('div', { class: 'overlay armory hidden' }, [panel]);
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Escape' && this.visible) this.close();
+      if (!this.visible) return;
+      if (e.code === 'Escape') this.close();
+      if (e.code === 'KeyY' && !e.repeat) this.preview.inspect();
     });
     parent.append(this.root);
     progress.onChange(() => {
@@ -173,12 +200,15 @@ export class Armory {
 
   open(onClose?: () => void): void {
     this.onClose = onClose ?? null;
+    this.selected = progress.equipped;
     this.render();
     show(this.root, true);
+    this.preview.start();
   }
 
   close(): void {
     show(this.root, false);
+    this.preview.stop();
     this.onClose?.();
     this.onClose = null;
   }
@@ -211,11 +241,49 @@ export class Armory {
         ? 'Jogando como convidado: o progresso fica só neste navegador. Entre numa conta para guardá-lo.'
         : 'O progresso fica salvo neste navegador.';
     clear(this.grid);
+    clear(this.premiumGrid);
     if (progress.loading) {
       this.grid.append(el('p', { class: 'hint', text: 'Carregando o progresso da conta…' }));
       return;
     }
-    for (const s of SKINS) this.grid.append(this.card(s, info.level));
+    for (const s of SKINS) (s.fx ? this.premiumGrid : this.grid).append(this.card(s, info.level));
+    this.renderShowcase(info.level);
+  }
+
+  private select(id: string): void {
+    this.selected = id;
+    this.render();
+  }
+
+  private renderShowcase(level: number): void {
+    const s = skinById(this.selected);
+    this.preview.show(s.id, this.gun);
+    clear(this.gunChips);
+    for (const w of SHOWCASE_GUNS) {
+      this.gunChips.append(
+        el('button', {
+          class: 'gun-chip' + (w === this.gun ? ' active' : ''),
+          text: WEAPONS[w].short,
+          onClick: () => {
+            this.gun = w;
+            this.renderShowcase(progress.level);
+          },
+        }),
+      );
+    }
+    const { status, action } = this.actionFor(s, level);
+    const feats: string[] = s.fx
+      ? ['Formato próprio', 'Tiros coloridos', 'Efeito de abate', `Inspeção: ${INSPECT_NAMES[s.fx.inspect]}`]
+      : [s.pattern === 'solid' ? 'Cor sólida' : 'Padrão na arma toda'];
+    clear(this.showcaseInfo);
+    this.showcaseInfo.append(
+      s.fx ? el('span', { class: 'premium-tag', text: 'PREMIUM' }) : '',
+      el('div', { class: 'showcase-name', text: s.name }),
+      s.tagline ? el('p', { class: 'hint', text: s.tagline }) : '',
+      el('div', { class: 'feat-list' }, feats.map((f) => el('span', { class: 'feat', text: f }))),
+      el('div', { class: 'skin-status', text: status }),
+      el('div', { class: 'showcase-actions' }, [el('button', { class: 'btn', text: 'Inspecionar (Y)', onClick: () => this.preview.inspect() }), action]),
+    );
   }
 
   /** One request at a time, with the buttons off meanwhile. */
@@ -232,11 +300,30 @@ export class Armory {
   }
 
   private card(s: SkinDef, level: number): HTMLElement {
+    const canvas = el('canvas', { class: 'skin-preview' });
+    drawPreview(canvas, s);
+    const { status, action } = this.actionFor(s, level);
+    const classes = ['skin-card', s.fx ? 'premium' : '', progress.equipped === s.id ? 'equipped' : '', level < s.level ? 'locked' : '', this.selected === s.id ? 'selected' : ''];
+    const card = el('div', { class: classes.filter(Boolean).join(' '), title: 'Ver na vitrine' }, [
+      canvas,
+      s.fx ? el('span', { class: 'premium-tag small', text: 'PREMIUM' }) : null,
+      el('div', { class: 'skin-name', text: s.name }),
+      el('div', { class: 'skin-status', text: status }),
+      action,
+    ]);
+    if (s.fx) card.style.setProperty('--skin-glow', s.fx.kill);
+    // A click on the card shows it in the showcase; its button still buys or equips.
+    card.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('button')) return;
+      this.select(s.id);
+    });
+    return card;
+  }
+
+  private actionFor(s: SkinDef, level: number): { status: string; action: HTMLElement } {
     const owned = progress.owns(s.id);
     const equipped = progress.equipped === s.id;
     const locked = level < s.level;
-    const canvas = el('canvas', { class: 'skin-preview' });
-    drawPreview(canvas, s);
 
     let status: string;
     let action: HTMLElement;
@@ -274,11 +361,6 @@ export class Armory {
       if (!afford) (action as HTMLButtonElement).disabled = true;
     }
 
-    return el('div', { class: 'skin-card' + (equipped ? ' equipped' : '') + (locked ? ' locked' : '') }, [
-      canvas,
-      el('div', { class: 'skin-name', text: s.name }),
-      el('div', { class: 'skin-status', text: status }),
-      action,
-    ]);
+    return { status, action };
   }
 }

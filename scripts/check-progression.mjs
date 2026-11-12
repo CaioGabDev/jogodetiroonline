@@ -1,6 +1,6 @@
 // Progression check: `npm run check`. Levels, ranks, rewards, the skin catalog and the saved progress.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createServer } from 'vite';
 
 // The store saves to localStorage: a map stands in for it.
@@ -62,9 +62,18 @@ for (const s of P.SKINS) {
   for (const c of s.colors) assert.match(c, /^#[0-9a-f]{6}$/, `${s.id} color ${c}`);
 }
 assert.equal(P.skinById('nao-existe').id, P.DEFAULT_SKIN);
+for (const s of P.SKINS.filter((x) => x.fx)) {
+  assert.ok(s.price >= 5000, `${s.id}: premium costs more`);
+  for (const c of [s.fx.tracer, s.fx.flash, s.fx.kill]) assert.match(c, /^#[0-9a-f]{6}$/, `${s.id} fx color`);
+}
 
 // The database has its own copy of the catalog, which decides what can be bought.
-const sql = readFileSync(new URL('../supabase/migrations/20261112000100_progressao.sql', import.meta.url), 'utf8');
+const dir = new URL('../supabase/migrations/', import.meta.url);
+const sql = readdirSync(dir)
+  .filter((f) => f.endsWith('.sql'))
+  .sort()
+  .map((f) => readFileSync(new URL(f, dir), 'utf8'))
+  .join(' ');
 const rows = [...sql.matchAll(/\('([a-z]+)', (\d+), (\d+)\)/g)].map((m) => ({ id: m[1], level: Number(m[2]), price: Number(m[3]) }));
 assert.deepEqual(rows, P.SKINS.map((s) => ({ id: s.id, level: s.level, price: s.price })), 'catalog in the migration matches progression.ts');
 

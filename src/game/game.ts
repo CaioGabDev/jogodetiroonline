@@ -16,6 +16,8 @@ import { F_PROTECTED, type DropsMsg, type HostMsg, type KitMsg, type LobbyState,
 import type { SceneManager } from '../render/scene';
 import { Effects } from '../render/effects';
 import { Viewmodel } from '../render/viewmodel';
+import { hexColor } from '../render/skins';
+import { skinById, type SkinFx } from './progression';
 import type { BuyState } from '../ui/buyMenu';
 import type { Hud } from '../ui/hud';
 import type { Chat } from '../ui/chat';
@@ -264,6 +266,12 @@ export class Game {
     return teamMode(this.config.mode) ? TEAM_COLORS[info.team] : info.color;
   }
 
+  /** Premium effects of the skin this player wears, if any. */
+  private fxOf(id: number): SkinFx | undefined {
+    const skin = this.infos.get(id)?.skin;
+    return skin ? skinById(skin).fx : undefined;
+  }
+
   private nameOf(id: number): string {
     return this.infos.get(id)?.name ?? '???';
   }
@@ -452,6 +460,13 @@ export class Game {
     const killer = { name: this.nameOf(k), color: this.displayColor(k) };
     const victim = { name: this.nameOf(v), color: this.displayColor(v) };
     this.hud.addKill(killer, victim, w, hs, k === this.localId || v === this.localId);
+    // A premium skin's kill effect, seen by everyone, where the victim fell.
+    const fx = k !== v ? this.fxOf(k) : undefined;
+    if (fx && !WEAPONS[w]?.melee) {
+      const rv = this.remotes.get(v);
+      const at = v === this.localId ? new THREE.Vector3(this.me.x, this.me.y + 1, this.me.z) : rv ? new THREE.Vector3(rv.x, rv.y + 1, rv.z) : null;
+      if (at) this.effects.killBurst(at, hexColor(fx.kill));
+    }
     if (v === this.localId) {
       this.alive = false;
       this.hp = 0;
@@ -475,9 +490,11 @@ export class Game {
     const def = WEAPONS[w];
     const melee = def?.melee === true;
     const pellets = h.length;
+    const fx = this.fxOf(id);
+    const tracer = fx ? hexColor(fx.tracer) : (def?.tracer ?? 0xffd27a);
     for (let i = 0; i < pellets; i++) {
       const end = new THREE.Vector3(e[i * 3], e[i * 3 + 1], e[i * 3 + 2]);
-      if (!melee && (pellets === 1 || i % 3 === 0)) this.effects.tracer(muzzle, end, def?.tracer ?? 0xffd27a);
+      if (!melee && (pellets === 1 || i % 3 === 0)) this.effects.tracer(muzzle, end, tracer);
       if (h[i] === 1) {
         const normal = new THREE.Vector3(n[i * 3], n[i * 3 + 1], n[i * 3 + 2]);
         this.effects.decal(end, normal);
@@ -487,7 +504,7 @@ export class Game {
       }
     }
     if (melee) r?.model.swing();
-    else this.effects.muzzleFlash(muzzle, 0.55, true);
+    else this.effects.muzzleFlash(muzzle, 0.55, true, 0.05, fx ? hexColor(fx.flash) : 0xffffff);
     audio.shot(def?.sound ?? 'rifle', muzzle);
   }
 
@@ -887,6 +904,7 @@ export class Game {
     const dirs: number[] = [];
     const muzzleCam = this.viewmodel.muzzleCameraSpace(new THREE.Vector3());
     const muzzleWorld = this.sm.camera.localToWorld(muzzleCam.clone());
+    const myFx = this.fxOf(this.localId);
     const rt = this.net.renderTime();
     for (let i = 0; i < def.pellets; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -914,7 +932,7 @@ export class Game {
         }
       }
       const end = origin.clone().addScaledVector(d, dist);
-      if (!def.melee && (def.pellets === 1 || i % 3 === 0)) this.effects.tracer(muzzleWorld, end, def.tracer);
+      if (!def.melee && (def.pellets === 1 || i % 3 === 0)) this.effects.tracer(muzzleWorld, end, myFx ? hexColor(myFx.tracer) : def.tracer);
       if (playerHit) {
         this.effects.impact(end, null, 'player', 6);
       } else if (wh) {
@@ -941,7 +959,7 @@ export class Game {
     } else {
       this.viewmodel.fire(def.fireKick * stance);
       const scoped = def.scoped && this.aimT > SCOPE_IN;
-      if (!scoped && !def.silent) this.effects.muzzleFlash(muzzleWorld, 0.35, true);
+      if (!scoped && !def.silent) this.effects.muzzleFlash(muzzleWorld, 0.35, true, 0.05, myFx ? hexColor(myFx.flash) : 0xffffff);
     }
     audio.shot(def.sound);
     this.protected = false;
@@ -966,8 +984,8 @@ export class Game {
     this.bloom -= this.bloom * damp(5, dt);
     if (this.bloom < BLOOM_EPSILON) this.bloom = 0;
 
-    // Anything that needs the weapon ends the inspection; the viewmodel eases back to its normal pose.
-    if (!this.alive || this.aimT > 0 || this.sprinting || this.reloadW >= 0 || t < this.switchUntil) this.inspectUntil = 0;
+    // Anything that needs the weapon ends the inspection; the viewmodel eases back to its normal pose. Running doesn't.
+    if (!this.alive || this.aimT > 0 || this.reloadW >= 0 || t < this.switchUntil) this.inspectUntil = 0;
 
     // Covers Gun Game level-ups and settings changed mid-match.
     const allowed = this.allowed();
@@ -994,7 +1012,7 @@ export class Game {
       this.setWeapon(allowed[next % allowed.length]);
     }
     if (input.consume('reload')) this.startReload();
-    if (input.consume('inspect') && this.reloadW < 0 && t >= this.switchUntil && this.aimT === 0 && !this.sprinting && t >= this.inspectUntil) {
+    if (input.consume('inspect') && this.reloadW < 0 && t >= this.switchUntil && this.aimT === 0 && t >= this.inspectUntil) {
       this.inspectStart = t;
       this.inspectUntil = t + INSPECT_MS;
       audio.switchWeapon();

@@ -310,9 +310,12 @@ export class Effects {
     this.fires.push({ group, life: ms / 1000 });
   }
 
-  muzzleFlash(pos: THREE.Vector3, scale = 0.6, light = true, life = 0.05): void {
+  /** `color` tints the flash and its light (premium skins); white keeps the normal fire color. */
+  muzzleFlash(pos: THREE.Vector3, scale = 0.6, light = true, life = 0.05, color = 0xffffff): void {
     const f = this.flashes[this.flashIdx];
     this.flashIdx = (this.flashIdx + 1) % this.flashes.length;
+    f.sprite.material.color.setHex(color);
+    this.light.color.setHex(color === 0xffffff ? 0xffb050 : color);
     f.sprite.position.copy(pos);
     f.sprite.scale.setScalar(scale * (0.8 + Math.random() * 0.4));
     f.sprite.material.rotation = Math.random() * Math.PI;
@@ -341,6 +344,31 @@ export class Effects {
     this.decalCount = Math.min(MAX_DECALS, this.decalCount + 1);
     this.decals.count = this.decalCount;
     this.decals.instanceMatrix.needsUpdate = true;
+  }
+
+  /** Premium skin kill: a burst of colored sparks rising from the body, with a flash. */
+  killBurst(pos: THREE.Vector3, color: number): void {
+    const c = new THREE.Color(color);
+    for (let i = 0; i < 46; i++) {
+      const k = this.pIdx;
+      this.pIdx = (this.pIdx + 1) % MAX_PARTICLES;
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * 0.35;
+      this.pPos[k * 3] = pos.x + Math.cos(a) * r;
+      this.pPos[k * 3 + 1] = pos.y + (Math.random() - 0.5) * 0.9;
+      this.pPos[k * 3 + 2] = pos.z + Math.sin(a) * r;
+      const sp = 1.5 + Math.random() * 3;
+      this.pVel[k * 3] = Math.cos(a) * sp;
+      this.pVel[k * 3 + 1] = 3 + Math.random() * 5;
+      this.pVel[k * 3 + 2] = Math.sin(a) * sp;
+      this.pLife[k] = 0.6 + Math.random() * 0.6;
+      // Some sparks are almost white, so the burst reads as light and not paint.
+      const w = Math.random() < 0.25 ? 0.6 : 0;
+      this.pCol[k * 3] = c.r + (1 - c.r) * w;
+      this.pCol[k * 3 + 1] = c.g + (1 - c.g) * w;
+      this.pCol[k * 3 + 2] = c.b + (1 - c.b) * w;
+    }
+    this.muzzleFlash(pos, 2.2, true, 0.18, color);
   }
 
   /** Spray of particles at an impact point. kind: world dust/sparks or blood. */

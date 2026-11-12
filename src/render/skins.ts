@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { DEFAULT_SKIN, skinById, type SkinDef, type SkinPattern } from '../game/progression';
+import { isKitPart, tickKits } from './skinKits';
 
 /**
  * Weapon skins. The gun models have no usable UVs, so the pattern is computed in the shader from each
@@ -14,6 +15,12 @@ const skinTime = { value: 0 };
 
 export function tickSkins(dt: number): void {
   skinTime.value = (skinTime.value + dt) % 1000;
+  tickKits(dt);
+}
+
+/** #rrggbb as a number, for tracers and flashes. */
+export function hexColor(hex: string): number {
+  return parseInt(hex.slice(1), 16);
 }
 
 const VERT_HEAD = /* glsl */ `
@@ -163,7 +170,7 @@ export function applySkin(root: THREE.Object3D, skinId: string, keep?: ReadonlyS
   root.updateMatrixWorld(true);
   _inv.copy(root.matrixWorld).invert();
   root.traverse((o) => {
-    if (!(o instanceof THREE.Mesh)) return;
+    if (!(o instanceof THREE.Mesh) || isKitPart(o)) return;
     let orig = originals.get(o);
     if (!orig) {
       orig = o.material as THREE.Material | THREE.Material[];

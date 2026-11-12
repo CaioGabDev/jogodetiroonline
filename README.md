@@ -37,7 +37,7 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 | Atirar | Botão esquerdo |
 | Mirar / luneta | Botão direito (segurar ou alternar) |
 | Recarregar | R |
-| Inspecionar arma | Y (atirar, mirar, recarregar, trocar de arma ou correr cancela) |
+| Inspecionar arma | Y (dá para correr inspecionando; atirar, mirar, recarregar ou trocar de arma cancela) |
 | Trocar arma | 1 e 2 primárias, 3 pistola, 4 faca, ou roda do mouse |
 | Inventário | B (nas partidas com todas as armas). No modo Bomba, B abre a compra |
 | Placar | Tab (segurar) |
@@ -194,6 +194,17 @@ Abates contam até 60 e dano até 8.000 por partida. O nível vai até 55 e cada
 | Nível | 1 | 3 | 6 | 10 | 15 | 20 | 26 | 33 | 40 | 50 |
 
 No menu, **Arsenal e skins** mostra a patente, o XP e a loja. A skin vale para todas as suas armas e os outros jogadores a veem. Floresta, Deserto, Urbano e Ártico vêm de graça com a patente; as outras (Tigre, Oceano, Carmesim, Neon, Cerejeira, Lava, Galáxia, Ouro e Diamante) custam moedas e algumas pedem nível mínimo. O catálogo e os números ficam em `src/game/progression.ts`.
+
+A **coleção premium** vai além da pintura. Cada skin muda o formato da arma com peças próprias, animadas, colore o traçante e o clarão do tiro, tem um efeito de abate que todo mundo na partida vê e uma inspeção (`Y`) própria. No Arsenal, a vitrine mostra a arma em 3D: dá para trocar a arma mostrada e inspecionar (`Y` ou o botão) antes de comprar. A faca recebe só a pintura.
+
+| Premium | Nível | Preço | Formato | Inspeção |
+| --- | --- | --- | --- | --- |
+| Plasma | 8 | 5.000 | anéis de energia girando no cano, faixa e núcleo brilhantes | giro no cano |
+| Cristal Gélido | 14 | 6.500 | lascas de gelo crescendo do corpo, pedaços flutuando | arremesso |
+| Brasa Infernal | 20 | 8.000 | aletas de obsidiana, respiros em brasa e fagulhas subindo | rodopio |
+| Vazio | 28 | 10.000 | fragmentos em órbita, halo e lâminas no cano | arremesso |
+
+As peças são montadas em código (`src/render/skinKits.ts`) a partir do tamanho de cada arma, então a mesma skin serve em todas.
 
 **Com conta**, o progresso fica no Supabase (`player_stats`) e quem paga é o banco: o `submit_match` confere a partida (duração, kills possíveis, intervalo entre partidas) e calcula XP e moedas, e comprar ou equipar passa pelas funções `buy_skin` e `equip_skin`, que conferem nível, moedas e posse. Valem as mesmas regras do elo: partida online, com outro jogador, jogada até o fim. Moedas e compras só o dono vê (`my_progress`); nível e skin equipada são públicos. O catálogo do banco fica na migration `20261112000100_progressao.sql`, e o `npm run check` confere que ele bate com `progression.ts`.
 

@@ -111,6 +111,22 @@ export const LEVEL_UP_COINS = 100;
 /** How the colors are laid over the gun. Must match the shader in `render/skins.ts`. */
 export type SkinPattern = 'solid' | 'camo' | 'digital' | 'stripes' | 'flow';
 
+/** Extra parts that change the gun's shape. Built in render/skinKits.ts. */
+export type SkinKit = 'plasma' | 'cristal' | 'brasa' | 'vazio';
+
+/** How the gun moves in hand when inspected (Y). */
+export type InspectStyle = 'default' | 'spin' | 'flip' | 'twirl';
+
+/** What only premium skins have: their own parts, shot colors, kill effect and inspection. */
+export interface SkinFx {
+  kit: SkinKit;
+  /** Tracer, muzzle flash and kill burst, as #rrggbb. */
+  tracer: string;
+  flash: string;
+  kill: string;
+  inspect: InspectStyle;
+}
+
 export interface SkinDef {
   id: string;
   name: string;
@@ -125,6 +141,10 @@ export interface SkinDef {
   shine: number;
   /** How much the colors glow in the dark. */
   glow: number;
+  /** Premium only. */
+  fx?: SkinFx;
+  /** One line about the skin, shown in the Arsenal. */
+  tagline?: string;
 }
 
 export const DEFAULT_SKIN = 'padrao';
@@ -144,6 +164,55 @@ export const SKINS: SkinDef[] = [
   { id: 'galaxia', name: 'Galáxia', pattern: 'flow', colors: ['#0b0630', '#5a2ca0', '#ff8ac0'], level: 26, price: 4500, shine: 0.4, glow: 0.7 },
   { id: 'ouro', name: 'Ouro', pattern: 'solid', colors: ['#d9ae3a'], level: 33, price: 6000, shine: 1, glow: 0.08 },
   { id: 'diamante', name: 'Diamante', pattern: 'digital', colors: ['#b9f2ff', '#e8ffff', '#7fd6ff', '#d2f6ff'], level: 50, price: 10000, shine: 1, glow: 0.25 },
+  // Premium: parts that change the gun's shape, colored shots, a kill effect everyone sees and their own inspection.
+  {
+    id: 'plasma',
+    name: 'Plasma',
+    pattern: 'flow',
+    colors: ['#0a1430', '#123a6b', '#38e8ff'],
+    level: 8,
+    price: 5000,
+    shine: 0.6,
+    glow: 0.8,
+    tagline: 'Anéis de energia que giram em volta do cano.',
+    fx: { kit: 'plasma', tracer: '#45f0ff', flash: '#7af6ff', kill: '#38e8ff', inspect: 'spin' },
+  },
+  {
+    id: 'cristal',
+    name: 'Cristal Gélido',
+    pattern: 'camo',
+    colors: ['#cfefff', '#8fd0f0', '#f4fcff', '#5aa6d6'],
+    level: 14,
+    price: 6500,
+    shine: 1,
+    glow: 0.2,
+    tagline: 'Lascas de gelo crescem do corpo da arma.',
+    fx: { kit: 'cristal', tracer: '#bdf3ff', flash: '#d8f8ff', kill: '#9fe6ff', inspect: 'flip' },
+  },
+  {
+    id: 'brasa',
+    name: 'Brasa Infernal',
+    pattern: 'flow',
+    colors: ['#120604', '#7a1606', '#ff7a1a'],
+    level: 20,
+    price: 8000,
+    shine: 0.3,
+    glow: 1,
+    tagline: 'Aletas de obsidiana e brasas que sobem da arma.',
+    fx: { kit: 'brasa', tracer: '#ff8a2a', flash: '#ffb04a', kill: '#ff5a10', inspect: 'twirl' },
+  },
+  {
+    id: 'vazio',
+    name: 'Vazio',
+    pattern: 'flow',
+    colors: ['#05030c', '#2a0f55', '#b06bff'],
+    level: 28,
+    price: 10000,
+    shine: 0.8,
+    glow: 0.9,
+    tagline: 'Fragmentos de outra dimensão orbitam a arma.',
+    fx: { kit: 'vazio', tracer: '#c08bff', flash: '#d4a8ff', kill: '#a34dff', inspect: 'flip' },
+  },
 ];
 
 const SKIN_BY_ID = new Map(SKINS.map((s) => [s.id, s]));

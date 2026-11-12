@@ -1,6 +1,8 @@
 import * as THREE from 'three';
+import { DEFAULT_SKIN, skinById } from '../game/progression';
 import { W } from '../game/weapons';
 import { assetsReady, gunAssets } from './assets';
+import { inspectPose, setKit, setKitInspect } from './skinKits';
 import { applySkin, tickSkins } from './skins';
 import { makeGlowTexture } from './textures';
 
@@ -31,13 +33,57 @@ function cyl(mat: THREE.Material, r: number, len: number, x: number, y: number, 
   return m;
 }
 
-interface GunModel {
+/** What each builder makes: the gun and the hands holding it, all in one group. */
+interface GunParts {
   group: THREE.Group;
   muzzle: THREE.Vector3;
   /** Offset that centers the sights on screen while aiming. */
   adsPos: THREE.Vector3;
   hipPos: THREE.Vector3;
   mag: THREE.Object3D | null;
+}
+
+interface GunModel extends GunParts {
+  /** The gun without the hands, centered on itself: premium inspections turn it in hand. */
+  pivot: THREE.Group;
+  /** Where the pivot rests. */
+  pivotBase: THREE.Vector3;
+}
+
+const isHand = (o: THREE.Object3D): boolean => o instanceof THREE.Mesh && (o.material === glove || o.material === sleeve);
+
+/** Moves the pivot to the middle of what it holds, without moving anything on screen. */
+function recenter(pivot: THREE.Group): void {
+  const box = new THREE.Box3();
+  for (const c of pivot.children) {
+    c.updateMatrix();
+    c.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      o.updateMatrixWorld(true);
+    });
+  }
+  pivot.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(pivot.matrixWorld).invert();
+  const m = new THREE.Matrix4();
+  pivot.traverse((o) => {
+    if (!(o instanceof THREE.Mesh) || o.userData.kitPart) return;
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    box.union(o.geometry.boundingBox!.clone().applyMatrix4(m.multiplyMatrices(inv, o.matrixWorld)));
+  });
+  if (box.isEmpty()) return;
+  const c = box.getCenter(new THREE.Vector3());
+  pivot.position.add(c);
+  for (const child of pivot.children) child.position.sub(c);
+}
+
+/** Splits the gun from the hands, so it can turn in them. */
+function withPivot(parts: GunParts): GunModel {
+  const pivot = new THREE.Group();
+  const gun = parts.group.children.filter((c) => !isHand(c));
+  parts.group.add(pivot);
+  pivot.add(...gun);
+  recenter(pivot);
+  return { ...parts, pivot, pivotBase: pivot.position.clone() };
 }
 
 function hands(group: THREE.Group, gripZ: number, foreZ: number, foreY = -0.02): void {
@@ -47,7 +93,7 @@ function hands(group: THREE.Group, gripZ: number, foreZ: number, foreY = -0.02):
   group.add(box(sleeve, 0.05, 0.05, 0.18, -0.05, foreY - 0.05, foreZ + 0.1));
 }
 
-function buildRifle(): GunModel {
+function buildRifle(): GunParts {
   const g = new THREE.Group();
   g.add(box(metal, 0.06, 0.08, 0.42, 0, 0, -0.1));
   g.add(cyl(dark, 0.014, 0.28, 0, 0.01, -0.44));
@@ -63,7 +109,7 @@ function buildRifle(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.01, -0.6), hipPos: new THREE.Vector3(0.2, -0.2, -0.62), adsPos: new THREE.Vector3(0, -0.072, -0.42), mag };
 }
 
-function buildPistol(): GunModel {
+function buildPistol(): GunParts {
   const g = new THREE.Group();
   g.add(box(metal, 0.045, 0.05, 0.2, 0, 0, -0.05));
   g.add(box(dark, 0.04, 0.03, 0.18, 0, -0.035, -0.04));
@@ -77,7 +123,7 @@ function buildPistol(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.0, -0.16), hipPos: new THREE.Vector3(0.17, -0.17, -0.45), adsPos: new THREE.Vector3(0, -0.04, -0.36), mag: grip };
 }
 
-function buildShotgun(): GunModel {
+function buildShotgun(): GunParts {
   const g = new THREE.Group();
   g.add(box(metal, 0.065, 0.08, 0.32, 0, 0, -0.05));
   g.add(cyl(dark, 0.02, 0.5, 0, 0.015, -0.42));
@@ -90,7 +136,7 @@ function buildShotgun(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.015, -0.68), hipPos: new THREE.Vector3(0.2, -0.2, -0.6), adsPos: new THREE.Vector3(0, -0.065, -0.4), mag: pump };
 }
 
-function buildSniper(): GunModel {
+function buildSniper(): GunParts {
   const g = new THREE.Group();
   g.add(box(accent, 0.06, 0.08, 0.46, 0, 0, -0.05));
   g.add(cyl(dark, 0.013, 0.5, 0, 0.012, -0.52));
@@ -105,7 +151,7 @@ function buildSniper(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.78), hipPos: new THREE.Vector3(0.2, -0.2, -0.62), adsPos: new THREE.Vector3(0, -0.085, -0.4), mag };
 }
 
-function buildKnife(): GunModel {
+function buildKnife(): GunParts {
   // The group's origin is the fist, so swings pivot on the hand and the blade does the sweeping.
   const g = new THREE.Group();
   const profile = new THREE.Shape();
@@ -137,7 +183,7 @@ function buildKnife(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.21, -0.3), hipPos: pos, adsPos: pos, mag: null };
 }
 
-function buildSmg(): GunModel {
+function buildSmg(): GunParts {
   const g = new THREE.Group();
   g.add(box(metal, 0.05, 0.07, 0.3, 0, 0, -0.06));
   g.add(cyl(dark, 0.012, 0.14, 0, 0.012, -0.27));
@@ -149,7 +195,7 @@ function buildSmg(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.35), hipPos: new THREE.Vector3(0.19, -0.19, -0.55), adsPos: new THREE.Vector3(0, -0.06, -0.38), mag };
 }
 
-function buildLmg(): GunModel {
+function buildLmg(): GunParts {
   const g = new THREE.Group();
   g.add(box(metal, 0.08, 0.1, 0.5, 0, 0, -0.08));
   g.add(cyl(dark, 0.018, 0.5, 0, 0.012, -0.56));
@@ -164,7 +210,7 @@ function buildLmg(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.82), hipPos: new THREE.Vector3(0.21, -0.23, -0.62), adsPos: new THREE.Vector3(0, -0.095, -0.44), mag };
 }
 
-function buildCrossbow(): GunModel {
+function buildCrossbow(): GunParts {
   const g = new THREE.Group();
   g.add(box(wood, 0.05, 0.05, 0.6, 0, 0, -0.05));
   g.add(box(wood, 0.045, 0.1, 0.16, 0, -0.04, 0.2));
@@ -176,7 +222,7 @@ function buildCrossbow(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.03, -0.4), hipPos: new THREE.Vector3(0.2, -0.2, -0.6), adsPos: new THREE.Vector3(0, -0.062, -0.42), mag: null };
 }
 
-function buildDmr(): GunModel {
+function buildDmr(): GunParts {
   const g = new THREE.Group();
   g.add(box(wood, 0.055, 0.075, 0.5, 0, 0, -0.06));
   g.add(cyl(dark, 0.012, 0.4, 0, 0.012, -0.5));
@@ -189,7 +235,7 @@ function buildDmr(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.7), hipPos: new THREE.Vector3(0.2, -0.2, -0.62), adsPos: new THREE.Vector3(0, -0.075, -0.4), mag };
 }
 
-function buildLauncher(): GunModel {
+function buildLauncher(): GunParts {
   const g = new THREE.Group();
   g.add(cyl(metal, 0.05, 0.42, 0, 0.012, -0.24));
   g.add(cyl(dark, 0.056, 0.05, 0, 0.012, -0.46));
@@ -211,7 +257,7 @@ function pistolGrip(g: THREE.Group): THREE.Mesh {
   return grip;
 }
 
-function buildDeagle(): GunModel {
+function buildDeagle(): GunParts {
   const g = new THREE.Group();
   g.add(box(steel, 0.055, 0.065, 0.26, 0, 0, -0.08));
   g.add(box(dark, 0.05, 0.03, 0.2, 0, -0.045, -0.05));
@@ -220,7 +266,7 @@ function buildDeagle(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.005, -0.22), hipPos: new THREE.Vector3(0.17, -0.17, -0.45), adsPos: new THREE.Vector3(0, -0.05, -0.36), mag: grip };
 }
 
-function buildRevolver(): GunModel {
+function buildRevolver(): GunParts {
   const g = new THREE.Group();
   g.add(cyl(steel, 0.016, 0.2, 0, 0.012, -0.14));
   g.add(cyl(metal, 0.036, 0.075, 0, -0.008, -0.01));
@@ -230,7 +276,7 @@ function buildRevolver(): GunModel {
   return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.25), hipPos: new THREE.Vector3(0.17, -0.17, -0.45), adsPos: new THREE.Vector3(0, -0.048, -0.36), mag: grip };
 }
 
-function buildAutoPistol(): GunModel {
+function buildAutoPistol(): GunParts {
   const g = new THREE.Group();
   g.add(box(metal, 0.045, 0.05, 0.22, 0, 0, -0.06));
   g.add(box(dark, 0.04, 0.03, 0.2, 0, -0.035, -0.05));
@@ -271,6 +317,8 @@ export class Viewmodel {
   private landDip = 0;
   private swingT = 0;
   private skin = '';
+  /** How the equipped skin turns the gun when inspected. */
+  private inspectStyle = skinById(DEFAULT_SKIN).fx?.inspect ?? 'default';
 
   constructor(scene: THREE.Scene) {
     this.guns = [
@@ -287,7 +335,7 @@ export class Viewmodel {
       buildDeagle(),
       buildRevolver(),
       buildAutoPistol(),
-    ];
+    ].map(withPivot);
     this.guns.forEach((g, i) => {
       g.group.visible = i === 0;
       this.root.add(g.group);
@@ -312,24 +360,38 @@ export class Viewmodel {
       const asset = gunAssets.get(w);
       // The knife keeps its own model: in first person the blade has to show past the hand.
       if (!asset || w === W.KNIFE) return;
-      const old = g.group.children.filter((c) => c instanceof THREE.Mesh && c.material !== glove && c.material !== sleeve);
-      g.group.remove(...old);
+      g.pivot.position.copy(g.pivotBase);
+      g.pivot.rotation.set(0, 0, 0);
+      g.pivot.remove(...g.pivot.children.filter((c) => c instanceof THREE.Mesh));
       const model = asset.object.clone();
-      model.position.copy(g.muzzle);
-      g.group.add(model);
+      model.position.copy(g.muzzle).sub(g.pivot.position);
+      g.pivot.add(model);
+      recenter(g.pivot);
+      g.pivotBase.copy(g.pivot.position);
       if (g.adsPos === g.hipPos) return;
       g.adsPos.y = -(g.muzzle.y + asset.sightY);
       // These models are bulkier at the back: further out, they cover less of the screen.
       g.adsPos.z -= 0.12;
     });
-    if (this.skin) this.guns.forEach((g) => applySkin(g.group, this.skin, UNSKINNED));
+    if (this.skin) this.paint(this.skin);
+  }
+
+  /** Pattern on every gun, and the premium parts on all but the knife. */
+  private paint(id: string): void {
+    const skin = skinById(id);
+    this.guns.forEach((g, w) => {
+      applySkin(g.pivot, id, UNSKINNED);
+      setKit(g.pivot, w === W.KNIFE ? skinById(DEFAULT_SKIN) : skin, UNSKINNED);
+    });
+    this.flash.material.color.set(skin.fx?.flash ?? '#ffffff');
+    this.inspectStyle = skin.fx?.inspect ?? 'default';
   }
 
   /** Paints every gun (not the hands) with a weapon skin. */
   setSkin(id: string): void {
     if (id === this.skin) return;
     this.skin = id;
-    this.guns.forEach((g) => applySkin(g.group, id, UNSKINNED));
+    this.paint(id);
   }
 
   setWeapon(w: number): void {
@@ -396,7 +458,8 @@ export class Viewmodel {
     let rotY = 0;
     let rotZ = 0;
     // Not tied to the ground: the run pose holds through a jump.
-    if (s.sprint && s.aim < 0.1 && s.speed > 0.5) {
+    // Inspecting while running shows the gun instead of lowering it.
+    if (s.sprint && s.aim < 0.1 && s.speed > 0.5 && s.inspect < 0) {
       rotY = 0.5;
       rotX -= 0.25;
       pos.x -= 0.03;
@@ -443,6 +506,12 @@ export class Viewmodel {
     g.group.rotation.y += (rotY - g.group.rotation.y) * (swinging ? 1 : Math.min(1, dt * 10));
     g.group.rotation.z += (rotZ - g.group.rotation.z) * (swinging ? 1 : Math.min(1, dt * 10));
     g.group.updateMatrix();
+
+    // Premium inspections: the gun turns in the hands, and its parts react.
+    const pose = inspectPose(this.current === W.KNIFE ? 'default' : this.inspectStyle, s.inspect);
+    g.pivot.rotation.set(pose.rx, pose.ry, pose.rz);
+    g.pivot.position.set(g.pivotBase.x, g.pivotBase.y + pose.dy, g.pivotBase.z);
+    setKitInspect(g.pivot, pose.amount);
 
     if (this.flashLife > 0) {
       this.flashLife -= dt;

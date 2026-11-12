@@ -3,6 +3,8 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { PLAYER } from '../game/constants';
 import { WEAPONS } from '../game/weapons';
 import { assetsReady, gunAssets, soldierAsset } from './assets';
+import { skinById } from '../game/progression';
+import { removeKit, setKit } from './skinKits';
 import { applySkin } from './skins';
 import { makeLabelTexture } from './textures';
 
@@ -292,7 +294,14 @@ export class PlayerModel {
     if (id === this.skin) return;
     this.skin = id;
     applySkin(this.gun, id);
-    this.gunModels.forEach((m) => applySkin(m, id));
+    this.gunModels.forEach((m, w) => this.dress(m, w));
+  }
+
+  /** Pattern, and premium parts on everything but the knife. */
+  private dress(model: THREE.Object3D, w: number): void {
+    applySkin(model, this.skin);
+    if (WEAPONS[w]?.melee) removeKit(model);
+    else setKit(model, skinById(this.skin));
   }
 
   setLabel(text: string, color: string): void {
@@ -341,7 +350,7 @@ export class PlayerModel {
       model = asset.object.clone();
       model.scale.setScalar(s.len / asset.len);
       model.traverse((o) => (o.castShadow = o instanceof THREE.Mesh));
-      if (this.skin) applySkin(model, this.skin);
+      if (this.skin) this.dress(model, w);
       this.armGroup.add(model);
       this.gunModels.set(w, model);
     }
@@ -404,6 +413,7 @@ export class PlayerModel {
 
   dispose(): void {
     this.disposed = true;
+    this.gunModels.forEach((m) => removeKit(m));
     this.soldier?.dispose();
     this.teamMat.dispose();
     if (this.label) {
