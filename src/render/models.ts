@@ -3,6 +3,7 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { PLAYER } from '../game/constants';
 import { WEAPONS } from '../game/weapons';
 import { assetsReady, gunAssets, soldierAsset } from './assets';
+import { applySkin } from './skins';
 import { makeLabelTexture } from './textures';
 
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -210,6 +211,7 @@ export class PlayerModel {
   private gripL = new THREE.Object3D();
   private gunModels = new Map<number, THREE.Object3D>();
   private weapon = -1;
+  private skin = '';
   private disposed = false;
   private teamMat: THREE.MeshLambertMaterial;
   private label: THREE.Sprite | null = null;
@@ -278,6 +280,14 @@ export class PlayerModel {
     this.soldier?.setColor(color);
   }
 
+  /** Weapon skin of this player, on every gun they hold. */
+  setSkin(id: string): void {
+    if (id === this.skin) return;
+    this.skin = id;
+    applySkin(this.gun, id);
+    this.gunModels.forEach((m) => applySkin(m, id));
+  }
+
   setLabel(text: string, color: string): void {
     const key = text + color;
     if (key === this.labelText) return;
@@ -323,6 +333,7 @@ export class PlayerModel {
       model = asset.object.clone();
       model.scale.setScalar(s.len / asset.len);
       model.traverse((o) => (o.castShadow = o instanceof THREE.Mesh));
+      if (this.skin) applySkin(model, this.skin);
       this.armGroup.add(model);
       this.gunModels.set(w, model);
     }

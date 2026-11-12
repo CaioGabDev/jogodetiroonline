@@ -33,7 +33,7 @@ export class NetClient {
   ) {}
 
   /** Performs the hello/welcome handshake. */
-  handshake(name: string, color: string, timeoutMs = 12000): Promise<WelcomeMsg> {
+  handshake(name: string, color: string, profile: { skin: string; lv: number }, timeoutMs = 12000): Promise<WelcomeMsg> {
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => reject(new Error('Tempo esgotado aguardando resposta do host.')), timeoutMs);
       this.conn.onMessage = (raw) => {
@@ -61,7 +61,7 @@ export class NetClient {
         clearTimeout(timer);
         reject(new Error('A conexão com o host foi encerrada.'));
       };
-      this.send({ type: 'hello', name, color, v: PROTOCOL_VERSION });
+      this.send({ type: 'hello', name, color, v: PROTOCOL_VERSION, skin: profile.skin, lv: profile.lv });
     });
   }
 

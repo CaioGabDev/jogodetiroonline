@@ -1,6 +1,7 @@
 import './style.css';
 import { audio } from './core/audio';
 import { input } from './core/input';
+import { progress, type MatchSummary } from './core/progress';
 import { GameLoop } from './core/loop';
 import { normalizeCode } from './core/util';
 import { teamMode, type MapId } from './game/constants';
@@ -11,6 +12,7 @@ import { NetClient, joinRemote, type DisconnectReason } from './net/client';
 import { describeError } from './net/peer';
 import type { HostMsg, LobbyState, MatchInfo, WelcomeMsg } from './net/protocol';
 import { SceneManager } from './render/scene';
+import { Armory } from './ui/armory';
 import { Chat } from './ui/chat';
 import { Hud } from './ui/hud';
 import { BuyMenu } from './ui/buyMenu';
@@ -36,6 +38,7 @@ class App {
   private pause: PauseMenu;
   private results: Results;
   private settingsUI: SettingsUI;
+  private armory: Armory;
   private roomBrowser: RoomBrowser;
   private loadout: LoadoutPicker;
   private inventory: Inventory;
@@ -49,6 +52,8 @@ class App {
   private game: Game | null = null;
   private lobbyState: LobbyState | null = null;
   private busy = false;
+  /** The match on screen already paid its reward. */
+  private rewarded = false;
   private idleT = 0;
 
   constructor() {
@@ -66,6 +71,7 @@ class App {
       onJoin: (n, c, code) => void this.joinRoom(n, c, code),
       onPractice: (n, c, map) => void this.practice(n, c, map),
       onSettings: () => this.settingsUI.open(),
+      onArmory: () => this.armory.open(),
     });
     this.lobby = new Lobby(ui, {
       onStart: () => {
@@ -102,6 +108,7 @@ class App {
       },
     });
     this.settingsUI = new SettingsUI(ui);
+    this.armory = new Armory(ui);
     this.roomBrowser = new RoomBrowser((rooms) => this.menu.setRooms(rooms));
     this.loadout = new LoadoutPicker(ui, (w, go) => {
       this.net?.send({ type: 'loadout', w, go });
@@ -233,6 +240,11 @@ class App {
 
   // ------------------------------------------------------------------ connection flows
 
+  /** What the others see of this player's progress. */
+  private profile(): { skin: string; lv: number } {
+    return { skin: progress.equipped, lv: progress.level };
+  }
+
   private async createRoom(nick: string, color: string): Promise<void> {
     if (this.busy) return;
     this.busy = true;
@@ -271,7 +283,7 @@ class App {
   private async connectLocal(host: HostServer, nick: string, color: string): Promise<boolean> {
     const net = new NetClient(host.connectLocal(), null);
     try {
-      const welcome = await net.handshake(nick, color);
+      const welcome = await net.handshake(nick, color, this.profile());
       this.attach(net, welcome);
       return true;
     } catch (e) {
@@ -292,7 +304,7 @@ class App {
     let net: NetClient | null = null;
     try {
       net = await joinRemote(code);
-      const welcome = await net.handshake(nick, color);
+      const welcome = await net.handshake(nick, color, this.profile());
       this.attach(net, welcome);
       history.replaceState(null, '', location.pathname);
       const joined = net;
@@ -368,9 +380,16 @@ class App {
         const mode = this.lobbyState?.config.mode ?? 'ffa';
         const isHost = this.lobbyState?.hostId === net.localId;
         this.pause.show(false);
-        this.results.render(m, mode, net.localId, isHost, !!this.lobbyState?.offline, this.game.myTeam);
-        this.results.show(true);
         const won = teamMode(mode) ? m.winnerTeam === this.game.myTeam : m.winnerId === net.localId;
+        // Practice against targets pays nothing; an online match pays once.
+        let summary: MatchSummary | null = null;
+        const me = m.results.find((r) => r.id === net.localId);
+        if (me && !this.lobbyState?.offline && !this.rewarded) {
+          this.rewarded = true;
+          summary = progress.addMatch({ kills: me.kills, deaths: me.deaths, headshots: me.headshots, damage: me.damage, won, mvp: m.mvp === net.localId });
+        }
+        this.results.render(m, mode, net.localId, isHost, !!this.lobbyState?.offline, this.game.myTeam, summary);
+        this.results.show(true);
         audio.matchEnd(won);
         break;
       }
@@ -395,6 +414,7 @@ class App {
   private startGame(match: MatchInfo): void {
     if (!this.net || !this.lobbyState) return;
     this.stopGame();
+    this.rewarded = false;
     this.results.show(false);
     this.chat.clearLog();
     this.game = new Game(

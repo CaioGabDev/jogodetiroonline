@@ -1,7 +1,9 @@
+import { progress } from '../core/progress';
 import { loadColor, loadNick, saveColor, saveNick } from '../core/settings';
 import { normalizeCode, sanitizeText } from '../core/util';
 import { ARSENAL_NAMES, FFA_COLORS, MAP_NAMES, MAX_PLAYERS, NAME_MAX, type MapId } from '../game/constants';
 import type { RoomInfo } from '../net/directory';
+import { coinLabel, rankBadge, xpBar } from './armory';
 import { clear, el, show } from './dom';
 
 export interface MenuCallbacks {
@@ -9,6 +11,7 @@ export interface MenuCallbacks {
   onJoin(nick: string, color: string, code: string): void;
   onPractice(nick: string, color: string, map: MapId): void;
   onSettings(): void;
+  onArmory(): void;
 }
 
 export class MainMenu {
@@ -25,6 +28,7 @@ export class MainMenu {
   private roomsKey = '';
   private joinRoom: (code: string) => void;
   private busy = false;
+  private profile: HTMLElement;
 
   constructor(parent: HTMLElement, cb: MenuCallbacks) {
     this.nick = el('input', {
@@ -106,7 +110,11 @@ export class MainMenu {
       },
     });
     const settingsBtn = el('button', { class: 'btn ghost', text: 'Configurações', onClick: () => cb.onSettings() });
-    this.buttons = [create, join, practice, settingsBtn];
+    const armoryBtn = el('button', { class: 'btn ghost', text: 'Arsenal e skins', onClick: () => cb.onArmory() });
+    this.buttons = [create, join, practice, settingsBtn, armoryBtn];
+    this.profile = el('button', { class: 'profile-strip', title: 'Abrir o Arsenal', onClick: () => cb.onArmory() });
+    this.renderProfile();
+    progress.onChange(() => this.renderProfile());
     this.code.addEventListener('keydown', (e) => {
       if (e.code === 'Enter' || e.code === 'NumpadEnter') join.click();
     });
@@ -117,6 +125,7 @@ export class MainMenu {
     const card = el('div', { class: 'panel menu-panel' }, [
       el('div', { class: 'logo' }, [el('span', { text: 'ARENA' }), el('b', { text: 'FPS' })]),
       el('div', { class: 'subtitle', text: 'Multiplayer no navegador · até 10 jogadores' }),
+      this.profile,
       el('label', { class: 'field-label', text: 'Nickname' }),
       this.nick,
       el('label', { class: 'field-label', text: 'Sua cor (mata-mata)' }),
@@ -124,7 +133,7 @@ export class MainMenu {
       create,
       el('div', { class: 'join-row' }, [this.code, join]),
       el('div', { class: 'row2' }, [practice, practiceMap]),
-      settingsBtn,
+      el('div', { class: 'row2' }, [armoryBtn, settingsBtn]),
       this.status,
       this.error,
     ]);
@@ -153,6 +162,12 @@ export class MainMenu {
     ]);
     this.root = el('div', { class: 'screen menu hidden' }, [el('div', { class: 'menu-layout' }, [card, roomsPanel, help])]);
     parent.append(this.root);
+  }
+
+  private renderProfile(): void {
+    const info = progress.levelInfo;
+    clear(this.profile);
+    this.profile.append(el('div', { class: 'profile-top' }, [rankBadge(info.level), coinLabel(progress.coins)]), xpBar(info.into, info.need));
   }
 
   /** Redraws only when something changed, so a refresh can't swallow a click on a row. */

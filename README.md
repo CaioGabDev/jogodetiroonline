@@ -166,6 +166,30 @@ O dinheiro do seu time aparece no placar (`Tab`) e no menu de compra. O do time 
 
 A jogabilidade também muda nesse modo: sem regeneração de vida, sem corrida e sem slide, e só sniper e DMR miram. O tiro é preciso parado e ruim correndo. `Shift` anda devagar e sem barulho de passos. Headshot multiplica por 4 e passa por tudo sem capacete; colete e capacete cortam o dano conforme a arma. A faca leva 2 golpes. `X` joga a fumaça, que corta a visão por 17 s. Quem morre assiste um companheiro, e o clique troca de quem.
 
+### Patentes, moedas e skins
+
+Cada partida online dá **XP** e **moedas**. O XP sobe o nível, e o nível dá a patente. Treino offline não dá nada.
+
+| Recompensa | XP | Moedas |
+| --- | --- | --- |
+| Partida jogada | 150 | 25 |
+| Abate | 50 | 5 |
+| Headshot | +25 | +2 |
+| Dano | 1 a cada 10 | |
+| Vitória (time ou 1º lugar no FFA) | 300 | 40 |
+| MVP | 150 | 20 |
+| Cada nível ganho | | 100 |
+
+Abates contam até 60 e dano até 8.000 por partida. O nível vai até 55 e cada um pede 150 XP a mais que o anterior (800 do 1 para o 2). Uma partida boa dá uns 1.500 XP, então o nível 10 sai em umas 9 partidas.
+
+| Patente | Recruta | Soldado | Cabo | Sargento | Subtenente | Tenente | Capitão | Major | Coronel | General |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Nível | 1 | 3 | 6 | 10 | 15 | 20 | 26 | 33 | 40 | 50 |
+
+No menu, **Arsenal e skins** mostra a patente, o XP e a loja. A skin vale para todas as suas armas e os outros jogadores a veem. Floresta, Deserto, Urbano e Ártico vêm de graça com a patente; as outras (Tigre, Oceano, Carmesim, Neon, Cerejeira, Lava, Galáxia, Ouro e Diamante) custam moedas e algumas pedem nível mínimo. O catálogo e os números ficam em `src/game/progression.ts`.
+
+O progresso fica salvo **no navegador** (`localStorage`): trocar de navegador ou limpar os dados zera tudo, e quem mexer no console consegue se dar moedas. Para jogar entre amigos isso basta; um ranking público pediria contas e um servidor.
+
 ---
 
 ## Rodando localmente
@@ -182,7 +206,7 @@ Para testar o multiplayer na mesma máquina, abra duas abas (ou uma aba anônima
 ```bash
 npm run build      # checagem de tipos + build de produção em dist/
 npm run preview    # serve o build de dist/
-npm run check      # confere movimentação, balanceamento, mapas, equipamentos e o modo Bomba
+npm run check      # confere movimentação, balanceamento, mapas, equipamentos, o modo Bomba e a progressão
 ```
 
 ---
@@ -292,9 +316,9 @@ Ficam salvas no `localStorage` e são aplicadas na hora:
 src/
   main.ts            orquestra telas, conexão e o loop
   style.css
-  core/              loop (60 Hz fixo + render interpolado), input, settings, audio, utilidades
-  render/            cena/renderer, mapa, texturas procedurais, modelos, arma em 1ª pessoa, efeitos
-  game/              constantes, dados do mapa, física (AABB + rampas), armas, hitboxes, jogador remoto, partida (cliente)
+  core/              loop (60 Hz fixo + render interpolado), input, settings, progresso salvo, audio, utilidades
+  render/            cena/renderer, mapa, texturas procedurais, modelos, arma em 1ª pessoa, skins (shader), efeitos
+  game/              constantes, dados do mapa, física (AABB + rampas), armas, hitboxes, jogador remoto, partida (cliente), patentes e skins
   net/               protocol.ts (mensagens tipadas), peer (PeerJS + loopback), host (simulação autoritativa), client, iceConfig
   ui/                menu, lobby, HUD, placar, chat, configurações, pausa, resultados, toasts
 ```

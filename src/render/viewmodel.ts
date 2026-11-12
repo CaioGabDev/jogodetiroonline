@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { assetsReady, gunAssets } from './assets';
+import { applySkin, tickSkins } from './skins';
 import { makeGlowTexture } from './textures';
 
 const metal = new THREE.MeshStandardMaterial({ color: 0x30343a, roughness: 0.45, metalness: 0.6 });
@@ -10,6 +11,8 @@ const sleeve = new THREE.MeshStandardMaterial({ color: 0x3b4230, roughness: 0.9 
 const glove = new THREE.MeshStandardMaterial({ color: 0x24272b, roughness: 0.9 });
 const lens = new THREE.MeshStandardMaterial({ color: 0x113355, emissive: 0x0a2244, roughness: 0.2, metalness: 0.8 });
 const steel = new THREE.MeshStandardMaterial({ color: 0xe4e8ee, roughness: 0.35, metalness: 0.2 });
+/** Never painted by a skin. */
+const UNSKINNED = new Set<THREE.Material>([glove, sleeve, lens]);
 
 /** Duration of a knife swing, in seconds. */
 const SWING_TIME = 0.28;
@@ -246,6 +249,7 @@ export class Viewmodel {
   private flashLife = 0;
   private landDip = 0;
   private swingT = 0;
+  private skin = '';
 
   constructor(scene: THREE.Scene) {
     this.guns = [
@@ -296,6 +300,14 @@ export class Viewmodel {
       // These models are bulkier at the back: further out, they cover less of the screen.
       g.adsPos.z -= 0.12;
     });
+    if (this.skin) this.guns.forEach((g) => applySkin(g.group, this.skin, UNSKINNED));
+  }
+
+  /** Paints every gun (not the hands) with a weapon skin. */
+  setSkin(id: string): void {
+    if (id === this.skin) return;
+    this.skin = id;
+    this.guns.forEach((g) => applySkin(g.group, id, UNSKINNED));
   }
 
   setWeapon(w: number): void {
@@ -333,6 +345,7 @@ export class Viewmodel {
   update(dt: number, s: ViewmodelState): void {
     const g = this.guns[this.current];
     const k = Math.min(1, dt * 10);
+    tickSkins(dt);
 
     // Bob
     const moving = s.onGround && s.speed > 0.5;

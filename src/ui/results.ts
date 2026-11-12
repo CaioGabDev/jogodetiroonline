@@ -1,5 +1,7 @@
+import { progress, type MatchSummary } from '../core/progress';
 import { TEAM_COLORS, TEAM_NAMES, teamMode, type GameMode } from '../game/constants';
 import type { EndMsg } from '../net/protocol';
+import { coinLabel, rankBadge, xpBar } from './armory';
 import { clear, el, show } from './dom';
 
 export interface ResultsCallbacks {
@@ -14,6 +16,7 @@ export class Results {
   private sub: HTMLElement;
   private mvp: HTMLElement;
   private table: HTMLElement;
+  private rewards: HTMLElement;
   private actions: HTMLElement;
 
   constructor(
@@ -24,8 +27,9 @@ export class Results {
     this.sub = el('div', { class: 'res-sub' });
     this.mvp = el('div', { class: 'res-mvp' });
     this.table = el('div', { class: 'res-table' });
+    this.rewards = el('div', { class: 'res-rewards' });
     this.actions = el('div', { class: 'lobby-actions' });
-    const panel = el('div', { class: 'panel results-panel' }, [this.banner, this.sub, this.mvp, this.table, this.actions]);
+    const panel = el('div', { class: 'panel results-panel' }, [this.banner, this.sub, this.mvp, this.rewards, this.table, this.actions]);
     this.root = el('div', { class: 'overlay results hidden' }, [panel]);
     parent.append(this.root);
   }
@@ -38,7 +42,7 @@ export class Results {
     return !this.root.classList.contains('hidden');
   }
 
-  render(m: EndMsg, mode: GameMode, localId: number, isHost: boolean, offline: boolean, myTeam: string): void {
+  render(m: EndMsg, mode: GameMode, localId: number, isHost: boolean, offline: boolean, myTeam: string, summary: MatchSummary | null): void {
     let won = false;
     if (teamMode(mode)) {
       if (m.winnerTeam) {
@@ -71,6 +75,8 @@ export class Results {
       );
     }
 
+    this.renderRewards(summary, offline);
+
     clear(this.table);
     const t = el('table', { class: 'sb-table' });
     t.append(
@@ -101,5 +107,53 @@ export class Results {
     } else {
       this.actions.append(el('div', { class: 'waiting', text: 'Aguardando o host (revanche ou lobby)…' }));
     }
+  }
+
+  private renderRewards(sum: MatchSummary | null, offline: boolean): void {
+    clear(this.rewards);
+    if (!sum) {
+      if (offline) this.rewards.append(el('p', { class: 'hint', text: 'Treino offline não dá XP nem moedas.' }));
+      return;
+    }
+    const fmt = (n: number): string => n.toLocaleString('pt-BR');
+    const lines = sum.reward.lines.map((l) =>
+      el('div', { class: 'rw-line' }, [
+        el('span', { text: l.label }),
+        el('span', { class: 'rw-xp', text: `+${fmt(l.xp)} XP` }),
+        el('span', { class: 'rw-coins', text: l.coins ? `+${fmt(l.coins)}` : '' }),
+      ]),
+    );
+    if (sum.levelCoins) {
+      lines.push(
+        el('div', { class: 'rw-line' }, [
+          el('span', { text: 'Bônus de nível' }),
+          el('span', { class: 'rw-xp', text: '' }),
+          el('span', { class: 'rw-coins', text: `+${fmt(sum.levelCoins)}` }),
+        ]),
+      );
+    }
+    const info = progress.levelInfo;
+    const news: HTMLElement[] = [];
+    if (sum.levelAfter > sum.levelBefore) {
+      const promo = sum.rankAfter !== sum.rankBefore;
+      news.push(
+        el('div', { class: 'rw-levelup', style: { color: sum.rankAfter.color } }, [
+          el('b', { text: promo ? `PROMOVIDO A ${sum.rankAfter.name.toUpperCase()}!` : `SUBIU PARA O NÍVEL ${sum.levelAfter}!` }),
+        ]),
+      );
+    }
+    for (const s of sum.unlocked) news.push(el('div', { class: 'rw-news', text: `Skin liberada: ${s.name}` }));
+    for (const s of sum.buyable) news.push(el('div', { class: 'rw-news', text: `Nova skin na loja: ${s.name}` }));
+
+    this.rewards.append(
+      el('div', { class: 'rw-head' }, [
+        rankBadge(info.level),
+        el('b', { class: 'rw-total', text: `+${fmt(sum.reward.xp)} XP` }),
+        coinLabel(sum.reward.coins + sum.levelCoins),
+      ]),
+      xpBar(info.into, info.need),
+      ...news,
+      el('div', { class: 'rw-lines' }, lines),
+    );
   }
 }

@@ -259,7 +259,10 @@ export class Game {
     this.infos.clear();
     for (const p of lobby.players) this.infos.set(p.id, p);
     for (const p of lobby.players) {
-      if (p.id === this.localId) continue;
+      if (p.id === this.localId) {
+        this.viewmodel.setSkin(p.skin);
+        continue;
+      }
       let r = this.remotes.get(p.id);
       if (!r) {
         r = new RemotePlayer(p.id, this.displayColor(p.id));
@@ -267,6 +270,7 @@ export class Game {
         this.sm.scene.add(r.model.root);
       }
       r.model.setColor(this.displayColor(p.id));
+      r.model.setSkin(p.skin);
       r.model.setLabel(p.name, this.displayColor(p.id));
     }
     for (const [id, r] of this.remotes) {

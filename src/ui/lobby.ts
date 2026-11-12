@@ -1,3 +1,4 @@
+import { rankBadge } from './armory';
 import {
   ARSENAL_NAMES,
   BOMB_MAPS,
@@ -250,6 +251,7 @@ export class Lobby {
   private playerRow(p: PlayerInfo, color: string): HTMLElement {
     return el('div', { class: 'player-row' + (p.id === this.localId ? ' me' : '') }, [
       el('span', { class: 'sb-dot', style: { background: color } }),
+      p.bot ? null : rankBadge(p.lv, true),
       el('span', { class: 'pname', text: p.name }),
       p.host ? el('span', { class: 'tag', text: 'HOST' }) : null,
       p.id === this.localId ? el('span', { class: 'tag you', text: 'VOCÊ' }) : null,
