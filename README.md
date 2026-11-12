@@ -113,6 +113,8 @@ O host escolhe o mapa no lobby:
 - **Centro:** médio (84 m). Avenida com veículos, dois becos em zigue-zague e uma loja de atravessar com acesso ao telhado.
 - **Pátio:** médio (68 m). Corredores de contêineres, plataformas laterais e um pórtico central exposto, em três alturas.
 
+**Colisão:** carros, casas, árvores, caçambas e floreiras colidem com o formato real do modelo, e não com a caixa em volta dele. O tiro passa por cima do capô e por baixo do telhado da varanda, e a copa da árvore segura o tiro como segura a vista. As formas saem de `node scripts/gen-prop-shapes.mjs`, que lê os `.glb` e gera `src/game/propShapes.ts` (rode de novo ao trocar um modelo). Carros não dão escalada: são cobertura, não plataforma. Os quarteirões e os prédios grandes colados uns nos outros colidem como um bloco, e esse bloco também é desenhado atrás dos modelos: onde o prédio deixa um vão aparece parede, nunca uma parede invisível.
+
 Vila, Centro e Pátio são simétricos por rotação de 180°, e `npm run check` mede o equilíbrio deles: área e tempo iguais para os dois times, cobertura perto de qualquer ponto, spawns sem visão um do outro e limite para linhas de visão. Para ver a planta em texto: `node scripts/check-maps.mjs vila`.
 
 ### Modos
@@ -226,7 +228,7 @@ Para testar o multiplayer na mesma máquina, abra duas abas (ou uma aba anônima
 ```bash
 npm run build      # checagem de tipos + build de produção em dist/
 npm run preview    # serve o build de dist/
-npm run check      # confere movimentação, balanceamento, mapas, equipamentos, o modo Bomba e a progressão
+npm run check      # confere movimentação, balanceamento, mapas (e a colisão), equipamentos, o modo Bomba e a progressão
 ```
 
 ---

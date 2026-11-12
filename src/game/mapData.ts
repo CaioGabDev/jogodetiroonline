@@ -1,4 +1,5 @@
 import type { MapId, Team } from './constants';
+import { PROP_SHAPES } from './propShapes';
 
 export type MatKind = 'floor' | 'wall' | 'concrete' | 'crate' | 'metal' | 'trim' | 'red' | 'blue' | 'sand' | 'grass' | 'asphalt' | 'brick';
 
@@ -8,6 +9,10 @@ export interface BoxDef {
   mat: MatKind;
   /** Collision only: a prop shows what is there. */
   hidden?: boolean;
+  /** Drawn only: no collision (what shows behind the buildings of a block, whose collision is its own box). */
+  ghost?: boolean;
+  /** Can't be climbed onto (cars): cover, not a platform. */
+  noMantle?: boolean;
 }
 
 /** A 3D model stretched to fill a box. Purely visual: collision lives in `boxes`. */
@@ -86,6 +91,39 @@ interface PropOpts {
   solid?: boolean;
   /** Collision width, depth and height when it differs from the model, like a tree trunk. */
   col?: [number, number, number];
+  /**
+   * Big buildings side by side: collide as their whole box, which is drawn just inside the model in this material.
+   * Where the model leaves a gap there is wall, and no slot opens between two buildings.
+   */
+  mass?: MatKind;
+}
+
+/**
+ * Collision of a model stretched to w × h × d at (cx, y, cz) and turned `turn` quarter turns, following its real
+ * shape (propShapes.ts). Same stretch and turn as placeProp in render/map.ts. Null for a model without a shape.
+ */
+function shapeBoxes(model: string, cx: number, y: number, cz: number, w: number, d: number, h: number, turn: number): BoxDef[] | null {
+  const shape = PROP_SHAPES[model];
+  if (!shape) return null;
+  const q = ((turn % 4) + 4) % 4;
+  // Before turning, the model's own x spans what ends up along z after an odd number of quarter turns.
+  const lx = q % 2 ? d : w;
+  const lz = q % 2 ? w : d;
+  const r = (v: number): number => Math.round(v * 1000) / 1000;
+  return shape.map(([x0, y0, z0, x1, y1, z1]) => {
+    const ax0 = (x0 - 0.5) * lx;
+    const ax1 = (x1 - 0.5) * lx;
+    const az0 = (z0 - 0.5) * lz;
+    const az1 = (z1 - 0.5) * lz;
+    // A turn of θ around Y takes (x, z) to (x cos θ + z sin θ, z cos θ - x sin θ), as three.js does.
+    const [X0, X1, Z0, Z1] = [
+      [ax0, ax1, az0, az1],
+      [az0, az1, -ax1, -ax0],
+      [-ax1, -ax0, -az1, -az0],
+      [-az1, -az0, ax0, ax1],
+    ][q];
+    return { min: [r(cx + X0), r(y + y0 * h), r(cz + Z0)], max: [r(cx + X1), r(y + y1 * h), r(cz + Z1)], mat: 'trim', hidden: true };
+  });
 }
 
 function builder(): {
@@ -98,8 +136,11 @@ function builder(): {
   B: (x0: number, z0: number, x1: number, z1: number, y0: number, y1: number, mat: MatKind) => void;
   C: (cx: number, cz: number, w: number, d: number, y0: number, h: number, mat: MatKind) => void;
   crate: (x: number, z: number, s?: number, h?: number, y0?: number) => void;
-  /** Solid block of buildings: a single collision box, with models only along the edges anyone can see. */
-  block: (x0: number, z0: number, x1: number, z1: number, h: number, models: string[]) => void;
+  /**
+   * Solid block of buildings: a single collision box, with models only along the edges anyone can see. The box is
+   * drawn too, just inside the models, so wherever a model leaves a gap there is wall and not an invisible one.
+   */
+  block: (x0: number, z0: number, x1: number, z1: number, h: number, models: string[], mass?: MatKind) => void;
   shell: (half: number, wallH: number, floor: MatKind) => void;
 } {
   const boxes: BoxDef[] = [];
@@ -108,6 +149,19 @@ function builder(): {
     const y = opts.y ?? 0;
     props.push({ model, x: cx, y, z: cz, turn: opts.turn ?? 0, size: [w, h, d] });
     if (opts.solid === false) return;
+    if (opts.mass) {
+      boxes.push({ min: [cx - w / 2, y, cz - d / 2], max: [cx + w / 2, y + h, cz + d / 2], mat: 'trim', hidden: true });
+      const IN = 0.08;
+      boxes.push({ min: [cx - w / 2 + IN, y, cz - d / 2 + IN], max: [cx + w / 2 - IN, y + h - 0.04, cz + d / 2 - IN], mat: opts.mass, ghost: true });
+      return;
+    }
+    // The real shape: no invisible wall over a car's hood or under a roof's slope.
+    const shaped = opts.col ? null : shapeBoxes(model, cx, y, cz, w, d, h, opts.turn ?? 0);
+    if (shaped) {
+      if (model.startsWith('cars/')) shaped.forEach((b) => (b.noMantle = true));
+      boxes.push(...shaped);
+      return;
+    }
     const [cw, cd, ch] = opts.col ?? [w, d, h];
     boxes.push({ min: [cx - cw / 2, y, cz - cd / 2], max: [cx + cw / 2, y + ch, cz + cd / 2], mat: 'trim', hidden: true });
   };
@@ -134,8 +188,11 @@ function builder(): {
   const C = (cx: number, cz: number, w: number, d: number, y0: number, h: number, mat: MatKind): void =>
     B(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, y0, y0 + h, mat);
   const crate = (x: number, z: number, s = 2, h = s, y0 = 0): void => C(x, z, s, s, y0, h, 'crate');
-  const block = (x0: number, z0: number, x1: number, z1: number, h: number, models: string[]): void => {
+  const block = (x0: number, z0: number, x1: number, z1: number, h: number, models: string[], mass: MatKind = 'concrete'): void => {
     boxes.push({ min: [x0, 0, z0], max: [x1, h, z1], mat: 'trim', hidden: true });
+    // Slightly inside the models, so their walls don't flicker against it.
+    const IN = 0.08;
+    boxes.push({ min: [x0 + IN, 0, z0 + IN], max: [x1 - IN, h - 0.04, z1 - IN], mat: mass, ghost: true });
     const nx = Math.max(1, Math.round((x1 - x0) / BLOCK_TILE));
     const nz = Math.max(1, Math.round((z1 - z0) / BLOCK_TILE));
     const w = (x1 - x0) / nx;
@@ -563,8 +620,8 @@ function vila(): MapDef {
     R(-17, -16, -5, -7, ROOM + 0.3, 5.4, 'brick');
     K(-11, -12.5, 3.6, 0.8, 0, 1.1, 'crate');
 
-    // Solid house across the alley.
-    P('suburban/building-type-b', s * 11, s * -11.5, 12, 9, 6.5, { turn: turn(0) });
+    // Solid house across the alley. A closed one: an open porch along its front would let the spawns see each other.
+    P('suburban/building-type-h', s * 11, s * -11.5, 12, 9, 6.5, { turn: turn(0) });
 
     // Deck: the high ground each side gets, reached by a ramp from the back yard.
     R(-27, -15, -19, -7, 0, DECK, 'concrete');
@@ -579,7 +636,8 @@ function vila(): MapDef {
 
     // Back yard lane.
     // Shed, garage and a crate stack each close part of the lane, so it has to be walked as a zigzag.
-    P('suburban/building-type-h', 0, s * -21, 6, 6, 4.2, { turn: turn(0) });
+    // Tall enough that its sloped roof, and not just its box, hides the lane from the deck's ramp.
+    P('suburban/building-type-h', 0, s * -21, 6, 6, 5, { turn: turn(0) });
     P('suburban/building-type-i', s * -14, s * -26.5, 7, 7, 4.2, { turn: turn(0) });
     fence(s * 13, s * -22.5, s * 13, s * -16);
     fence(s * -21, s * -19.5, s * -15, s * -19.5);
@@ -589,13 +647,17 @@ function vila(): MapDef {
     K(-18, 20, 3, 1, 0, 2.6, 'concrete');
     K(0.8, -9, 1.4, 1.4, 0, 3, 'concrete');
     P('suburban/planter', s * -19, s * -25.5, 3, 1.6, 1, { turn: turn(0) });
-    P('suburban/tree-large', s * 24, s * -20, 3, 3, 6.5, { col: [0.6, 0.6, 6] });
-    P('suburban/tree-small', s * 8, s * -26, 2.6, 2.6, 4.5, { col: [0.5, 0.5, 4] });
+    // Trees collide as they look: a thin trunk, and leaves that stop shots as they stop the view.
+    P('suburban/tree-large', s * 24, s * -20, 3, 3, 6.5);
+    P('suburban/tree-small', s * 8, s * -26, 2.6, 2.6, 4.5);
+    // At the corner of the house's porch: under its roof the deck would see across to the far yard.
+    P('suburban/tree-small', s * 4.6, s * -6, 2.6, 2.6, 4.5);
 
     // Street: alternating cars, so no spot sees the whole road.
     P('cars/van', s * -3.8, s * -5.8, 5, 2.3, 2.4, { turn: turn(1) });
     P('cars/delivery', s * 10.5, s * 3, 4.8, 2.2, 2.4, { turn: turn(1) });
-    P('cars/suv', s * -15, s * 2.8, 4.8, 2.3, 1.7, { turn: turn(3) });
+    // A van, not an SUV: eyes clear an SUV's roof, and the street would be seen end to end over it.
+    P('cars/van', s * -15, s * 2.8, 4.8, 2.3, 2.3, { turn: turn(3) });
     P('roads/dumpster', s * 21, s * -4, 2.6, 1.6, 1.6, { turn: turn(0) });
 
     // Scenery past the walls.
@@ -658,12 +720,12 @@ function centro(): MapDef {
     const K = (x: number, z: number, w: number, d: number, y0: number, h: number, mat: MatKind): void => C(s * x, s * z, w, d, y0, h, mat);
 
     // Row of buildings between the avenue and the alley.
-    P('commercial/building-a', s * -24, s * -15.5, 20, 13, 15, { turn: turn(0) });
-    P('commercial/building-c', s * 24, s * -15.5, 20, 13, 15, { turn: turn(0) });
+    P('commercial/building-a', s * -24, s * -15.5, 20, 13, 15, { turn: turn(0), mass: 'brick' });
+    P('commercial/building-c', s * 24, s * -15.5, 20, 13, 15, { turn: turn(0), mass: 'brick' });
     // Far side of the alley.
-    P('commercial/building-e', s * -28, s * -37, 28, 10, 18, { turn: turn(0) });
-    P('commercial/building-g', 0, s * -37, 28, 10, 18, { turn: turn(0) });
-    P('commercial/building-j', s * 28, s * -37, 28, 10, 18, { turn: turn(0) });
+    P('commercial/building-e', s * -28, s * -37, 28, 10, 18, { turn: turn(0), mass: 'brick' });
+    P('commercial/building-g', 0, s * -37, 28, 10, 18, { turn: turn(0), mass: 'brick' });
+    P('commercial/building-j', s * 28, s * -37, 28, 10, 18, { turn: turn(0), mass: 'brick' });
 
     // Shop: windows on both streets, doors on all sides, shelves to fight around.
     R(-10, -9.3, -7, -9, 0, SHOP, 'brick');
@@ -702,7 +764,8 @@ function centro(): MapDef {
     // Alley: blockers from alternating walls make it zigzag.
     P('cars/truck', s * -23, s * -30.5, 6.5, 3, 3, { turn: turn(1) });
     K(5, -27, 2.4, 4.4, 0, 2.6, 'crate');
-    P('cars/delivery', s * 17, s * -23.5, 6.5, 3, 3.2, { turn: turn(1) });
+    // Tall box toward the avenue: over the cab, the high corner across the map would see down the whole street.
+    P('cars/delivery', s * 17, s * -23.5, 6.5, 3, 3.2, { turn: turn(3) });
     P('roads/dumpster', s * 22, s * -30.6, 3, 1.9, 1.6, { turn: turn(0) });
     K(-11, -30.5, 2, 2, 0, 1.3, 'crate');
     K(32, -24, 2.4, 2.4, 0, 1.6, 'crate');
@@ -1046,19 +1109,19 @@ function mercado(): MapDef {
 
   shell(HALF, H, 'asphalt');
 
-  block(-38, -36, -14, 22, H, SHOPS);
-  block(-38, 22, -30, 30, H, SHOPS);
-  block(-26, 30, -6, 38, H, SHOPS);
-  block(-6, 16, 36, 38, H, SHOPS);
-  block(-6, 10, 22, 16, H, SHOPS);
+  block(-38, -36, -14, 22, H, SHOPS, 'brick');
+  block(-38, 22, -30, 30, H, SHOPS, 'brick');
+  block(-26, 30, -6, 38, H, SHOPS, 'brick');
+  block(-6, 16, 36, 38, H, SHOPS, 'brick');
+  block(-6, 10, 22, 16, H, SHOPS, 'brick');
   // Around the square: one gap north to A, one gap east to B.
-  block(-14, -20, -4, -14, H, SHOPS);
-  block(4, -20, 22, -14, H, SHOPS);
-  block(12, -14, 22, -4, H, SHOPS);
-  block(12, 4, 22, 10, H, SHOPS);
+  block(-14, -20, -4, -14, H, SHOPS, 'brick');
+  block(4, -20, 22, -14, H, SHOPS, 'brick');
+  block(12, -14, 22, -4, H, SHOPS, 'brick');
+  block(12, 4, 22, 10, H, SHOPS, 'brick');
   // The defenders' block, with a door to each site.
-  block(22, -34, 34, -16, H, SHOPS);
-  block(22, -46, 30, -42, H, SHOPS);
+  block(22, -34, 34, -16, H, SHOPS, 'brick');
+  block(22, -46, 30, -42, H, SHOPS, 'brick');
   B(24, -42, 26, -38.5, 0, H, 'brick');
   B(28, -36.5, 30, -34, 0, H, 'brick');
   C(43, -44.6, 6, 2.8, 0, 2.6, 'crate');

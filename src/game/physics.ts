@@ -8,6 +8,8 @@ export interface Box {
   maxX: number;
   maxY: number;
   maxZ: number;
+  /** Mantles skip it (cars). */
+  noMantle?: boolean;
 }
 
 interface Plane {
@@ -217,20 +219,79 @@ export interface StepResult {
   mantled: boolean;
 }
 
+/** Side of a broadphase cell, in meters. */
+const CELL = 4;
+const cellOf = (v: number): number => Math.floor(v / CELL);
+const cellKey = (ix: number, iz: number): number => (ix + 4096) * 8192 + (iz + 4096);
+
 export class CollisionWorld {
   boxes: Box[];
   ramps: Ramp[];
+  /** Which boxes touch each column of the floor plan, so a query only looks at what is near. */
+  private cells = new Map<number, number[]>();
+  /** Visit marks, so a box spanning many cells is tested once per query. */
+  private seen: Uint32Array;
+  private visit = 0;
+  /** Reused result of near(): valid until the next call. */
+  private found: number[] = [];
 
   constructor(map: MapDef) {
-    this.boxes = map.boxes.map((b) => ({
-      minX: b.min[0],
-      minY: b.min[1],
-      minZ: b.min[2],
-      maxX: b.max[0],
-      maxY: b.max[1],
-      maxZ: b.max[2],
-    }));
+    // Boxes that are only drawn (ghost) don't collide.
+    this.boxes = map.boxes
+      .filter((b) => !b.ghost)
+      .map((b) => ({
+        minX: b.min[0],
+        minY: b.min[1],
+        minZ: b.min[2],
+        maxX: b.max[0],
+        maxY: b.max[1],
+        maxZ: b.max[2],
+        noMantle: b.noMantle,
+      }));
     this.ramps = map.ramps.map((r) => ({ ...r, planes: buildRampPlanes(r) }));
+    this.seen = new Uint32Array(this.boxes.length);
+    this.boxes.forEach((b, i) => {
+      for (let ix = cellOf(b.minX); ix <= cellOf(b.maxX); ix++) {
+        for (let iz = cellOf(b.minZ); iz <= cellOf(b.maxZ); iz++) {
+          const k = cellKey(ix, iz);
+          const list = this.cells.get(k);
+          if (list) list.push(i);
+          else this.cells.set(k, [i]);
+        }
+      }
+    });
+  }
+
+  /**
+   * Indices of the boxes in the cells under the rectangle, in their original order (results don't depend on
+   * the grid). The array is reused: read it before the next query.
+   */
+  private near(x0: number, z0: number, x1: number, z1: number): number[] {
+    const out = this.found;
+    out.length = 0;
+    const stamp = this.nextVisit();
+    for (let ix = cellOf(x0); ix <= cellOf(x1); ix++) {
+      for (let iz = cellOf(z0); iz <= cellOf(z1); iz++) {
+        const list = this.cells.get(cellKey(ix, iz));
+        if (!list) continue;
+        for (const i of list) {
+          if (this.seen[i] === stamp) continue;
+          this.seen[i] = stamp;
+          out.push(i);
+        }
+      }
+    }
+    if (out.length > 1) out.sort((a, b) => a - b);
+    return out;
+  }
+
+  private nextVisit(): number {
+    this.visit = (this.visit + 1) >>> 0;
+    if (this.visit === 0) {
+      this.seen.fill(0);
+      this.visit = 1;
+    }
+    return this.visit;
   }
 
   /** Highest ramp surface over the rect, or -Infinity when not overlapping. */
@@ -255,7 +316,8 @@ export class CollisionWorld {
     const x1 = x + radius;
     const z0 = z - radius;
     const z1 = z + radius;
-    for (const b of this.boxes) {
+    for (const i of this.near(x0, z0, x1, z1)) {
+      const b = this.boxes[i];
       if (x0 < b.maxX && x1 > b.minX && y < b.maxY && y + h > b.minY && z0 < b.maxZ && z1 > b.minZ) return true;
     }
     for (const r of this.ramps) {
@@ -265,16 +327,21 @@ export class CollisionWorld {
     return false;
   }
 
-  /** Highest walkable surface under the footprint between feetY-maxDrop and feetY. */
-  groundHeight(x: number, z: number, feetY: number, maxDrop: number): number {
+  /**
+   * Highest walkable surface under the footprint between feetY-maxDrop and feetY. With `climbFrom`, boxes that
+   * can't be climbed count only up to a step over that height (what a mantle from there could reach).
+   */
+  groundHeight(x: number, z: number, feetY: number, maxDrop: number, climbFrom?: number): number {
     const r0 = PLAYER.radius;
     const x0 = x - r0;
     const x1 = x + r0;
     const z0 = z - r0;
     const z1 = z + r0;
     let best = -Infinity;
-    for (const b of this.boxes) {
+    for (const i of this.near(x0, z0, x1, z1)) {
+      const b = this.boxes[i];
       if (x0 < b.maxX && x1 > b.minX && z0 < b.maxZ && z1 > b.minZ) {
+        if (b.noMantle && climbFrom !== undefined && b.maxY > climbFrom + MOVE.step) continue;
         if (b.maxY <= feetY + 0.05 && b.maxY >= feetY - maxDrop && b.maxY > best) best = b.maxY;
       }
     }
@@ -288,11 +355,37 @@ export class CollisionWorld {
   raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxDist: number): RayHit | null {
     let best: RayHit | null = null;
     let limit = maxDist;
-    for (const b of this.boxes) {
-      const h = rayBox(ox, oy, oz, dx, dy, dz, b, limit);
-      if (h && h.dist < limit) {
-        best = h;
-        limit = h.dist;
+    // Walks the cells the ray crosses, nearest first, and stops once a hit can't be beaten by a farther cell.
+    const stamp = this.nextVisit();
+    let ix = cellOf(ox);
+    let iz = cellOf(oz);
+    const stepX = dx > 0 ? 1 : -1;
+    const stepZ = dz > 0 ? 1 : -1;
+    const tdx = Math.abs(dx) > 1e-9 ? CELL / Math.abs(dx) : Infinity;
+    const tdz = Math.abs(dz) > 1e-9 ? CELL / Math.abs(dz) : Infinity;
+    let tx = Math.abs(dx) > 1e-9 ? ((dx > 0 ? (ix + 1) * CELL : ix * CELL) - ox) / dx : Infinity;
+    let tz = Math.abs(dz) > 1e-9 ? ((dz > 0 ? (iz + 1) * CELL : iz * CELL) - oz) / dz : Infinity;
+    for (;;) {
+      const list = this.cells.get(cellKey(ix, iz));
+      if (list) {
+        for (const i of list) {
+          if (this.seen[i] === stamp) continue;
+          this.seen[i] = stamp;
+          const h = rayBox(ox, oy, oz, dx, dy, dz, this.boxes[i], limit);
+          if (h && h.dist < limit) {
+            best = h;
+            limit = h.dist;
+          }
+        }
+      }
+      const exit = Math.min(tx, tz);
+      if (exit >= limit) break;
+      if (tx < tz) {
+        ix += stepX;
+        tx += tdx;
+      } else {
+        iz += stepZ;
+        tz += tdz;
       }
     }
     for (const r of this.ramps) {
@@ -341,9 +434,13 @@ export class CollisionWorld {
   private moveAxis(s: PState, axis: 'x' | 'z', d: number, h: number): void {
     if (d === 0) return;
     const r = PLAYER.radius;
+    const fromX = s.x;
+    const fromZ = s.z;
     if (axis === 'x') s.x += d;
     else s.z += d;
-    for (const b of this.boxes) {
+    // Pushing back only moves toward where the move started, so the swept rectangle holds every candidate.
+    for (const i of this.near(Math.min(fromX, s.x) - r, Math.min(fromZ, s.z) - r, Math.max(fromX, s.x) + r, Math.max(fromZ, s.z) + r)) {
+      const b = this.boxes[i];
       // Only when not rising: the vertical step would push a rising player out through the bottom of the box.
       const top = s.vy <= 0 ? b.maxY - LEDGE_SKIN : b.maxY;
       if (
@@ -385,7 +482,9 @@ export class CollisionWorld {
     const r = PLAYER.radius;
     let top = -Infinity;
     // Boxes only: a ramp is walked, not climbed.
-    for (const b of this.boxes) {
+    for (const i of this.near(px - r, pz - r, px + r, pz + r)) {
+      const b = this.boxes[i];
+      if (b.noMantle) continue;
       const reachable = b.maxY >= s.y + MANTLE_MIN && b.maxY <= s.y + reach && b.maxY > top;
       if (reachable && px - r < b.maxX && px + r > b.minX && pz - r < b.maxZ && pz + r > b.minZ) top = b.maxY;
     }
@@ -501,7 +600,8 @@ export class CollisionWorld {
     s.onGround = false;
     s.y += s.vy * dt;
     const r = PLAYER.radius;
-    for (const b of this.boxes) {
+    for (const i of this.near(s.x - r, s.z - r, s.x + r, s.z + r)) {
+      const b = this.boxes[i];
       if (
         s.x - r < b.maxX &&
         s.x + r > b.minX &&

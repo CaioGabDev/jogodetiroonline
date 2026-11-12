@@ -5,7 +5,7 @@ import { createServer } from 'vite';
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'error' });
 const { MAPS } = await vite.ssrLoadModule('/src/game/mapData.ts');
-const { CollisionWorld } = await vite.ssrLoadModule('/src/game/physics.ts');
+const { CollisionWorld, rayBox } = await vite.ssrLoadModule('/src/game/physics.ts');
 const { MOVE, PLAYER } = await vite.ssrLoadModule('/src/game/constants.ts');
 await vite.close();
 
@@ -60,7 +60,7 @@ function reachable(world, def, starts, blocked = () => false) {
       if (Math.abs(x) > half - 0.5 || Math.abs(z) > half - 0.5 || blocked(x, z)) continue;
       for (const reach of [MOVE.step, MOVE.mantleReach]) {
         // groundHeight allows 5 cm over the feet, which the mantle in physics.ts doesn't.
-        const y = world.groundHeight(x, z, c.y + reach - 0.05, 40);
+        const y = world.groundHeight(x, z, c.y + reach - 0.05, 40, reach > MOVE.step ? c.y : undefined);
         if (y === -Infinity || world.overlapsSolid(x, y + 0.03, z, PLAYER.height, PLAYER.radius * 0.9)) continue;
         const k = key(x, z, y);
         if (!seen.has(k)) {
@@ -189,6 +189,46 @@ function checkBomb(name, def, world, problems, bombTable) {
   bombTable.push({ ...row, 'rotação (s)': +rotation.toFixed(1), 'maior visão (m)': +sight.toFixed(1), 'área (m²)': fromAttack.length });
 }
 
+/**
+ * The world only tests the boxes near a query (a grid). Random shots and positions must give exactly what
+ * testing every box gives, or the grid is hiding something.
+ */
+function sameAsBruteForce(name, world, size) {
+  let seed = 12345;
+  const rnd = () => {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  };
+  const half = size / 2 + 2;
+  for (let n = 0; n < 4000; n++) {
+    const ox = (rnd() * 2 - 1) * half;
+    const oy = rnd() * 12;
+    const oz = (rnd() * 2 - 1) * half;
+    let dx = rnd() * 2 - 1;
+    let dy = (rnd() * 2 - 1) * 0.4;
+    let dz = rnd() * 2 - 1;
+    const l = Math.hypot(dx, dy, dz);
+    dx /= l;
+    dy /= l;
+    dz /= l;
+    const max = 5 + rnd() * 150;
+    let best = Infinity;
+    for (const b of world.boxes) {
+      const h = rayBox(ox, oy, oz, dx, dy, dz, b, max);
+      if (h && h.dist < best) best = h.dist;
+    }
+    const got = world.raycast(ox, oy, oz, dx, dy, dz, max);
+    // Ramps are not in the grid: only compare when no ramp is closer.
+    if (got && got.dist < best - 1e-6) continue;
+    if (best < Infinity) assert.ok(got && Math.abs(got.dist - best) < 1e-6, `${name}: a grade perdeu um acerto em ${ox.toFixed(1)},${oy.toFixed(1)},${oz.toFixed(1)}`);
+    const px = (rnd() * 2 - 1) * half;
+    const pz = (rnd() * 2 - 1) * half;
+    const py = rnd() * 10;
+    const brute = world.boxes.some((b) => px - PLAYER.radius < b.maxX && px + PLAYER.radius > b.minX && py < b.maxY && py + PLAYER.height > b.minY && pz - PLAYER.radius < b.maxZ && pz + PLAYER.radius > b.minZ);
+    if (brute) assert.ok(world.overlapsSolid(px, py, pz, PLAYER.height), `${name}: a grade perdeu uma colisão em ${px.toFixed(1)},${pz.toFixed(1)}`);
+  }
+}
+
 const only = process.argv[2];
 const table = [];
 const bombTable = [];
@@ -196,6 +236,7 @@ const problems = [];
 for (const [name, def] of Object.entries(MAPS)) {
   if (only && name !== only) continue;
   const world = new CollisionWorld(def);
+  sameAsBruteForce(name, world, def.size);
   const allSpawns = [...def.ffaSpawns, ...def.teamSpawns.red, ...def.teamSpawns.blue];
   for (const s of allSpawns) {
     const [x, y, z] = s.pos;
