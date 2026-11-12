@@ -36,7 +36,7 @@ export function drawCrosshair(canvas: HTMLCanvasElement, c: CrosshairSettings, s
   } else if (c.style === 'dot') {
     const r = Math.max(1, len / 4 + t / 2);
     ctx.beginPath();
-    ctx.arc(cx + 0.5, cy + 0.5, r, 0, Math.PI * 2);
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
     if (outline) {
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(0,0,0,0.85)';
@@ -47,7 +47,7 @@ export function drawCrosshair(canvas: HTMLCanvasElement, c: CrosshairSettings, s
   } else {
     const r = gap + len / 2;
     ctx.beginPath();
-    ctx.arc(cx + 0.5, cy + 0.5, r, 0, Math.PI * 2);
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
     if (outline) {
       ctx.lineWidth = t + 2;
       ctx.strokeStyle = 'rgba(0,0,0,0.85)';

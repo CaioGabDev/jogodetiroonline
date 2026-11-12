@@ -201,6 +201,8 @@ export interface PInput {
   sprint: boolean;
   /** Starts a slide this step. */
   slide: boolean;
+  /** Knife in hand, outside the bomb mode. */
+  knife: boolean;
   /** Speed multiplier of the weapon in hand. */
   speedMul: number;
   ads: boolean;
@@ -416,8 +418,10 @@ export class CollisionWorld {
     if (inp.slide && s.onGround && !s.crouch) {
       const sp = Math.hypot(s.vx, s.vz);
       if (sp > 0) {
-        s.vx *= MOVE.slideSpeed / sp;
-        s.vz *= MOVE.slideSpeed / sp;
+        // Faster than the slide already, as with the knife, the speed stays.
+        const k = Math.max(1, MOVE.slideSpeed / sp);
+        s.vx *= k;
+        s.vz *= k;
         s.slide = MOVE.slideTime;
         res.slid = true;
       }
@@ -444,10 +448,13 @@ export class CollisionWorld {
       wx /= wl;
       wz /= wl;
     }
-    const maxSpeed = s.crouch ? MOVE.crouch : inp.ads ? MOVE.ads : inp.sprint && inp.fwd > 0 ? MOVE.sprint : MOVE.walk;
+    const running = inp.sprint && inp.fwd > 0;
+    const maxSpeed = s.crouch ? MOVE.crouch : inp.knife ? (running ? MOVE.knifeSprint : MOVE.knifeWalk) : inp.ads ? MOVE.ads : running ? MOVE.sprint : MOVE.walk;
     // A slide keeps its direction until it runs out.
     const wishSpeed = wl > 1e-4 && !sliding ? maxSpeed * inp.speedMul : 0;
-    const friction = sliding ? MOVE.slideFriction : MOVE.friction;
+    const friction = sliding ? MOVE.slideFriction : inp.knife ? MOVE.knifeFriction : MOVE.friction;
+    const accel = inp.knife ? MOVE.knifeAccel : MOVE.accel;
+    const airAccel = inp.knife ? MOVE.knifeAirAccel : inp.sprint ? MOVE.sprintAirAccel : MOVE.airAccel;
 
     const wasOnGround = s.onGround;
     if (s.onGround) {
@@ -458,16 +465,24 @@ export class CollisionWorld {
         s.vx *= ns;
         s.vz *= ns;
       }
-      accelerate(s, wx, wz, wishSpeed, MOVE.accel, dt);
+      accelerate(s, wx, wz, wishSpeed, accel, dt);
       if (inp.jump) {
         s.vy = MOVE.jump;
         s.onGround = false;
         s.slide = 0;
         res.jumped = true;
+        if (inp.sprint) {
+          const run = Math.hypot(s.vx, s.vz);
+          if (run > 0) {
+            const k = Math.max(1, (Math.min(run, maxSpeed) * MOVE.sprintJump) / run);
+            s.vx *= k;
+            s.vz *= k;
+          }
+        }
       }
     } else {
       const before = Math.hypot(s.vx, s.vz);
-      accelerate(s, wx, wz, wishSpeed, MOVE.airAccel, dt);
+      accelerate(s, wx, wz, wishSpeed, airAccel, dt);
       // Air control steers but never adds speed, so strafing can't build past the run speed.
       const after = Math.hypot(s.vx, s.vz);
       const limit = Math.max(before, maxSpeed);

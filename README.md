@@ -6,7 +6,7 @@ CC0 de Quaternius, e os cenários usam os kits CC0 de Kenney (créditos em `publ
 
 A jogabilidade segue a fórmula de FPS militar arcade: morte rápida, vida que regenera, corrida curta, slide e mantle.
 
-Funciona como site estático (Vercel, Netlify, GitHub Pages…): não existe servidor de jogo.
+Funciona como site estático (Vercel, Netlify, GitHub Pages…): não existe servidor de jogo. Contas, perfil e ranking são opcionais e usam o Supabase.
 Quem cria a sala vira o **host** e roda a simulação oficial no próprio navegador.
 
 ---
@@ -37,10 +37,11 @@ Quem cria a sala vira o **host** e roda a simulação oficial no próprio navega
 | Atirar | Botão esquerdo |
 | Mirar / luneta | Botão direito (segurar ou alternar) |
 | Recarregar | R |
+| Inspecionar arma | Y (atirar, mirar, recarregar, trocar de arma ou correr cancela) |
 | Trocar arma | 1 e 2 primárias, 3 pistola, 4 faca, ou roda do mouse |
 | Inventário | B (nas partidas com todas as armas). No modo Bomba, B abre a compra |
 | Placar | Tab (segurar) |
-| Chat (todos) / chat do time | Enter / Y |
+| Chat (todos) / chat do time | Enter / U |
 | Pausa | Esc |
 
 > No Chrome e no Edge o jogo abre em tela cheia para que **Ctrl+W não feche a aba** (dá para agachar com Ctrl e andar normalmente). Nos outros navegadores isso não é possível: aparece um aviso antes de sair, e o `C` é mais seguro para agachar.
@@ -67,7 +68,9 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 | Revólver | 6 | 2 tiros de perto, preciso, recarga lenta |
 | Pistola Automática | 20 | dispara em rajada, recuo médio |
 
-**Faca:** mata com 1 golpe, em até 2,8 m. O `V` dá o golpe com qualquer arma em mãos.
+**Faca:** mata com 1 golpe, em até 2,8 m. O `V` dá o golpe com qualquer arma em mãos. Com ela na mão o boneco corre muito mais rápido (até 17,5 m/s) e para na hora, menos no modo Bomba.
+
+**Pular enquanto corre** (toque no Shift, depois W + Espaço) dá um impulso de velocidade (+25%) e mais controle no ar, com qualquer arma. O boneco continua correndo durante o pulo, e segurar o Espaço emenda um pulo no outro.
 
 **Corrida:** dura 4 s e o fôlego volta no dobro da velocidade. Ao parar de correr, a arma leva um instante para atirar e mirar (de 120 ms na pistola a 350 ms na LMG). Armas pesadas deixam o boneco mais lento.
 
@@ -97,6 +100,8 @@ Nas partidas com todas as armas, cada um escolhe um letal e um tático na tela d
 
 Paredes bloqueiam as explosões. Seu próprio equipamento também pega você, e morrer assim conta só a morte. Companheiros de time só são atingidos com fogo amigo ligado.
 
+**Precisão:** parado e no chão, o primeiro tiro sai exatamente no centro da mira. Depois de 350 ms sem atirar, o tiro volta a contar como primeiro. Movimento, pulo e tiro contínuo abrem o spread. Sniper e DMR só têm esse primeiro tiro exato com a luneta aberta; sem mirar, dispersam sempre. Na escopeta, um pellet sai no centro e os outros abrem o cone em volta. Besta e lança-granadas saem no centro, mas o projétil cai com a distância. Agachado, o recuo cai 30%.
+
 ### Mapas
 
 O host escolhe o mapa no lobby:
@@ -121,6 +126,8 @@ O host também escolhe as **Armas** da partida:
 - **Todas as armas:** cada jogador escolhe as armas na tela de spawn. Em Configurações → Armas dá para mudar a ordem da roda: a primeira é a arma inicial, e a roda do mouse e o HUD seguem essa ordem.
 - **Só sniper / Só doze:** só essa arma e a faca, em FFA ou TDM.
 - **Gun Game:** sempre FFA. Cada kill com a arma do seu nível troca para a próxima, passando por todas. Todo mundo também tem a faca: matar com ela não sobe de nível, mas faz a vítima voltar uma arma. No último nível só resta a faca, e quem mata com ela vence.
+
+Em **Todas as armas** e **Gun Game**, o host também pode escolher **Sem granadas (só armas)**: saem o Lança-granadas e todos os equipamentos arremessáveis, da escolha de armas, do inventário e dos níveis do Gun Game.
 
 Quem abrir o link no meio da partida entra direto no jogo. Durante a tela de resultados, espera no lobby.
 
@@ -188,7 +195,9 @@ Abates contam até 60 e dano até 8.000 por partida. O nível vai até 55 e cada
 
 No menu, **Arsenal e skins** mostra a patente, o XP e a loja. A skin vale para todas as suas armas e os outros jogadores a veem. Floresta, Deserto, Urbano e Ártico vêm de graça com a patente; as outras (Tigre, Oceano, Carmesim, Neon, Cerejeira, Lava, Galáxia, Ouro e Diamante) custam moedas e algumas pedem nível mínimo. O catálogo e os números ficam em `src/game/progression.ts`.
 
-O progresso fica salvo **no navegador** (`localStorage`): trocar de navegador ou limpar os dados zera tudo, e quem mexer no console consegue se dar moedas. Para jogar entre amigos isso basta; um ranking público pediria contas e um servidor.
+**Com conta**, o progresso fica no Supabase (`player_stats`) e quem paga é o banco: o `submit_match` confere a partida (duração, kills possíveis, intervalo entre partidas) e calcula XP e moedas, e comprar ou equipar passa pelas funções `buy_skin` e `equip_skin`, que conferem nível, moedas e posse. Valem as mesmas regras do elo: partida online, com outro jogador, jogada até o fim. Moedas e compras só o dono vê (`my_progress`); nível e skin equipada são públicos. O catálogo do banco fica na migration `20261112000100_progressao.sql`, e o `npm run check` confere que ele bate com `progression.ts`.
+
+**Sem conta**, o progresso fica só no navegador (`localStorage`): trocar de navegador ou limpar os dados zera tudo, e ele não passa para a conta ao entrar.
 
 ---
 
@@ -227,7 +236,55 @@ vercel          # primeiro deploy (preview)
 vercel --prod   # produção
 ```
 
-Não há variáveis de ambiente nem backend: o site é 100% estático.
+O site é 100% estático e funciona sem nenhuma variável de ambiente. Para ter contas e ranking, veja a seção abaixo.
+
+---
+
+## Contas, perfil e ranking (Supabase)
+
+É opcional: sem as variáveis abaixo, o menu esconde login e ranking e todo mundo joga como convidado.
+Convidados continuam jogando normalmente mesmo com o Supabase ligado.
+
+**1. Banco.** Aplique os arquivos de `supabase/migrations/` em ordem, com `supabase db push` ou colando cada um no SQL Editor.
+
+**2. Variáveis.** Em *Vercel → Settings → Environment Variables* (ou no `.env` local):
+
+| Variável | Valor |
+| --- | --- |
+| `VITE_SUPABASE_URL` | URL do projeto (`https://SEU-PROJETO.supabase.co`) |
+| `VITE_SUPABASE_ANON_KEY` | chave anon/publishable |
+| `VITE_GOOGLE_LOGIN` | `true` para mostrar o botão do Google (só depois do passo 4) |
+
+Tudo que começa com `VITE_` fica visível no navegador. **Nunca** use a chave `service_role` aqui.
+Depois faça um novo deploy: essas variáveis entram no build.
+
+**3. URLs de redirect.** Em *Supabase → Authentication → URL Configuration*:
+
+- **Site URL:** o domínio de produção da Vercel.
+- **Redirect URLs:** `http://localhost:5173/**` e `https://SEU-DOMINIO.vercel.app/**`.
+
+O `/**` é necessário porque o login com Google volta para o mesmo endereço, mantendo o `?sala=` de um convite.
+
+**4. Google (opcional).** Sem isso, o login por e-mail e senha funciona normalmente. No Google Cloud, crie um cliente OAuth do tipo *Aplicativo da Web* com a URI de redirecionamento
+`https://SEU-PROJETO.supabase.co/auth/v1/callback`. Coloque o Client ID e o Secret em *Supabase → Authentication → Providers → Google*. Depois defina `VITE_GOOGLE_LOGIN=true` e faça um novo deploy.
+
+### Elos
+
+O ranking é ordenado por pontos, que sobem na vitória e caem na derrota. Os elos são Ferro, Bronze, Prata, Ouro, Platina,
+Diamante e Mestre, com divisões I, II e III de 100 pontos cada, e Lenda no topo, a partir de 2100 pontos.
+
+Vitória dá de 15 a 30 pontos, derrota tira de 10 a 25 e empate vale só o desempenho (kills menos mortes, de -5 a +10).
+Em FFA e Gun Game, a metade de cima do placar conta como vitória. Os elos ficam em `src/game/ranks.ts`.
+
+### Limitação do ranking
+
+O jogo é P2P e nenhum servidor vê a partida, então as kills e o resultado são informados pelo navegador do jogador e **não dá para provar
+que são reais**. As funções `begin_match` e `submit_match` limitam o estrago, usando o relógio do banco: ninguém escreve na
+tabela direto, a partida precisa durar de 30 s a 30 min, as kills têm teto por modo (50, ou 60 no Gun Game) e por tempo
+(1 a cada 1,5 s), e há um intervalo mínimo de 30 s entre envios. Quem trapacear ainda chega até esses tetos, e ganha no máximo 30 pontos por partida. Só um servidor
+dedicado rodando a partida resolveria isso de verdade.
+
+Só contam partidas online, com outro jogador humano, jogadas até o fim com uma conta. O Treino Offline não conta.
 
 ---
 
@@ -299,6 +356,7 @@ o PeerJS passa a registrar tudo no console.
 
 Ficam salvas no `localStorage` e são aplicadas na hora:
 
+- Com uma conta, as configurações também ficam salvas nela e acompanham o jogador em outros dispositivos.
 - **Controles:** sensibilidade (0,1–10, slider + campo numérico), sensibilidade de mira (escalada pelo zoom),
   inverter Y, remapear todas as teclas (2 por ação, inclusive botões do mouse), segurar/alternar para mirar e agachar.
 - **Vídeo:** FOV (70–110), qualidade baixa/média/alta (sombras, pixel ratio, antialias), sombras liga/desliga,
@@ -316,11 +374,14 @@ Ficam salvas no `localStorage` e são aplicadas na hora:
 src/
   main.ts            orquestra telas, conexão e o loop
   style.css
-  core/              loop (60 Hz fixo + render interpolado), input, settings, progresso salvo, audio, utilidades
+  core/              loop (60 Hz fixo + render interpolado), input, settings, progresso (XP, moedas, skins), audio, utilidades
   render/            cena/renderer, mapa, texturas procedurais, modelos, arma em 1ª pessoa, skins (shader), efeitos
-  game/              constantes, dados do mapa, física (AABB + rampas), armas, hitboxes, jogador remoto, partida (cliente), patentes e skins
-  net/               protocol.ts (mensagens tipadas), peer (PeerJS + loopback), host (simulação autoritativa), client, iceConfig
-  ui/                menu, lobby, HUD, placar, chat, configurações, pausa, resultados, toasts
+  game/              constantes, dados do mapa, física (AABB + rampas), armas, hitboxes, jogador remoto, partida (cliente),
+                     patentes e catálogo de skins (progression), elos (ranks)
+  net/               protocol.ts (mensagens tipadas), peer (PeerJS + loopback), host (simulação autoritativa), client, iceConfig,
+                     supabase, account (login), profile (nome, foto, configurações), ranking
+  ui/                menu, lobby, HUD, placar, chat, configurações, pausa, resultados, toasts, login, perfil, ranking, arsenal
+supabase/migrations/ tabelas, RLS, bucket de avatares e funções do ranking e da progressão
 ```
 
 Todo texto vindo de jogadores (nicks com até 16 caracteres e chat com até 120) é sanitizado e exibido via

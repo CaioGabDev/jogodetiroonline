@@ -10,6 +10,7 @@
     "check": "node scripts/check-gameplay.mjs && node scripts/check-maps.mjs && node scripts/check-equipment.mjs && node scripts/check-bomb.mjs && node scripts/check-progression.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
     "peerjs": "^1.5.5",
     "three": "^0.187.0"
   },

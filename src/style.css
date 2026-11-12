@@ -1643,14 +1643,14 @@ kbd {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 121px;
-  height: 121px;
-  margin: -60px 0 0 -60px;
+  width: 122px;
+  height: 122px;
+  margin: -61px 0 0 -61px;
   background:
-    linear-gradient(#000, #000) top center / 1px 46px no-repeat,
-    linear-gradient(#000, #000) bottom center / 1px 46px no-repeat,
-    linear-gradient(#000, #000) left center / 46px 1px no-repeat,
-    linear-gradient(#000, #000) right center / 46px 1px no-repeat;
+    linear-gradient(#000, #000) top center / 2px 46px no-repeat,
+    linear-gradient(#000, #000) bottom center / 2px 46px no-repeat,
+    linear-gradient(#000, #000) left center / 46px 2px no-repeat,
+    linear-gradient(#000, #000) right center / 46px 2px no-repeat;
 }
 
 .scope-lines::after {
@@ -1658,9 +1658,9 @@ kbd {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 3px;
-  height: 3px;
-  margin: -1.5px 0 0 -1.5px;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
   background: #ff3b3b;
   border-radius: 50%;
 }
@@ -1806,7 +1806,7 @@ kbd {
 
 /* ------------------------------------------------------------ progression: rank, coins, XP, armory */
 
-.rank-badge {
+.level-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1819,12 +1819,12 @@ kbd {
   white-space: nowrap;
 }
 
-.rank-badge b {
+.level-badge b {
   color: var(--text);
   font-weight: 800;
 }
 
-.rank-badge.compact {
+.level-badge.compact {
   font-size: 10.5px;
   padding: 1px 7px;
   gap: 4px;
@@ -2090,4 +2090,200 @@ kbd {
   .skin-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+
+/* Account */
+.account-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.account-box.hidden {
+  display: none;
+}
+
+.account-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  object-fit: cover;
+}
+
+.auth-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(380px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.auth-panel h2 {
+  margin: 0 0 4px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-form .btn {
+  margin-top: 8px;
+}
+
+.input[readonly] {
+  color: var(--muted);
+  cursor: default;
+}
+
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar.big {
+  width: 72px;
+  height: 72px;
+  font-size: 28px;
+}
+
+.rank-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(600px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+}
+
+.rank-panel h2 {
+  margin: 0;
+}
+
+.rank-list {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+}
+
+.rank-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 124px 56px 48px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.rank-row.me {
+  background: rgba(255, 176, 32, 0.14);
+}
+
+.rank-head {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rank-place {
+  color: var(--accent-2);
+  font-weight: 700;
+}
+
+.rank-player {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.rank-player .pname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-mine:not(:empty) {
+  border-top: 1px solid var(--panel-border);
+  padding-top: 6px;
+}
+
+.rank-open {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.account-name b {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.account-rank {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.account-rank:empty {
+  display: none;
+}
+
+.rank-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 24px;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  color: #10141c;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.account-rank .rank-badge {
+  width: 15px;
+  height: 17px;
+  font-size: 7px;
+}
+
+.rank-tier {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
 }

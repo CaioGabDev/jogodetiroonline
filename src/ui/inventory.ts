@@ -1,4 +1,4 @@
-import { LETHALS, PISTOLS, PRIMARIES, TACTICALS, WEAPONS, magLabel } from '../game/weapons';
+import { LETHALS, PISTOLS, PRIMARIES, TACTICALS, W, WEAPONS, magLabel } from '../game/weapons';
 import { clear, el, show } from './dom';
 
 const SLOTS = [
@@ -16,6 +16,7 @@ export class Inventory {
   private grid: HTMLElement;
   private loadout: number[] = [];
   private slot = 0;
+  private grenades = true;
 
   constructor(
     parent: HTMLElement,
@@ -38,7 +39,8 @@ export class Inventory {
     return !this.root.classList.contains('hidden');
   }
 
-  open(loadout: number[]): void {
+  open(loadout: number[], grenades: boolean): void {
+    this.grenades = grenades;
     this.loadout = [...loadout];
     this.slot = 0;
     this.render();
@@ -61,6 +63,8 @@ export class Inventory {
   private render(): void {
     clear(this.slotsEl);
     this.loadout.forEach((id, i) => {
+      // Slots past the pistol hold equipment, which a guns-only match doesn't have.
+      if (i > 2 && !this.grenades) return;
       this.slotsEl.append(
         el(
           'button',
@@ -77,6 +81,7 @@ export class Inventory {
     });
     clear(this.grid);
     for (const w of SLOTS[this.slot].items) {
+      if (w.id === W.LAUNCHER && !this.grenades) continue;
       this.grid.append(
         el(
           'button',

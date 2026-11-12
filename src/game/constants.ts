@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 15;
 /** Prefix added to the room code to form the host's PeerJS id (avoids collisions on the public server). */
 export const PEER_PREFIX = 'arenafps-v1-';
 
@@ -35,21 +35,29 @@ export const PLAYER = {
 };
 
 export const HITBOX = {
-  bodyHalf: 0.34,
-  headHalf: 0.21,
-  standBodyTop: 1.45,
-  standHeadTop: 1.87,
-  crouchBodyTop: 1.0,
-  crouchHeadTop: 1.42,
+  standBodyTop: 1.5,
+  standHeadTop: 1.85,
+  crouchBodyTop: 1.14,
+  crouchHeadTop: 1.4,
 };
 
 export const MOVE = {
   walk: 5.4,
   sprint: 8.1,
+  knifeWalk: 12,
+  knifeSprint: 17.5,
+  knifeAirAccel: 9,
+  /** High accel and friction: with the knife, starts, stops and turns are near-instant. */
+  knifeAccel: 40,
+  knifeFriction: 16,
   crouch: 2.6,
   ads: 2.9,
   accel: 14,
   airAccel: 2,
+  /** Air control while sprinting. */
+  sprintAirAccel: 6,
+  /** Speed multiplier for jumping out of a sprint. Based on the run speed, so hops don't stack. */
+  sprintJump: 1.25,
   friction: 8,
   stopSpeed: 1.5,
   gravity: 20,
@@ -139,6 +147,8 @@ export interface MatchConfig {
   /** Minutes; 0 = no limit. */
   timeLimit: number;
   friendlyFire: boolean;
+  /** False leaves only guns: no launcher, no thrown equipment. */
+  grenades: boolean;
   /** Bomb mode: round wins that take the match. Sides swap halfway. */
   rounds: number;
 }
@@ -147,4 +157,4 @@ export const KILL_LIMITS = [10, 20, 30, 50];
 export const TIME_LIMITS = [5, 10, 15, 20];
 export const ROUND_WINS = [7, 9, 13];
 
-export const DEFAULT_CONFIG: MatchConfig = { map: 'arena', mode: 'ffa', arsenal: 'all', killLimit: 20, timeLimit: 10, friendlyFire: false, rounds: 13 };
+export const DEFAULT_CONFIG: MatchConfig = { map: 'arena', mode: 'ffa', arsenal: 'all', killLimit: 20, timeLimit: 10, friendlyFire: false, grenades: true, rounds: 13 };

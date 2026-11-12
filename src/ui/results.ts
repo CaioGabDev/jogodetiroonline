@@ -1,7 +1,7 @@
 import { progress, type MatchSummary } from '../core/progress';
 import { TEAM_COLORS, TEAM_NAMES, teamMode, type GameMode } from '../game/constants';
 import type { EndMsg } from '../net/protocol';
-import { coinLabel, rankBadge, xpBar } from './armory';
+import { coinLabel, levelBadge, xpBar } from './armory';
 import { clear, el, show } from './dom';
 
 export interface ResultsCallbacks {
@@ -42,7 +42,7 @@ export class Results {
     return !this.root.classList.contains('hidden');
   }
 
-  render(m: EndMsg, mode: GameMode, localId: number, isHost: boolean, offline: boolean, myTeam: string, summary: MatchSummary | null): void {
+  render(m: EndMsg, mode: GameMode, localId: number, isHost: boolean, offline: boolean, myTeam: string): void {
     let won = false;
     if (teamMode(mode)) {
       if (m.winnerTeam) {
@@ -75,7 +75,7 @@ export class Results {
       );
     }
 
-    this.renderRewards(summary, offline);
+    clear(this.rewards);
 
     clear(this.table);
     const t = el('table', { class: 'sb-table' });
@@ -109,10 +109,12 @@ export class Results {
     }
   }
 
-  private renderRewards(sum: MatchSummary | null, offline: boolean): void {
+  /** XP, coins and unlocks of the match, or just a note when it paid nothing (or is still being paid). */
+  setRewards(sum: MatchSummary | null, note: string): void {
     clear(this.rewards);
+    const hint = note ? el('p', { class: 'hint rw-note', text: note }) : null;
     if (!sum) {
-      if (offline) this.rewards.append(el('p', { class: 'hint', text: 'Treino offline não dá XP nem moedas.' }));
+      if (hint) this.rewards.append(hint);
       return;
     }
     const fmt = (n: number): string => n.toLocaleString('pt-BR');
@@ -147,7 +149,7 @@ export class Results {
 
     this.rewards.append(
       el('div', { class: 'rw-head' }, [
-        rankBadge(info.level),
+        levelBadge(info.level),
         el('b', { class: 'rw-total', text: `+${fmt(sum.reward.xp)} XP` }),
         coinLabel(sum.reward.coins + sum.levelCoins),
       ]),
@@ -155,5 +157,6 @@ export class Results {
       ...news,
       el('div', { class: 'rw-lines' }, lines),
     );
+    if (hint) this.rewards.append(hint);
   }
 }

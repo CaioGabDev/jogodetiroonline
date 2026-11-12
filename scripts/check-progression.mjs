@@ -1,5 +1,6 @@
 // Progression check: `npm run check`. Levels, ranks, rewards, the skin catalog and the saved progress.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'vite';
 
 // The store saves to localStorage: a map stands in for it.
@@ -62,6 +63,11 @@ for (const s of P.SKINS) {
 }
 assert.equal(P.skinById('nao-existe').id, P.DEFAULT_SKIN);
 
+// The database has its own copy of the catalog, which decides what can be bought.
+const sql = readFileSync(new URL('../supabase/migrations/20261112000100_progressao.sql', import.meta.url), 'utf8');
+const rows = [...sql.matchAll(/\('([a-z]+)', (\d+), (\d+)\)/g)].map((m) => ({ id: m[1], level: Number(m[2]), price: Number(m[3]) }));
+assert.deepEqual(rows, P.SKINS.map((s) => ({ id: s.id, level: s.level, price: s.price })), 'catalog in the migration matches progression.ts');
+
 // Hello: skin and level are checked by the host.
 const hello = { type: 'hello', name: 'A', color: '#f94144', v: 1 };
 assert.ok(parseClientMsg(hello), 'hello without profile');
@@ -75,8 +81,8 @@ assert.equal(progress.level, 1);
 assert.equal(progress.coins, 0);
 assert.equal(progress.equipped, P.DEFAULT_SKIN);
 assert.equal(progress.owns('floresta'), false, 'level skin locked at level 1');
-assert.equal(progress.buy('tigre'), 'coins');
-assert.equal(progress.equip('tigre'), false);
+assert.equal(await progress.buy('tigre'), 'coins');
+assert.equal(await progress.equip('tigre'), false);
 
 const before = progress.coins;
 const sum = progress.addMatch({ kills: 30, deaths: 5, headshots: 10, damage: 5000, won: true, mvp: true });
@@ -87,15 +93,54 @@ assert.ok(sum.unlocked.some((s) => s.id === 'floresta'));
 
 while (progress.coins < 600) progress.addMatch({ kills: 10, deaths: 5, headshots: 2, damage: 1500, won: false, mvp: false });
 const coins = progress.coins;
-assert.equal(progress.buy('tigre'), 'ok');
+assert.equal(await progress.buy('tigre'), 'ok');
 assert.equal(progress.coins, coins - 600);
-assert.equal(progress.buy('tigre'), 'owned');
-assert.equal(progress.equip('tigre'), true);
-assert.equal(progress.buy('diamante'), 'level', 'General skin needs level 50');
+assert.equal(progress.equipped, 'tigre', 'buying equips');
+assert.equal(await progress.buy('tigre'), 'owned');
+assert.equal(await progress.equip('padrao'), true);
+assert.equal(await progress.equip('tigre'), true);
+assert.equal(await progress.buy('diamante'), 'level', 'General skin needs level 50');
 
 const saved = JSON.parse(store.get('arenafps.progress.v1'));
 assert.equal(saved.equipped, 'tigre');
 assert.deepEqual(saved.bought, ['tigre']);
 assert.equal(saved.coins, progress.coins);
+
+// Logged in: the account's data replaces the browser's, purchases go to the server, and nothing is saved locally.
+const calls = [];
+const account = { xp: P.totalXpFor(12), coins: 5000, bought: ['neon'], equipped: 'neon', matches: 40, wins: 20, kills: 500 };
+await progress.useBackend({
+  load: async () => ({ ...account, bought: [...account.bought] }),
+  buy: async (id) => {
+    calls.push(['buy', id]);
+    account.coins -= P.skinById(id).price;
+    account.bought.push(id);
+    account.equipped = id;
+    return 'ok';
+  },
+  equip: async (id) => {
+    calls.push(['equip', id]);
+    return true;
+  },
+});
+const localSaved = store.get('arenafps.progress.v1');
+assert.equal(progress.remote, true);
+assert.equal(progress.level, 12);
+assert.equal(progress.equipped, 'neon');
+assert.equal(progress.owns('tigre'), false, 'the browser purchase is not in the account');
+assert.equal(await progress.buy('cerejeira'), 'ok');
+assert.equal(progress.coins, 5000 - 2200, 'reloaded from the server after buying');
+assert.equal(await progress.equip('urbano'), true);
+assert.deepEqual(calls, [['buy', 'cerejeira'], ['equip', 'urbano']]);
+const paid = progress.applyServerMatch(
+  { kills: 10, deaths: 4, headshots: 3, damage: 1500, won: true, mvp: false },
+  { xp: account.xp + 1525, coins: 9999, xpGain: 1525, coinGain: 131, levelCoins: 100 },
+);
+assert.equal(progress.coins, 9999, 'the server total wins');
+assert.equal(paid.reward.xp, 1525);
+assert.equal(store.get('arenafps.progress.v1'), localSaved, 'account progress never touches localStorage');
+await progress.useBackend(null);
+assert.equal(progress.remote, false);
+assert.equal(progress.equipped, 'tigre', 'logging out brings the browser progress back');
 
 console.log(`progressão ok: nível 10 em ~${matches} partidas, partida típica = ${typical.xp} XP e ${typical.coins} moedas`);

@@ -1,4 +1,4 @@
-import { LETHALS, PISTOLS, PRIMARIES, TACTICALS, fillLoadout, magLabel, type WeaponDef } from '../game/weapons';
+import { LETHALS, PISTOLS, PRIMARIES, TACTICALS, W, fillLoadout, magLabel, type WeaponDef } from '../game/weapons';
 import { el, show } from './dom';
 
 /**
@@ -9,6 +9,7 @@ export class LoadoutPicker {
   readonly root: HTMLElement;
   private timer: HTMLElement;
   private cards = new Map<number, HTMLElement>();
+  private equipment: HTMLElement;
   private primaries: number[] = [];
   private pistol: number | null = null;
   private lethal: number | null = null;
@@ -37,15 +38,16 @@ export class LoadoutPicker {
         }),
       ),
     ];
+    this.equipment = el('div', { class: 'loadout-col' }, [
+      ...section('Letal (escolha 1)', LETHALS, (id) => this.pickLethal(id)),
+      ...section('Tática (escolha 1)', TACTICALS, (id) => this.pickTactical(id)),
+    ]);
     const panel = el('div', { class: 'panel loadout-panel' }, [
       el('div', { class: 'loadout-head' }, [el('h2', { text: 'Escolha suas armas' }), this.timer]),
       el('div', { class: 'loadout-body' }, [
         el('div', { class: 'loadout-col' }, section('Primárias (escolha 2)', PRIMARIES, (id) => this.pickPrimary(id))),
         el('div', { class: 'loadout-col' }, section('Pistola (escolha 1)', PISTOLS, (id) => this.pickPistol(id))),
-        el('div', { class: 'loadout-col' }, [
-          ...section('Letal (escolha 1)', LETHALS, (id) => this.pickLethal(id)),
-          ...section('Tática (escolha 1)', TACTICALS, (id) => this.pickTactical(id)),
-        ]),
+        this.equipment,
       ]),
       el('button', { class: 'btn primary big', text: 'Confirmar', onClick: () => this.onChange(this.current(), true) }),
     ]);
@@ -57,7 +59,9 @@ export class LoadoutPicker {
     return !this.root.classList.contains('hidden');
   }
 
-  open(ms: number): void {
+  open(ms: number, grenades: boolean): void {
+    this.cards.get(W.LAUNCHER)?.classList.toggle('hidden', !grenades);
+    show(this.equipment, grenades);
     this.primaries = [];
     this.pistol = null;
     this.lethal = null;

@@ -1,18 +1,25 @@
 import './style.css';
 import { audio } from './core/audio';
 import { input } from './core/input';
-import { progress, type MatchSummary } from './core/progress';
+import { progress } from './core/progress';
+import type { MatchStats } from './game/progression';
+import { accountProgress } from './net/progressApi';
 import { GameLoop } from './core/loop';
 import { normalizeCode } from './core/util';
-import { teamMode, type MapId } from './game/constants';
+import { teamMode, type GameMode, type MapId } from './game/constants';
 import { Game } from './game/game';
+import { rankOf } from './game/ranks';
 import { HostServer } from './net/host';
 import { RoomBrowser } from './net/directory';
 import { NetClient, joinRemote, type DisconnectReason } from './net/client';
+import { account } from './net/account';
 import { describeError } from './net/peer';
-import type { HostMsg, LobbyState, MatchInfo, WelcomeMsg } from './net/protocol';
+import { initSettingsSync } from './net/profile';
+import { beginMatch, loadMyRating, submitMatch, type MatchResult } from './net/ranking';
+import type { EndMsg, HostMsg, LobbyState, MatchInfo, WelcomeMsg } from './net/protocol';
 import { SceneManager } from './render/scene';
 import { Armory } from './ui/armory';
+import { AuthScreen } from './ui/auth';
 import { Chat } from './ui/chat';
 import { Hud } from './ui/hud';
 import { BuyMenu } from './ui/buyMenu';
@@ -21,6 +28,8 @@ import { LoadoutPicker } from './ui/loadout';
 import { Lobby } from './ui/lobby';
 import { MainMenu } from './ui/menu';
 import { PauseMenu } from './ui/pause';
+import { ProfileScreen } from './ui/profile';
+import { RankingScreen } from './ui/ranking';
 import { Results } from './ui/results';
 import { Scoreboard } from './ui/scoreboard';
 import { SettingsUI } from './ui/settingsUI';
@@ -39,6 +48,9 @@ class App {
   private results: Results;
   private settingsUI: SettingsUI;
   private armory: Armory;
+  private auth: AuthScreen;
+  private profile: ProfileScreen;
+  private ranking: RankingScreen;
   private roomBrowser: RoomBrowser;
   private loadout: LoadoutPicker;
   private inventory: Inventory;
@@ -54,6 +66,10 @@ class App {
   private busy = false;
   /** The match on screen already paid its reward. */
   private rewarded = false;
+  /** This match was opened on the ranking and still has to be reported. */
+  private ranked = false;
+  /** Last known rating of the logged-in player. */
+  private rating: number | null = null;
   private idleT = 0;
 
   constructor() {
@@ -72,6 +88,10 @@ class App {
       onPractice: (n, c, map) => void this.practice(n, c, map),
       onSettings: () => this.settingsUI.open(),
       onArmory: () => this.armory.open(),
+      onLogin: () => this.auth.open(),
+      onLogout: () => void account.signOut(),
+      onProfile: () => this.profile.open(),
+      onRanking: () => this.ranking.open(),
     });
     this.lobby = new Lobby(ui, {
       onStart: () => {
@@ -109,6 +129,17 @@ class App {
     });
     this.settingsUI = new SettingsUI(ui);
     this.armory = new Armory(ui);
+    this.auth = new AuthScreen(ui);
+    this.profile = new ProfileScreen(ui);
+    this.ranking = new RankingScreen(ui);
+    account.onChange(() => {
+      void progress.useBackend(account.profile ? accountProgress : null);
+      this.menu.setAccount(account.profile, account.available);
+      void this.refreshRating();
+    });
+    this.menu.setAccount(null, account.available);
+    initSettingsSync();
+    account.init();
     this.roomBrowser = new RoomBrowser((rooms) => this.menu.setRooms(rooms));
     this.loadout = new LoadoutPicker(ui, (w, go) => {
       this.net?.send({ type: 'loadout', w, go });
@@ -241,7 +272,7 @@ class App {
   // ------------------------------------------------------------------ connection flows
 
   /** What the others see of this player's progress. */
-  private profile(): { skin: string; lv: number } {
+  private helloProfile(): { skin: string; lv: number } {
     return { skin: progress.equipped, lv: progress.level };
   }
 
@@ -283,7 +314,7 @@ class App {
   private async connectLocal(host: HostServer, nick: string, color: string): Promise<boolean> {
     const net = new NetClient(host.connectLocal(), null);
     try {
-      const welcome = await net.handshake(nick, color, this.profile());
+      const welcome = await net.handshake(nick, color, this.helloProfile());
       this.attach(net, welcome);
       return true;
     } catch (e) {
@@ -304,7 +335,7 @@ class App {
     let net: NetClient | null = null;
     try {
       net = await joinRemote(code);
-      const welcome = await net.handshake(nick, color, this.profile());
+      const welcome = await net.handshake(nick, color, this.helloProfile());
       this.attach(net, welcome);
       history.replaceState(null, '', location.pathname);
       const joined = net;
@@ -362,7 +393,7 @@ class App {
         this.closeInventory(false);
         input.exitLock();
         this.pause.show(false);
-        this.loadout.open(m.ms);
+        this.loadout.open(m.ms, this.lobbyState?.config.grenades !== false);
         break;
       case 'spawn':
         this.game?.onMessage(m);
@@ -381,16 +412,10 @@ class App {
         const isHost = this.lobbyState?.hostId === net.localId;
         this.pause.show(false);
         const won = teamMode(mode) ? m.winnerTeam === this.game.myTeam : m.winnerId === net.localId;
-        // Practice against targets pays nothing; an online match pays once.
-        let summary: MatchSummary | null = null;
-        const me = m.results.find((r) => r.id === net.localId);
-        if (me && !this.lobbyState?.offline && !this.rewarded) {
-          this.rewarded = true;
-          summary = progress.addMatch({ kills: me.kills, deaths: me.deaths, headshots: me.headshots, damage: me.damage, won, mvp: m.mvp === net.localId });
-        }
-        this.results.render(m, mode, net.localId, isHost, !!this.lobbyState?.offline, this.game.myTeam, summary);
+        this.results.render(m, mode, net.localId, isHost, !!this.lobbyState?.offline, this.game.myTeam);
         this.results.show(true);
         audio.matchEnd(won);
+        this.reportMatch(m, net.localId, won);
         break;
       }
       case 'sys':
@@ -423,14 +448,72 @@ class App {
       match,
     );
     this.showScreen('game');
+    this.ranked = account.profile !== null && !this.lobbyState.offline;
+    if (this.ranked) void beginMatch();
     this.game.onInventory = (loadout) => this.openInventory(loadout);
     this.game.onBuyMenu = () => this.openBuyMenu();
     this.syncTeamButton();
     if (!input.locked) this.pause.show(true, true);
   }
 
+  /**
+   * Pays the match once. Practice targets and empty rooms don't count: XP, coins and rating need another human.
+   * With an account the database validates the match and pays it; a guest is paid in this browser.
+   */
+  private reportMatch(m: EndMsg, localId: number, won: boolean): void {
+    const lobby = this.lobbyState;
+    const row = m.results.find((r) => r.id === localId);
+    const ranked = this.ranked;
+    this.ranked = false;
+    if (!lobby || !row || this.rewarded) return;
+    this.rewarded = true;
+    if (lobby.offline) return this.results.setRewards(null, 'Treino offline não dá XP nem moedas.');
+    if (lobby.players.filter((p) => !p.bot).length < 2) {
+      return this.results.setRewards(null, 'Só partidas com outro jogador dão XP e moedas.');
+    }
+    const stats: MatchStats = { kills: row.kills, deaths: row.deaths, headshots: row.headshots, damage: row.damage, won, mvp: m.mvp === localId };
+    if (!account.profile) {
+      const note = account.available ? 'Entre numa conta para guardar o progresso e aparecer no ranking.' : '';
+      return this.results.setRewards(progress.addMatch(stats), note);
+    }
+    if (!ranked) return this.results.setRewards(null, 'Você entrou na conta durante a partida: ela não conta.');
+
+    this.results.setRewards(null, 'Calculando as recompensas…');
+    const mode = lobby.config.arsenal === 'gungame' ? 'gungame' : lobby.config.mode;
+    const result = matchResult(m, localId, lobby.config.mode);
+    void submitMatch({ ...stats, mode, result })
+      .catch(() => null)
+      .then((pay) => {
+        if (!pay) {
+          this.results.setRewards(null, 'Esta partida não contou: curta demais (menos de 30 s) ou com números impossíveis.');
+          return;
+        }
+        this.results.setRewards(progress.applyServerMatch(stats, pay), '');
+        this.showRating(pay.rating);
+      });
+  }
+
+  private showRating(rating: number | null): void {
+    if (rating === null) {
+      toast('Esta partida não entrou no ranking.', 'warn');
+      return;
+    }
+    const before = this.rating ?? 0;
+    const rank = rankOf(rating);
+    const delta = rating - before;
+    const promoted = delta > 0 && rankOf(before).label !== rank.label;
+    toast(promoted ? `Subiu para ${rank.label}! (+${delta})` : `${delta >= 0 ? '+' : ''}${delta} pontos · ${rank.label}`, delta >= 0 ? 'ok' : 'warn', 6000);
+    this.rating = rating;
+    this.menu.setRating(rating);
+  }
+
+  private async refreshRating(): Promise<void> {
+    this.rating = await loadMyRating().catch(() => null);
+    this.menu.setRating(this.rating);
+  }
+
   private openInventory(loadout: number[]): void {
-    this.inventory.open(loadout);
+    this.inventory.open(loadout, this.lobbyState?.config.grenades !== false);
     input.releaseMouse();
     this.unhookInventory = input.addKeyHook((code, e) => {
       if (code !== 'KeyB' && code !== 'Escape') return false;
@@ -517,6 +600,17 @@ class App {
     this.settingsUI.close();
     this.showScreen('menu');
   }
+}
+
+/** In a free-for-all the top half of the table wins, so a good match still pays when someone else came first. */
+function matchResult(m: EndMsg, localId: number, mode: GameMode): MatchResult {
+  if (teamMode(mode)) {
+    if (m.winnerTeam === null) return 'draw';
+    return m.results.find((r) => r.id === localId)?.team === m.winnerTeam ? 'win' : 'loss';
+  }
+  const place = m.results.findIndex((r) => r.id === localId) + 1;
+  const middle = (m.results.length + 1) / 2;
+  return place < middle ? 'win' : place === middle ? 'draw' : 'loss';
 }
 
 const app = new App();

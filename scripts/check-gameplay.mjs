@@ -31,7 +31,7 @@ assert.ok(ttk(W.SMG, 10) < ttk(W.RIFLE, 10), 'SMG wins up close');
 assert.ok(ttk(W.RIFLE, 30) < ttk(W.SMG, 30), 'rifle wins at range');
 assert.ok(WEAPONS.filter((d) => !d.melee).every((d) => d.adsTime >= 0.12 && d.adsTime <= 0.35));
 
-// Jump: about a meter high, and a jump out of a sprint adds no speed.
+// Jump: about a meter high. A jump out of a sprint gives a push (MOVE.sprintJump), and hops don't stack it.
 {
   const w = world();
   const s = player();
@@ -44,7 +44,13 @@ assert.ok(WEAPONS.filter((d) => !d.melee).every((d) => d.adsTime >= 0.12 && d.ad
     top = Math.max(top, s.y);
   }
   assert.ok(top > 0.9 && top < 1.1, `jump height ${top}`);
-  assert.ok(speed(s) <= before + 0.01, 'no speed from jumping');
+  const cap = MOVE.sprint * MOVE.sprintJump + 0.01;
+  assert.ok(speed(s) > before + 0.5 && speed(s) <= cap, `sprint jump push: ${before} -> ${speed(s)}`);
+  for (let hop = 0; hop < 5; hop++) {
+    w.step(s, input({ fwd: 1, sprint: true, jump: true }), DT);
+    for (let i = 0; i < 60 && !s.onGround; i++) w.step(s, input({ fwd: 1, sprint: true }), DT);
+  }
+  assert.ok(speed(s) <= cap, `hops don't stack: ${speed(s)}`);
 }
 
 // Slide: faster than a sprint, keeps going without input, ends crouched and slow.

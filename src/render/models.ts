@@ -12,6 +12,10 @@ const darkMat = new THREE.MeshLambertMaterial({ color: 0x1d2026 });
 const visorMat = new THREE.MeshLambertMaterial({ color: 0x111111, emissive: 0x0a2a3a });
 const gunMat = new THREE.MeshLambertMaterial({ color: 0x2b2e33 });
 
+/** Duration of a knife swing seen from outside, in seconds, and how far the hand reaches. */
+const SWING_TIME = 0.28;
+const SWING_REACH = 0.35;
+
 function part(mat: THREE.Material, sx: number, sy: number, sz: number, x = 0, y = 0, z = 0): THREE.Mesh {
   const m = new THREE.Mesh(boxGeo, mat);
   m.scale.set(sx, sy, sz);
@@ -213,6 +217,9 @@ export class PlayerModel {
   private weapon = -1;
   private skin = '';
   private disposed = false;
+  private swingT = 0;
+  /** Rest position of the right hand along the arm, set by the weapon in hand. */
+  private gripZ = 0;
   private teamMat: THREE.MeshLambertMaterial;
   private label: THREE.Sprite | null = null;
   private labelText = '';
@@ -321,7 +328,8 @@ export class PlayerModel {
     this.gun.scale.set(0.09, s.h, s.len);
     this.gun.position.z = -rear - s.len / 2;
     this.muzzle.position.z = -rear - s.len;
-    this.gripR.position.set(GUN_X, -0.07, -rear - Math.min(s.len * 0.4, 0.3));
+    this.gripZ = -rear - Math.min(s.len * 0.4, 0.3);
+    this.gripR.position.set(GUN_X, -0.07, this.gripZ);
     this.gripL.position.set(GUN_X - 0.02, -0.03, -rear - Math.min(s.len * 0.7, 0.52));
 
     this.gunModels.forEach((m) => (m.visible = false));
@@ -339,6 +347,19 @@ export class PlayerModel {
     }
     model.visible = true;
     model.position.copy(this.muzzle.position);
+  }
+
+  swing(): void {
+    this.swingT = SWING_TIME;
+  }
+
+  /** Thrusts the hand and the weapon forward. holdGun then brings the arm along. */
+  private updateSwing(dt: number): void {
+    this.swingT = Math.max(0, this.swingT - dt);
+    const reach = Math.sin((1 - this.swingT / SWING_TIME) * Math.PI) * SWING_REACH;
+    this.gripR.position.z = this.gripZ - reach;
+    const held = this.gunModels.get(this.weapon) ?? this.gun;
+    held.position.z = held === this.gun ? this.muzzle.position.z / 2 - reach : this.muzzle.position.z - reach;
   }
 
   update(s: ModelState, dt: number): void {
@@ -370,6 +391,7 @@ export class PlayerModel {
     this.armGroup.rotation.x = s.pitch * 0.9;
     this.head.rotation.x = s.pitch * 0.5;
 
+    this.updateSwing(dt);
     if (this.soldier) {
       this.soldier.animate(dt, s.alive ? s.speed : 0, this.crouchT);
       this.soldier.holdGun(this.gripR, this.gripL, s.yaw);

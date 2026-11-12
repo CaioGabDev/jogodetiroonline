@@ -2,7 +2,7 @@ import { CHAT_MAX } from '../game/constants';
 import { sanitizeText } from '../core/util';
 import { el, show } from './dom';
 
-/** Chat log + input. Opening is controlled by the game (Enter / Y). */
+/** Chat log + input. Opening is controlled by the game (Enter / U). */
 export class Chat {
   readonly root: HTMLElement;
   private log: HTMLElement;

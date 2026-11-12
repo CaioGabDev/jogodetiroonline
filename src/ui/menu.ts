@@ -2,9 +2,13 @@ import { progress } from '../core/progress';
 import { loadColor, loadNick, saveColor, saveNick } from '../core/settings';
 import { normalizeCode, sanitizeText } from '../core/util';
 import { ARSENAL_NAMES, FFA_COLORS, MAP_NAMES, MAX_PLAYERS, NAME_MAX, type MapId } from '../game/constants';
+import { rankOf } from '../game/ranks';
+import type { Profile } from '../net/account';
 import type { RoomInfo } from '../net/directory';
-import { coinLabel, rankBadge, xpBar } from './armory';
+import { coinLabel, levelBadge, xpBar } from './armory';
+import { avatar } from './avatar';
 import { clear, el, show } from './dom';
+import { rankBadge } from './rankBadge';
 
 export interface MenuCallbacks {
   onCreate(nick: string, color: string): void;
@@ -12,6 +16,10 @@ export interface MenuCallbacks {
   onPractice(nick: string, color: string, map: MapId): void;
   onSettings(): void;
   onArmory(): void;
+  onLogin(): void;
+  onLogout(): void;
+  onProfile(): void;
+  onRanking(): void;
 }
 
 export class MainMenu {
@@ -28,9 +36,15 @@ export class MainMenu {
   private roomsKey = '';
   private joinRoom: (code: string) => void;
   private busy = false;
-  private profile: HTMLElement;
+  private progressBox: HTMLElement;
+  private accountBox: HTMLElement;
+  private rankingBtn: HTMLButtonElement;
+  private rankLine = el('small', { class: 'account-rank' });
 
-  constructor(parent: HTMLElement, cb: MenuCallbacks) {
+  constructor(
+    parent: HTMLElement,
+    private cb: MenuCallbacks,
+  ) {
     this.nick = el('input', {
       class: 'input big',
       attrs: { maxlength: String(NAME_MAX), placeholder: 'Seu nickname', autocomplete: 'off', spellcheck: 'false' },
@@ -64,7 +78,8 @@ export class MainMenu {
         return null;
       }
       this.nick.value = n;
-      saveNick(n);
+      // The account name is not the nickname a guest typed.
+      if (!this.nick.readOnly) saveNick(n);
       return n;
     };
 
@@ -111,21 +126,24 @@ export class MainMenu {
     });
     const settingsBtn = el('button', { class: 'btn ghost', text: 'Configurações', onClick: () => cb.onSettings() });
     const armoryBtn = el('button', { class: 'btn ghost', text: 'Arsenal e skins', onClick: () => cb.onArmory() });
+    this.rankingBtn = el('button', { class: 'btn ghost rank-open hidden', text: 'Ranking', onClick: () => cb.onRanking() });
     this.buttons = [create, join, practice, settingsBtn, armoryBtn];
-    this.profile = el('button', { class: 'profile-strip', title: 'Abrir o Arsenal', onClick: () => cb.onArmory() });
-    this.renderProfile();
-    progress.onChange(() => this.renderProfile());
+    this.progressBox = el('button', { class: 'profile-strip', title: 'Abrir o Arsenal', onClick: () => cb.onArmory() });
+    this.renderProgress();
+    progress.onChange(() => this.renderProgress());
     this.code.addEventListener('keydown', (e) => {
       if (e.code === 'Enter' || e.code === 'NumpadEnter') join.click();
     });
 
+    this.accountBox = el('div', { class: 'account-box hidden' });
     this.error = el('div', { class: 'error hidden' });
     this.status = el('div', { class: 'status hidden' });
 
     const card = el('div', { class: 'panel menu-panel' }, [
       el('div', { class: 'logo' }, [el('span', { text: 'ARENA' }), el('b', { text: 'FPS' })]),
       el('div', { class: 'subtitle', text: 'Multiplayer no navegador · até 10 jogadores' }),
-      this.profile,
+      this.accountBox,
+      this.progressBox,
       el('label', { class: 'field-label', text: 'Nickname' }),
       this.nick,
       el('label', { class: 'field-label', text: 'Sua cor (mata-mata)' }),
@@ -134,6 +152,7 @@ export class MainMenu {
       el('div', { class: 'join-row' }, [this.code, join]),
       el('div', { class: 'row2' }, [practice, practiceMap]),
       el('div', { class: 'row2' }, [armoryBtn, settingsBtn]),
+      this.rankingBtn,
       this.status,
       this.error,
     ]);
@@ -152,10 +171,11 @@ export class MainMenu {
         ['V', 'golpe rápido'],
         ['Mouse Dir.', 'mirar / luneta'],
         ['R', 'recarregar'],
+        ['Y', 'inspecionar arma'],
         ['1-4 / Roda', 'trocar arma'],
         ['B', 'inventário'],
         ['Tab', 'placar'],
-        ['Enter / Y', 'chat / chat do time'],
+        ['Enter / U', 'chat / chat do time'],
         ['Esc', 'pausa'],
       ].map(([k, d]) => el('div', { class: 'help-row' }, [el('kbd', { text: k }), el('span', { text: d })])),
       el('p', { class: 'hint', text: 'Crie uma sala e mande o link para seus amigos. As teclas podem ser alteradas em Configurações.' }),
@@ -164,10 +184,41 @@ export class MainMenu {
     parent.append(this.root);
   }
 
-  private renderProfile(): void {
+  private renderProgress(): void {
     const info = progress.levelInfo;
-    clear(this.profile);
-    this.profile.append(el('div', { class: 'profile-top' }, [rankBadge(info.level), coinLabel(progress.coins)]), xpBar(info.into, info.need));
+    clear(this.progressBox);
+    this.progressBox.append(el('div', { class: 'profile-top' }, [levelBadge(info.level), coinLabel(progress.coins)]), xpBar(info.into, info.need));
+  }
+
+  /** Logged in, the profile name is the nickname. Without Supabase configured the box stays hidden. */
+  setAccount(profile: Profile | null, available: boolean): void {
+    show(this.accountBox, available);
+    show(this.rankingBtn, available);
+    clear(this.accountBox);
+    this.nick.readOnly = profile !== null;
+    this.nick.value = profile ? profile.username : loadNick();
+    if (!profile) {
+      this.accountBox.append(
+        el('span', { class: 'account-name', text: 'Jogando como convidado' }),
+        el('button', { class: 'btn small', text: 'Entrar', onClick: () => this.cb.onLogin() }),
+      );
+      return;
+    }
+    this.accountBox.append(
+      avatar(profile.username, profile.avatar_url),
+      el('span', { class: 'account-name' }, [el('b', { text: profile.username }), this.rankLine]),
+      el('button', { class: 'btn small', text: 'Perfil', onClick: () => this.cb.onProfile() }),
+      el('button', { class: 'btn small ghost', text: 'Sair', onClick: () => this.cb.onLogout() }),
+    );
+  }
+
+  /** Null hides the line, when the rating couldn't be read. */
+  setRating(rating: number | null): void {
+    clear(this.rankLine);
+    if (rating === null) return;
+    const rank = rankOf(rating);
+    const points = rank.goal === null ? `${rank.points} pts` : `${rank.points}/${rank.goal}`;
+    this.rankLine.append(rankBadge(rank), ` ${rank.label} · ${points}`);
   }
 
   /** Redraws only when something changed, so a refresh can't swallow a click on a row. */

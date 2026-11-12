@@ -1,4 +1,5 @@
 import { progress } from '../core/progress';
+import { account } from '../net/account';
 import { RANKS, SKINS, rankFor, type Rank, type SkinDef } from '../game/progression';
 import { clear, el, show } from './dom';
 import { toast } from './toast';
@@ -107,9 +108,9 @@ function drawPreview(canvas: HTMLCanvasElement, skin: SkinDef): void {
 }
 
 /** Rank icon, name and level, colored by rank. */
-export function rankBadge(level: number, compact = false): HTMLElement {
+export function levelBadge(level: number, compact = false): HTMLElement {
   const r = rankFor(level);
-  return el('span', { class: 'rank-badge' + (compact ? ' compact' : ''), title: `${r.name} · nível ${level}`, style: { color: r.color, borderColor: r.color } }, [
+  return el('span', { class: 'level-badge' + (compact ? ' compact' : ''), title: `${r.name} · nível ${level}`, style: { color: r.color, borderColor: r.color } }, [
     el('span', { class: 'rank-icon', text: r.icon }),
     compact ? null : el('span', { text: r.name }),
     el('b', { text: compact ? String(level) : `Nv ${level}` }),
@@ -138,11 +139,15 @@ export class Armory {
   readonly root: HTMLElement;
   private head: HTMLElement;
   private grid: HTMLElement;
+  private where: HTMLElement;
+  /** A purchase or equip is on its way to the account. */
+  private busy = false;
   private onClose: (() => void) | null = null;
 
   constructor(parent: HTMLElement) {
     this.head = el('div', { class: 'armory-head' });
     this.grid = el('div', { class: 'skin-grid' });
+    this.where = el('p', { class: 'hint' });
     const close = el('button', { class: 'btn primary', text: 'Fechar', onClick: () => this.close() });
     const panel = el('div', { class: 'panel armory-panel' }, [
       el('h2', { text: 'Arsenal' }),
@@ -150,7 +155,7 @@ export class Armory {
       el('h3', { text: 'Skins de arma' }),
       el('p', { class: 'hint', text: 'A skin vale para todas as suas armas, e os outros jogadores também a veem. As de patente são grátis ao chegar no nível; as outras se compram com moedas.' }),
       this.grid,
-      el('div', { class: 'armory-foot' }, [el('p', { class: 'hint', text: 'O progresso fica salvo neste navegador. Treino offline não dá XP nem moedas.' }), close]),
+      el('div', { class: 'armory-foot' }, [this.where, close]),
     ]);
     this.root = el('div', { class: 'overlay armory hidden' }, [panel]);
     window.addEventListener('keydown', (e) => {
@@ -200,8 +205,30 @@ export class Armory {
       ]),
     );
 
+    this.where.textContent = progress.remote
+      ? `Progresso salvo na conta de ${account.profile?.username ?? 'você'}.`
+      : account.available
+        ? 'Jogando como convidado: o progresso fica só neste navegador. Entre numa conta para guardá-lo.'
+        : 'O progresso fica salvo neste navegador.';
     clear(this.grid);
+    if (progress.loading) {
+      this.grid.append(el('p', { class: 'hint', text: 'Carregando o progresso da conta…' }));
+      return;
+    }
     for (const s of SKINS) this.grid.append(this.card(s, info.level));
+  }
+
+  /** One request at a time, with the buttons off meanwhile. */
+  private async run(task: () => Promise<void>): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.grid.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    try {
+      await task();
+    } finally {
+      this.busy = false;
+      if (this.visible) this.render();
+    }
   }
 
   private card(s: SkinDef, level: number): HTMLElement {
@@ -218,7 +245,14 @@ export class Armory {
       action = el('button', { class: 'btn small', text: 'Em uso', attrs: { disabled: '' } });
     } else if (owned) {
       status = 'Sua';
-      action = el('button', { class: 'btn small primary', text: 'Equipar', onClick: () => progress.equip(s.id) });
+      action = el('button', {
+        class: 'btn small primary',
+        text: 'Equipar',
+        onClick: () =>
+          void this.run(async () => {
+            if (!(await progress.equip(s.id))) toast('Não deu para equipar agora. Tente de novo.', 'error');
+          }),
+      });
     } else if (locked) {
       const r = rankFor(s.level);
       status = s.price > 0 ? `Nível ${s.level} · ${fmt(s.price)} moedas` : `Grátis no nível ${s.level}`;
@@ -229,15 +263,13 @@ export class Armory {
       action = el('button', {
         class: 'btn small' + (afford ? ' primary' : ''),
         text: afford ? 'Comprar' : 'Sem moedas',
-        onClick: () => {
-          const r = progress.buy(s.id);
-          if (r === 'ok') {
-            progress.equip(s.id);
-            toast(`Skin ${s.name} comprada e equipada!`, 'ok');
-          } else if (r === 'coins') {
-            toast(`Faltam ${fmt(s.price - progress.coins)} moedas para a ${s.name}.`, 'warn');
-          }
-        },
+        onClick: () =>
+          void this.run(async () => {
+            const r = await progress.buy(s.id);
+            if (r === 'ok') toast(`Skin ${s.name} comprada e equipada!`, 'ok');
+            else if (r === 'coins') toast(`Faltam ${fmt(s.price - progress.coins)} moedas para a ${s.name}.`, 'warn');
+            else if (r === 'error') toast('A compra não foi concluída. Tente de novo.', 'error');
+          }),
       });
       if (!afford) (action as HTMLButtonElement).disabled = true;
     }

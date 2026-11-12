@@ -708,8 +708,9 @@ export function magLabel(w: WeaponDef): string {
   return w.category === 'lethal' || w.category === 'tactical' ? `Por vida: ${w.mag}` : `Pente: ${w.mag}`;
 }
 
-export function validLoadout(l: number[]): boolean {
+export function validLoadout(l: number[], grenades = true): boolean {
   const [a, b, c, d, e] = l;
+  if (!grenades && l.includes(W.LAUNCHER)) return false;
   const is = (w: number, category: WeaponCategory): boolean => WEAPONS[w]?.category === category;
   return l.length === 5 && a !== b && is(a, 'primary') && is(b, 'primary') && is(c, 'pistol') && is(d, 'lethal') && is(e, 'tactical');
 }
@@ -722,7 +723,7 @@ export function fillLoadout(primaries: number[], pistol: number | null, lethal: 
 }
 
 /** Gun Game levels: every weapon, one kill each, from the easiest to the hardest. A kill on the last one wins. */
-export const GUN_GAME_LADDER: number[] = [
+const GUN_GAME_LADDER: number[] = [
   W.RIFLE,
   W.SMG,
   W.LMG,
@@ -738,8 +739,13 @@ export const GUN_GAME_LADDER: number[] = [
   W.KNIFE,
 ];
 
+/** Levels of a match. Without grenades the launcher's level is skipped. */
+export function gunGameLadder(grenades: boolean): number[] {
+  return grenades ? GUN_GAME_LADDER : GUN_GAME_LADDER.filter((w) => w !== W.LAUNCHER);
+}
+
 /** Weapons a player may use. `level` is the Gun Game level. Every mode keeps the knife for movement. */
-export function allowedWeapons(arsenal: Arsenal, level: number, loadout: number[]): number[] {
+export function allowedWeapons(arsenal: Arsenal, level: number, loadout: number[], grenades = true): number[] {
   switch (arsenal) {
     case 'sniper':
       return [W.SNIPER, W.KNIFE];
@@ -748,7 +754,8 @@ export function allowedWeapons(arsenal: Arsenal, level: number, loadout: number[
     case 'shop':
       return [...loadout, W.KNIFE];
     case 'gungame': {
-      const w = GUN_GAME_LADDER[Math.min(level, GUN_GAME_LADDER.length - 1)];
+      const ladder = gunGameLadder(grenades);
+      const w = ladder[Math.min(level, ladder.length - 1)];
       return w === W.KNIFE ? [w] : [w, W.KNIFE];
     }
     default:
@@ -757,8 +764,8 @@ export function allowedWeapons(arsenal: Arsenal, level: number, loadout: number[
 }
 
 /** Equipment a player spawns with. Fixed until the next spawn, or swapping it in the inventory would refill it. */
-export function spawnEquipment(arsenal: Arsenal, loadout: number[]): number[] {
-  return arsenal === 'all' ? loadout.slice(3) : [];
+export function spawnEquipment(arsenal: Arsenal, loadout: number[], grenades = true): number[] {
+  return arsenal === 'all' && grenades ? loadout.slice(3) : [];
 }
 
 /** Horizontal recoil pattern (multiplied by kickYaw), cycles after the end. */

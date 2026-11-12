@@ -37,7 +37,7 @@ import { MAPS, type MapDef, type SpawnDef } from '../game/mapData';
 import { CollisionWorld, eyeHeight } from '../game/physics';
 import { PositionHistory, rayPlayer } from '../game/hitbox';
 import { DEFAULT_SKIN } from '../game/progression';
-import { DEFAULT_LOADOUT, GUN_GAME_LADDER, W, WEAPONS, allowedWeapons, blastDamage, damageAt, fullAmmo, spawnEquipment, stunMs, validLoadout } from '../game/weapons';
+import { DEFAULT_LOADOUT, W, WEAPONS, allowedWeapons, blastDamage, damageAt, fullAmmo, gunGameLadder, spawnEquipment, stunMs, validLoadout } from '../game/weapons';
 import { ITEM, MAX_THROWN, ROUND, SHOP, gunHit, inRect, isThrowable, isWeaponItem, lossBonus, siteAt } from '../game/bomb';
 import { clamp, now, r2, r3, randomCode, sanitizeText } from '../core/util';
 import {
@@ -108,7 +108,7 @@ interface SPlayer {
   respawnAt: number;
   tp: number;
   kills: number;
-  /** Gun Game level: index in GUN_GAME_LADDER. */
+  /** Gun Game level: index in the match's ladder. */
   level: number;
   deaths: number;
   damage: number;
@@ -673,7 +673,7 @@ export class HostServer {
   }
 
   private onLoadout(p: SPlayer, m: LoadoutMsg): void {
-    if (!validLoadout(m.w)) return;
+    if (!validLoadout(m.w, this.config.grenades)) return;
     // Outside the spawn screen this is the inventory, which only exists with every weapon enabled.
     if (!p.picking && (this.phase !== 'playing' || this.config.arsenal !== 'all')) return;
     p.loadout = [...m.w];
@@ -723,6 +723,7 @@ export class HostServer {
     if (!KILL_LIMITS.includes(c.killLimit)) c.killLimit = DEFAULT_CONFIG.killLimit;
     if (!TIME_LIMITS.includes(c.timeLimit)) c.timeLimit = DEFAULT_CONFIG.timeLimit;
     c.friendlyFire = !!c.friendlyFire;
+    c.grenades = c.grenades !== false;
     this.config = c;
     this.broadcastLobby();
   }
@@ -783,7 +784,7 @@ export class HostServer {
   // ---------------------------------------------------------------- simulation
 
   private allowed(p: SPlayer): number[] {
-    return allowedWeapons(this.config.arsenal, p.level, p.loadout);
+    return allowedWeapons(this.config.arsenal, p.level, p.loadout, this.config.grenades);
   }
 
   private isEnemy(a: SPlayer, b: SPlayer): boolean {
@@ -850,7 +851,7 @@ export class HostServer {
     p.mag = ammo.mag;
     p.reserve = ammo.reserve;
     p.reloadW = -1;
-    p.equip = this.bombMode ? this.heldThrowables(p) : spawnEquipment(this.config.arsenal, p.loadout);
+    p.equip = this.bombMode ? this.heldThrowables(p) : spawnEquipment(this.config.arsenal, p.loadout, this.config.grenades);
     p.weapon = this.allowed(p)[0];
     p.tp++;
     p.lastCt = -1;
@@ -858,7 +859,7 @@ export class HostServer {
     p.ctOff = null;
     p.lastMoveT = t;
     p.history.clear();
-    p.history.push({ t, x: p.x, y: p.y, z: p.z, crouch: p.crouch });
+    p.history.push({ t, x: p.x, y: p.y, z: p.z, yaw: p.yaw, crouch: p.crouch });
     p.lastHistT = t;
     this.send(p, { type: 'spawn', p: [p.x, p.y, p.z], yw: p.yaw, tp: p.tp, full: true, ld: p.loadout, eq: p.equip });
     this.sendAmmo(p);
@@ -908,7 +909,8 @@ export class HostServer {
     const up = Math.max(0, ny - p.y);
     const h = m.c ? PLAYER.crouchHeight : PLAYER.height;
     const half = this.map.size / 2;
-    const maxHoriz = (MOVE.slideSpeed * 1.25 * dct) / 1000 + 0.3;
+    // Not per weapon: speed carries over for a moment after switching away from the knife.
+    const maxHoriz = (MOVE.knifeSprint * MOVE.sprintJump * 1.25 * dct) / 1000 + 0.3;
     const maxUp = (9 * dct) / 1000 + 0.35;
     const invalid =
       p.clockAhead > 1500 ||
@@ -936,7 +938,7 @@ export class HostServer {
     p.ctOff = p.ctOff === null ? off : Math.min(p.ctOff + realDt * 0.01, off);
     const sampleT = Math.max(p.lastHistT + 1, Math.min(t, m.ct + p.ctOff));
     p.lastHistT = sampleT;
-    p.history.push({ t: sampleT, x: nx, y: ny, z: nz, crouch: m.c });
+    p.history.push({ t: sampleT, x: nx, y: ny, z: nz, yaw: m.yw, crouch: m.c });
     this.checkPickups(p);
   }
 
@@ -1045,11 +1047,11 @@ export class HostServer {
     const minT = t - Math.min(HISTORY_MS, rtt + MAX_INTERP_DELAY + SNAP_SAMPLE_DELAY + 200);
     const rewindT = clamp(m.rt - SNAP_SAMPLE_DELAY, minT, t);
 
-    const targets: Array<{ pl: SPlayer; pos: { x: number; y: number; z: number; crouch: boolean } }> = [];
+    const targets: Array<{ pl: SPlayer; pos: { x: number; y: number; z: number; yaw: number; crouch: boolean } }> = [];
     for (const o of this.players.values()) {
       if (o === p || !o.alive) continue;
       if (!this.isEnemy(p, o) && !this.config.friendlyFire) continue;
-      const pos = o.history.at(rewindT) ?? { x: o.x, y: o.y, z: o.z, crouch: o.crouch };
+      const pos = o.history.at(rewindT) ?? { x: o.x, y: o.y, z: o.z, yaw: o.yaw, crouch: o.crouch };
       targets.push({ pl: o, pos });
     }
 
@@ -1688,9 +1690,10 @@ export class HostServer {
 
   /** Only the weapon of the current level moves a player up. The knife sends the victim back one instead. */
   private gunGameKill(killer: SPlayer, victim: SPlayer, w: number): void {
-    if (w === GUN_GAME_LADDER[killer.level]) {
+    const ladder = gunGameLadder(this.config.grenades);
+    if (w === ladder[killer.level]) {
       killer.level++;
-      if (killer.level === GUN_GAME_LADDER.length - 1) this.broadcast({ type: 'sys', text: `${killer.info.name} chegou na faca!` });
+      if (killer.level === ladder.length - 1) this.broadcast({ type: 'sys', text: `${killer.info.name} chegou na faca!` });
     } else if (w === W.KNIFE) {
       victim.level = Math.max(0, victim.level - 1);
     }
@@ -1699,7 +1702,7 @@ export class HostServer {
   private checkWin(): void {
     if (this.phase !== 'playing') return;
     if (this.config.arsenal === 'gungame') {
-      if ([...this.players.values()].some((p) => !p.bot && p.level >= GUN_GAME_LADDER.length)) this.endMatch('kills');
+      if ([...this.players.values()].some((p) => !p.bot && p.level >= gunGameLadder(this.config.grenades).length)) this.endMatch('kills');
       return;
     }
     const lim = this.config.killLimit;
@@ -1786,7 +1789,7 @@ export class HostServer {
         }
       }
       if (best) p.yaw = Math.atan2(-(best.x - p.x), -(best.z - p.z));
-      p.history.push({ t, x: p.x, y: p.y, z: p.z, crouch: p.crouch });
+      p.history.push({ t, x: p.x, y: p.y, z: p.z, yaw: p.yaw, crouch: p.crouch });
       p.lastHistT = t;
     }
   }

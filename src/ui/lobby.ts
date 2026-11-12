@@ -1,4 +1,4 @@
-import { rankBadge } from './armory';
+import { levelBadge } from './armory';
 import {
   ARSENAL_NAMES,
   BOMB_MAPS,
@@ -194,6 +194,19 @@ export class Lobby {
     const arsenals = (Object.entries(ARSENAL_NAMES) as Array<[Arsenal, string]>).filter(([a]) => a !== 'shop');
     this.config.append(sel<MapId>('Mapa', mapOptions, c.map, (v) => ({ map: v })));
     if (!bomb) this.config.append(sel<Arsenal>('Armas', arsenals, c.arsenal, (v) => ({ arsenal: v })));
+    if (!bomb && (c.arsenal === 'all' || gunGame)) {
+      this.config.append(
+        sel<string>(
+          'Granadas',
+          [
+            ['on', 'Com granadas'],
+            ['off', 'Sem granadas (só armas)'],
+          ],
+          c.grenades ? 'on' : 'off',
+          (v) => ({ grenades: v === 'on' }),
+        ),
+      );
+    }
     if (gunGame) {
       // Fixed by the rules: everyone for themselves, and the match ends at the last weapon.
       this.config.append(
@@ -251,7 +264,7 @@ export class Lobby {
   private playerRow(p: PlayerInfo, color: string): HTMLElement {
     return el('div', { class: 'player-row' + (p.id === this.localId ? ' me' : '') }, [
       el('span', { class: 'sb-dot', style: { background: color } }),
-      p.bot ? null : rankBadge(p.lv, true),
+      p.bot ? null : levelBadge(p.lv, true),
       el('span', { class: 'pname', text: p.name }),
       p.host ? el('span', { class: 'tag', text: 'HOST' }) : null,
       p.id === this.localId ? el('span', { class: 'tag you', text: 'VOCÊ' }) : null,

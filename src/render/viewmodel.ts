@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { W } from '../game/weapons';
 import { assetsReady, gunAssets } from './assets';
 import { applySkin, tickSkins } from './skins';
 import { makeGlowTexture } from './textures';
@@ -105,17 +106,35 @@ function buildSniper(): GunModel {
 }
 
 function buildKnife(): GunModel {
+  // The group's origin is the fist, so swings pivot on the hand and the blade does the sweeping.
   const g = new THREE.Group();
-  g.add(box(steel, 0.014, 0.04, 0.2, 0, 0.012, -0.16));
-  const tip = box(steel, 0.014, 0.028, 0.028, 0, 0.018, -0.265);
-  tip.rotation.x = Math.PI / 4;
-  g.add(tip);
-  g.add(box(dark, 0.03, 0.06, 0.012, 0, 0.01, -0.055));
-  g.add(box(dark, 0.028, 0.035, 0.11, 0, 0.006, 0.005));
-  g.add(box(glove, 0.06, 0.07, 0.08, 0, -0.01, 0.01));
-  g.add(box(sleeve, 0.055, 0.05, 0.16, 0, -0.02, 0.12));
-  const pos = new THREE.Vector3(0.2, -0.17, -0.48);
-  return { group: g, muzzle: new THREE.Vector3(0, 0.015, -0.27), hipPos: pos, adsPos: pos, mag: null };
+  const profile = new THREE.Shape();
+  profile.moveTo(-0.024, 0);
+  profile.lineTo(0.02, 0);
+  profile.lineTo(0.02, 0.25);
+  profile.lineTo(0.016, 0.31);
+  profile.quadraticCurveTo(-0.024, 0.24, -0.024, 0.14);
+  profile.closePath();
+  const bladeGeo = new THREE.ExtrudeGeometry(profile, { depth: 0.008, bevelEnabled: false });
+  bladeGeo.translate(0, 0.06, -0.004);
+
+  // Turned on its long axis so the flat of the blade faces the camera, then tilted up and forward.
+  const twist = new THREE.Group();
+  twist.rotation.y = 0.85;
+  twist.add(new THREE.Mesh(bladeGeo, steel));
+  twist.add(box(dark, 0.07, 0.012, 0.03, 0, 0.06, 0));
+  twist.add(box(dark, 0.03, 0.13, 0.03, 0, -0.01, 0));
+  twist.add(box(glove, 0.07, 0.09, 0.08, 0, -0.005, 0.008));
+  const tilt = new THREE.Group();
+  tilt.rotation.x = -0.95;
+  tilt.add(twist);
+  g.add(tilt);
+
+  const forearm = box(sleeve, 0.06, 0.055, 0.22, 0.015, -0.05, 0.14);
+  forearm.rotation.x = 0.25;
+  g.add(forearm);
+  const pos = new THREE.Vector3(0.2, -0.2, -0.46);
+  return { group: g, muzzle: new THREE.Vector3(0, 0.21, -0.3), hipPos: pos, adsPos: pos, mag: null };
 }
 
 function buildSmg(): GunModel {
@@ -228,6 +247,8 @@ export interface ViewmodelState {
   sprint: boolean;
   /** Reload progress 0..1, or -1 when not reloading. */
   reload: number;
+  /** Inspection progress 0..1, or -1 when not inspecting. */
+  inspect: number;
   /** Weapon raise progress 0..1 (1 = ready). */
   raise: number;
   lookDX: number;
@@ -289,7 +310,8 @@ export class Viewmodel {
   private useAssets(): void {
     this.guns.forEach((g, w) => {
       const asset = gunAssets.get(w);
-      if (!asset) return;
+      // The knife keeps its own model: in first person the blade has to show past the hand.
+      if (!asset || w === W.KNIFE) return;
       const old = g.group.children.filter((c) => c instanceof THREE.Mesh && c.material !== glove && c.material !== sleeve);
       g.group.remove(...old);
       const model = asset.object.clone();
@@ -373,7 +395,8 @@ export class Viewmodel {
     let rotX = this.kickRot * (1 - s.aim * 0.6);
     let rotY = 0;
     let rotZ = 0;
-    if (s.sprint && s.aim < 0.1 && moving) {
+    // Not tied to the ground: the run pose holds through a jump.
+    if (s.sprint && s.aim < 0.1 && s.speed > 0.5) {
       rotY = 0.5;
       rotX -= 0.25;
       pos.x -= 0.03;
@@ -385,21 +408,34 @@ export class Viewmodel {
       rotZ += r * 0.35;
       pos.y -= r * 0.08;
     }
+    if (s.inspect >= 0) {
+      // Brings the weapon in, shows one side, turns it over to show the other, and puts it back.
+      const smooth = THREE.MathUtils.smoothstep;
+      const hold = smooth(s.inspect, 0, 0.12) * (1 - smooth(s.inspect, 0.88, 1));
+      const turn = smooth(s.inspect, 0.12, 0.42) - 2 * smooth(s.inspect, 0.5, 0.8);
+      pos.x -= hold * 0.1;
+      pos.y += hold * 0.05;
+      pos.z += hold * 0.08;
+      rotX += hold * 0.2;
+      rotY += hold * (0.45 + turn * 0.75);
+      rotZ += hold * (0.25 - turn * 0.3);
+    }
     const lower = 1 - s.raise;
     pos.y -= lower * 0.3;
     rotX -= lower * 0.6;
 
-    // Knife slash: right to left across the screen, applied directly so the smoothing below doesn't mute it.
+    // Knife thrust: the hand moves a little and the blade sweeps across the screen.
+    // Applied directly so the smoothing below doesn't mute it.
     this.swingT = Math.max(0, this.swingT - dt);
     const swinging = this.swingT > 0;
     if (swinging) {
       const a = Math.sin((1 - this.swingT / SWING_TIME) * Math.PI);
-      pos.x -= a * 0.2;
-      pos.y += a * 0.06;
-      pos.z -= a * 0.16;
-      rotX -= a * 0.3;
-      rotY += a * 0.9;
-      rotZ += a * 0.5;
+      pos.x -= a * 0.12;
+      pos.y += a * 0.03;
+      pos.z -= a * 0.2;
+      rotX -= a * 0.55;
+      rotY += a * 0.7;
+      rotZ += a * 0.35;
     }
 
     g.group.position.lerp(pos, swinging ? 1 : Math.min(1, dt * 25));
