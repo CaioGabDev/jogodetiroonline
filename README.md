@@ -64,7 +64,7 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 | Pistola | Pente | Características |
 | --- | --- | --- |
 | Pistola | 12 | rápida, 3 tiros de perto, perde dano depois de 12 m |
-| Desert Eagle | 7 | 2 tiros de perto, recuo forte, tiro lento |
+| Desert Eagle | 7 | mata com 1 tiro na cabeça até 15 m, 2 no corpo de perto, recuo forte, tiro lento |
 | Revólver | 6 | 2 tiros de perto, preciso, recarga lenta |
 | Pistola Automática | 20 | dispara em rajada, recuo médio |
 
@@ -84,7 +84,7 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 
 **Itens no chão** (reaparecem em 20 s): a munição recarrega por completo a arma em mãos.
 
-Headshot multiplica o dano por um valor de cada arma (de 1,25× na LMG a 1,5× na sniper), e a partir de certa distância o dano cai. Os números ficam em `src/game/weapons.ts`. O lança-granadas não fere quem atirou.
+Headshot multiplica o dano por um valor de cada arma (de 1,25× na LMG a 2× na Desert Eagle), e a partir de certa distância o dano cai. Os números ficam em `src/game/weapons.ts`. O lança-granadas não fere quem atirou.
 
 ### Equipamentos
 

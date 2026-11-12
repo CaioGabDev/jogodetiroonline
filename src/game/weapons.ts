@@ -525,7 +525,7 @@ export const WEAPONS: WeaponDef[] = [
     name: 'Desert Eagle',
     short: 'DEAGLE',
     category: 'pistol',
-    desc: 'Dano muito alto, recuo forte, tiro lento',
+    desc: '1 tiro na cabeça até 15 m, recuo forte, tiro lento',
     damage: 50,
     interval: 350,
     auto: false,
@@ -551,7 +551,8 @@ export const WEAPONS: WeaponDef[] = [
     sound: 'deagle',
     fireKick: 1.6,
     shape: { len: 0.42, h: 0.14 },
-    headMul: 1.5,
+    // 50 × 2 = 100: a headshot kills, up to where the falloff starts (15 m).
+    headMul: 2,
     sprintOut: 150,
   },
   {
