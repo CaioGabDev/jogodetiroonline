@@ -303,26 +303,6 @@ kbd {
 
 /* ------------------------------------------------------------ main menu */
 
-.menu-layout {
-  display: flex;
-  gap: 18px;
-  align-items: stretch;
-  max-width: 1180px;
-  width: 100%;
-  justify-content: center;
-}
-
-.menu-panel {
-  width: 420px;
-  max-width: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.menu-panel > .btn.primary {
-  margin-top: 18px;
-}
-
 .logo {
   font-size: 46px;
   font-weight: 900;
@@ -349,20 +329,6 @@ kbd {
 
 .join-row .btn {
   flex: 1;
-}
-
-.row2 {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.row2 .btn {
-  flex: 1;
-}
-
-.help-panel {
-  width: 300px;
 }
 
 .loadout-panel {
@@ -486,20 +452,6 @@ kbd {
   gap: 6px;
 }
 
-.rooms-panel {
-  width: 320px;
-  max-width: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.room-list {
-  flex: 1;
-  min-height: 0;
-  max-height: 460px;
-  overflow-y: auto;
-}
-
 .room-row {
   display: flex;
   align-items: center;
@@ -536,25 +488,6 @@ kbd {
   font-size: 14px;
 }
 
-@media (max-width: 1120px) {
-  .help-panel {
-    display: none;
-  }
-}
-
-@media (max-width: 760px) {
-  .menu-layout {
-    flex-direction: column;
-    align-items: center;
-  }
-  .help-panel {
-    display: none;
-  }
-  .screen {
-    overflow-y: auto;
-    align-items: flex-start;
-  }
-}
 
 /* ------------------------------------------------------------ lobby */
 
@@ -1880,34 +1813,6 @@ kbd {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 
-.profile-strip {
-  font: inherit;
-  color: var(--text);
-  text-align: left;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  padding: 10px 12px 8px;
-  margin: 12px 0 4px;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-
-.profile-strip:hover {
-  border-color: rgba(255, 255, 255, 0.22);
-}
-
-.profile-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.row2 + .row2 {
-  margin-top: 8px;
-}
-
 .armory-panel {
   width: 860px;
   max-width: 100%;
@@ -2090,6 +1995,7 @@ kbd {
   .skin-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+}
 
 /* Account */
 .account-box {
@@ -2236,11 +2142,6 @@ kbd {
   padding-top: 6px;
 }
 
-.rank-open {
-  width: 100%;
-  margin-top: 8px;
-}
-
 .account-name b {
   display: block;
   overflow: hidden;
@@ -2286,4 +2187,405 @@ kbd {
   min-width: 0;
   font-size: 13px;
   white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ main menu (layout) */
+
+.screen.menu {
+  align-items: flex-start;
+  overflow-y: auto;
+}
+
+.menu-shell {
+  width: 100%;
+  max-width: 1080px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.menu-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 24px;
+  flex-wrap: wrap;
+}
+
+.menu-brand .logo {
+  font-size: 52px;
+  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.6);
+}
+
+.menu-brand .subtitle {
+  margin: 8px 0 0;
+}
+
+/* Player card */
+.player-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 8px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  min-width: 0;
+  flex: 0 1 460px;
+}
+
+.pc-main {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px;
+  background: none;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.pc-main:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.avatar.pc-avatar {
+  width: 46px;
+  height: 46px;
+  font-size: 19px;
+}
+
+.avatar.guest {
+  background: linear-gradient(140deg, #2b3442, #1a2029);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.pc-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pc-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pc-name {
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-guest {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pc-tags {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pc-elo {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+
+.pc-elo .rank-badge {
+  width: 14px;
+  height: 16px;
+  font-size: 7px;
+}
+
+.pc-info .xp-bar {
+  height: 14px;
+  margin: 4px 0 0;
+}
+
+.pc-info .xp-bar span {
+  font-size: 10px;
+  line-height: 12px;
+}
+
+.pc-main .coins {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.pc-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 10px;
+  border-left: 1px solid var(--panel-border);
+}
+
+/* Play and rooms */
+.menu-main {
+  display: grid;
+  grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.play-panel,
+.rooms-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.play-panel > h3,
+.rooms-head h3 {
+  margin: 0 0 4px;
+}
+
+.play-panel .field-label {
+  margin-top: 10px;
+}
+
+.play-panel > .btn.primary {
+  margin-top: 18px;
+}
+
+.menu-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.menu-divider::before,
+.menu-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--panel-border);
+}
+
+.play-panel .join-row .input.code {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.play-panel .join-row .btn {
+  flex: 0 0 110px;
+}
+
+.practice-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.rooms-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.room-count {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 176, 32, 0.18);
+  color: var(--accent-2);
+}
+
+.room-count:empty {
+  display: none;
+}
+
+.room-list {
+  flex: 1;
+  min-height: 160px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.room-row {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.room-row:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.room-info {
+  flex: 1;
+}
+
+.room-players {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.room-players.live {
+  color: var(--ok);
+}
+
+.rooms-empty {
+  height: 100%;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.rooms-empty b {
+  color: var(--text);
+  font-size: 15px;
+}
+
+/* Ten colors in one row, whatever the width. */
+.play-panel .swatches {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 32px));
+  gap: 6px;
+}
+
+.play-panel .swatch {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+/* Shortcut tiles */
+.menu-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.menu-tile {
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    border-color 0.15s,
+    transform 0.1s,
+    background 0.15s;
+}
+
+.menu-tile:hover {
+  border-color: rgba(255, 176, 32, 0.45);
+  background: rgba(24, 30, 40, 0.95);
+  transform: translateY(-1px);
+}
+
+.tile-icon {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  fill: none;
+  stroke: var(--accent-2);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tile-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tile-text b {
+  font-size: 15px;
+}
+
+.tile-text small {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Controls window */
+.controls-panel {
+  width: 640px;
+  max-width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.controls-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 20px;
+  margin-bottom: 8px;
+}
+
+.controls-panel > .btn {
+  margin-top: 8px;
+}
+
+@media (max-width: 860px) {
+  .menu-main {
+    grid-template-columns: 1fr;
+  }
+  .player-card {
+    flex: 1 1 100%;
+  }
+  .menu-brand .logo {
+    font-size: 40px;
+  }
+}
+
+@media (max-width: 560px) {
+  .controls-grid {
+    grid-template-columns: 1fr;
+  }
+  .pc-main .coins {
+    display: none;
+  }
 }

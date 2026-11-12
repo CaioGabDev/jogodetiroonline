@@ -45,7 +45,7 @@ export interface Rank {
 }
 
 export const RANKS: Rank[] = [
-  { name: 'Recruta', level: 1, color: '#9aa3ad', icon: '·' },
+  { name: 'Recruta', level: 1, color: '#9aa3ad', icon: '○' },
   { name: 'Soldado', level: 3, color: '#b8c4cf', icon: '▲' },
   { name: 'Cabo', level: 6, color: '#8fc97a', icon: '▲▲' },
   { name: 'Sargento', level: 10, color: '#5cc1a6', icon: '▲▲▲' },
