@@ -2744,3 +2744,7 @@ kbd {
     grid-template-columns: 1fr;
   }
 }
+
+.sens-hint {
+  margin: -4px 0 10px;
+}

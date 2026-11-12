@@ -67,7 +67,19 @@ export interface CrosshairSettings {
   centerDot: boolean;
 }
 
+/**
+ * Degrees the view turns per mouse count at sensitivity 1: the same as Valorant, so the same number with the
+ * same DPI turns the same distance (cm per 360°).
+ */
+export const DEG_PER_COUNT = 0.07;
+export const LOOK_RAD_PER_COUNT = (DEG_PER_COUNT * Math.PI) / 180;
+/** Radians per count per sensitivity point before the Valorant scale: old saves are converted with it. */
+const OLD_RAD_PER_COUNT = 0.0005;
+export const SENS_MIN = 0.01;
+export const SENS_MAX = 10;
+
 export interface Settings {
+  /** In Valorant's scale (see DEG_PER_COUNT). */
   sensitivity: number;
   adsSensitivity: number;
   invertY: boolean;
@@ -89,11 +101,14 @@ export interface Settings {
   killfeedSize: number;
   /** Mouse wheel order of the slots (0-1 primaries, 2 pistol, 3 knife). The first one is the starting weapon. */
   wheel: number[];
+  /** Marks a save already in Valorant's scale; without it, the sensitivities are converted once. */
+  sensScale: 'valorant';
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  sensitivity: 2.5,
-  adsSensitivity: 2.5,
+  // About what 2.5 was before the Valorant scale, and Valorant's own default.
+  sensitivity: 1,
+  adsSensitivity: 1,
   invertY: false,
   adsMode: 'hold',
   crouchMode: 'hold',
@@ -145,6 +160,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showDamage: true,
   killfeedSize: 5,
   wheel: [0, 1, 2, 3],
+  sensScale: 'valorant',
 };
 
 export const FPS_LIMITS = [0, 30, 60, 90, 120, 144, 165, 240];
@@ -173,8 +189,14 @@ function sanitize(raw: unknown): Settings {
     return typeof v === 'number' && Number.isFinite(v) ? clamp(v, min, max) : def;
   };
   const bool = (k: string, def: boolean): boolean => (typeof r[k] === 'boolean' ? (r[k] as boolean) : def);
-  s.sensitivity = num('sensitivity', 0.1, 10, s.sensitivity);
-  s.adsSensitivity = num('adsSensitivity', 0.1, 10, s.adsSensitivity);
+  // A save from before keeps its feel: the same turn per mouse count, in the new numbers.
+  const k = r.sensScale === 'valorant' ? 1 : OLD_RAD_PER_COUNT / LOOK_RAD_PER_COUNT;
+  const sens = (key: string, def: number): number => {
+    const v = r[key];
+    return typeof v === 'number' && Number.isFinite(v) ? clamp(Math.round(v * k * 1000) / 1000, SENS_MIN, SENS_MAX) : def;
+  };
+  s.sensitivity = sens('sensitivity', s.sensitivity);
+  s.adsSensitivity = sens('adsSensitivity', s.adsSensitivity);
   s.invertY = bool('invertY', s.invertY);
   s.adsMode = r.adsMode === 'toggle' ? 'toggle' : 'hold';
   s.crouchMode = r.crouchMode === 'toggle' ? 'toggle' : 'hold';

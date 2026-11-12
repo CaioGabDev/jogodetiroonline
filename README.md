@@ -370,9 +370,9 @@ o PeerJS passa a registrar tudo no console.
 Ficam salvas no `localStorage` e são aplicadas na hora:
 
 - Com uma conta, as configurações também ficam salvas nela e acompanham o jogador em outros dispositivos.
-- **Controles:** sensibilidade (0,1–10, slider + campo numérico), sensibilidade de mira (escalada pelo zoom),
+- **Controles:** sensibilidade na **mesma escala do Valorant** (0,07° por contagem do mouse: o mesmo número com o mesmo DPI gira igual; a tela mostra os cm por volta), com 3 casas decimais, sensibilidade de mira (escalada pelo zoom),
   inverter Y, remapear todas as teclas (2 por ação, inclusive botões do mouse), segurar/alternar para mirar e agachar.
-- **Vídeo:** FOV (70–110), qualidade baixa/média/alta (sombras, pixel ratio, antialias), sombras liga/desliga,
+- **Vídeo:** FOV horizontal (70–110; 103 é o do Valorant), qualidade baixa/média/alta (sombras, pixel ratio, antialias), sombras liga/desliga,
   limite de FPS e escala de resolução.
 - **Áudio:** volume geral, efeitos e interface.
 - **Mira:** cruz, ponto ou círculo; cor, tamanho, espessura, gap, contorno e ponto central, com pré-visualização.

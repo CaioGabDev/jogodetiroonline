@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
-import { keyLabel, settings, type Action } from '../core/settings';
+import { LOOK_RAD_PER_COUNT, keyLabel, settings, type Action } from '../core/settings';
 import { clamp, damp, now, r2, r3, r5 } from '../core/util';
 import { ROUND, inRect, siteAt } from './bomb';
 import { Radar } from '../ui/radar';
@@ -31,7 +31,6 @@ export interface GameDeps {
   scoreboard: Scoreboard;
 }
 
-const LOOK_SCALE = 0.0005;
 const SWITCH_MS = 380;
 /** How long the knife stays out after a quick melee. */
 const MELEE_MS = 450;
@@ -1200,8 +1199,8 @@ export class Game {
     if (this.alive && !this.ended) {
       const zoom = 1 + (def.zoom - 1) * this.aimT;
       const sens = (this.aimT > 0.5 ? s.adsSensitivity / zoom : s.sensitivity) * (dazed ? CONCUSSED_LOOK : 1);
-      this.yaw -= mdx * sens * LOOK_SCALE;
-      this.pitch -= mdy * sens * LOOK_SCALE * (s.invertY ? -1 : 1);
+      this.yaw -= mdx * sens * LOOK_RAD_PER_COUNT;
+      this.pitch -= mdy * sens * LOOK_RAD_PER_COUNT * (s.invertY ? -1 : 1);
       this.pitch = clamp(this.pitch, -1.55, 1.55);
     }
 

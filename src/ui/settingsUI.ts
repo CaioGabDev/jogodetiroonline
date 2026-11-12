@@ -1,6 +1,8 @@
 import {
   ACTION_LABELS,
+  DEG_PER_COUNT,
   FPS_LIMITS,
+  SENS_MIN,
   keyLabel,
   settings,
   type Action,
@@ -136,6 +138,12 @@ export class SettingsUI {
 
   // ------------------------------------------------------------------ widgets
 
+  /** How far the mouse travels for a full turn, at the usual DPIs. */
+  private sensInfo(sens: number): string {
+    const cm = (dpi: number): string => ((360 / (sens * DEG_PER_COUNT * dpi)) * 2.54).toFixed(1).replace('.', ',');
+    return `Uma volta (360°): ${cm(400)} cm a 400 DPI · ${cm(800)} cm a 800 DPI · ${cm(1600)} cm a 1600 DPI. No Firefox o Windows ainda mexe no mouse: deixe a velocidade do ponteiro em 6/11 e "Aprimorar precisão" desligado.`;
+  }
+
   private row(label: string, control: HTMLElement, hint?: string): HTMLElement {
     return el('div', { class: 'set-row' }, [
       el('label', { class: 'set-label' }, [label, hint ? el('small', { text: hint }) : null]),
@@ -224,15 +232,21 @@ export class SettingsUI {
 
   private renderControls(s: Settings): void {
     const c = this.content;
+    const sensInfo = el('p', { class: 'hint sens-hint', text: this.sensInfo(s.sensitivity) });
     c.append(
       el('h3', { text: 'Mouse' }),
       this.row(
         'Sensibilidade',
-        this.slider(0.1, 10, 0.05, s.sensitivity, (v) => settings.update((d) => (d.sensitivity = v))),
+        this.slider(SENS_MIN, 5, 0.001, s.sensitivity, (v) => {
+          settings.update((d) => (d.sensitivity = v));
+          sensInfo.textContent = this.sensInfo(v);
+        }),
+        'Mesma escala do Valorant: o mesmo número com o mesmo DPI gira igual',
       ),
+      sensInfo,
       this.row(
         'Sensibilidade na mira (ADS)',
-        this.slider(0.1, 10, 0.05, s.adsSensitivity, (v) => settings.update((d) => (d.adsSensitivity = v))),
+        this.slider(SENS_MIN, 5, 0.001, s.adsSensitivity, (v) => settings.update((d) => (d.adsSensitivity = v))),
         'Escalada automaticamente pelo zoom de cada arma',
       ),
       this.row('Inverter eixo Y', this.toggle(s.invertY, (v) => settings.update((d) => (d.invertY = v)))),
@@ -339,7 +353,7 @@ export class SettingsUI {
 
   private renderVideo(s: Settings): void {
     this.content.append(
-      this.row('Campo de visão (FOV)', this.slider(70, 110, 1, s.fov, (v) => settings.update((d) => (d.fov = v)))),
+      this.row('Campo de visão (FOV)', this.slider(70, 110, 1, s.fov, (v) => settings.update((d) => (d.fov = v))), 'Horizontal: 103 é o mesmo do Valorant'),
       this.row(
         'Qualidade',
         this.segmented(
