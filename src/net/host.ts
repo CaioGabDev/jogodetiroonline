@@ -37,6 +37,7 @@ import { MAPS, type MapDef, type SpawnDef } from '../game/mapData';
 import { CollisionWorld, eyeHeight } from '../game/physics';
 import { PositionHistory, rayPlayer } from '../game/hitbox';
 import { DEFAULT_SKIN } from '../game/progression';
+import { DEFAULT_PRACTICE, DRILL_COUNTDOWN_MS, DRILL_TARGETS, LEVELS, PRACTICE_LEVELS, type LevelTuning, type PracticeSetup } from '../game/practice';
 import { DEFAULT_LOADOUT, W, WEAPONS, allowedWeapons, blastDamage, damageAt, fullAmmo, gunGameLadder, spawnEquipment, stunMs, validLoadout } from '../game/weapons';
 import { ITEM, MAX_THROWN, ROUND, SHOP, gunHit, inRect, isThrowable, isWeaponItem, lossBonus, siteAt } from '../game/bomb';
 import { clamp, now, r2, r3, randomCode, sanitizeText } from '../core/util';
@@ -85,6 +86,24 @@ interface Bot {
   speed: number;
   phase: number;
   crouch: boolean;
+  /** Duel: when it first saw its target (0 = not seeing anyone) and when it may shoot again. */
+  seenAt: number;
+  nextShotAt: number;
+  /** Reflex drill: when the target came up and when it goes down by itself. */
+  upAt: number;
+  downAt: number;
+}
+
+/** One run of the reflex drill. */
+interface Drill {
+  running: boolean;
+  goAt: number;
+  nextAt: number;
+  shown: number;
+  kills: number;
+  reactions: number[];
+  /** The use key went down since the last tick. Kept until read, so a quick tap between ticks still counts. */
+  pressed: boolean;
 }
 
 interface SPlayer {
@@ -259,7 +278,9 @@ export interface HostCallbacks {
   onStatus?(text: string): void;
 }
 
-const BOT_DEFS: Array<Omit<Bot, 'phase'> & { name: string }> = [
+type BotDef = Omit<Bot, 'phase' | 'seenAt' | 'nextShotAt' | 'upAt' | 'downAt'> & { name: string };
+
+const BOT_DEFS: BotDef[] = [
   { name: 'Alvo Parado', ax: 0, az: -12, bx: 0, bz: -12, y: 0, speed: 0, crouch: false },
   { name: 'Alvo Móvel', ax: -4, az: 11, bx: 4, bz: 11, y: 0, speed: 2.5, crouch: false },
   { name: 'Alvo Agachado', ax: 18, az: -6, bx: 18, bz: 6, y: 0, speed: 1.5, crouch: true },
@@ -291,11 +312,13 @@ export class HostServer {
   private round: Round = this.newRound();
   private drops: Drop[] = [];
   private nextDrop = 1;
+  private drill: Drill = { running: false, goAt: 0, nextAt: 0, shown: 0, kills: 0, reactions: [], pressed: false };
 
   constructor(
     offline: boolean,
     private cb: HostCallbacks = {},
     practiceMap: MapId = DEFAULT_CONFIG.map,
+    private practice: PracticeSetup = DEFAULT_PRACTICE,
   ) {
     this.offline = offline;
     // Practice on a bomb map is the real mode, against targets that stand in the defenders' spawn.
@@ -306,6 +329,15 @@ export class HostServer {
 
   private get bombMode(): boolean {
     return this.config.mode === 'bomb';
+  }
+
+  /** Practice modes only run on the deathmatch maps; bomb maps have their own. */
+  private get drillMode(): PracticeSetup['mode'] {
+    return this.offline && !this.bombMode ? this.practice.mode : 'alvos';
+  }
+
+  private get tuning(): LevelTuning {
+    return LEVELS[this.practice.level];
   }
 
   private get frozen(): boolean {
@@ -512,18 +544,22 @@ export class HostServer {
   }
 
   private addBots(): void {
-    BOT_DEFS.forEach((d, i) => {
+    const mode = this.drillMode;
+    const count = mode === 'duelo' ? this.tuning.duelists : mode === 'aleatorio' ? 6 : mode === 'reflexo' ? 3 : BOT_DEFS.length;
+    const label = mode === 'duelo' ? 'Inimigo' : 'Alvo';
+    for (let i = 0; i < count; i++) {
+      const d: BotDef = mode === 'alvos' ? BOT_DEFS[i] : { ...BOT_DEFS[0], name: `${label} ${i + 1}` };
       const id = this.nextId++;
-      const bot: Bot = { ...this.botSpot(d, i), phase: Math.random() * Math.PI * 2 };
+      const bot: Bot = { ...this.botSpot(d, i), phase: Math.random() * Math.PI * 2, seenAt: 0, nextShotAt: 0, upAt: 0, downAt: 0 };
       const p = this.createPlayer(id, d.name, null, bot);
       p.info.color = '#c9a227';
       p.info.team = 'blue';
       this.players.set(id, p);
-    });
+    }
   }
 
   /** BOT_DEFS were placed by hand on the Arena. Elsewhere targets use the spawns, which are clear on every map. */
-  private botSpot(d: (typeof BOT_DEFS)[number], i: number): (typeof BOT_DEFS)[number] {
+  private botSpot(d: BotDef, i: number): BotDef {
     if (this.config.map === 'arena') return d;
     if (this.map.bomb) {
       const [ax, y, az] = this.map.teamSpawns.blue[i].pos;
@@ -795,6 +831,7 @@ export class HostServer {
 
   private chooseSpawn(p: SPlayer): SpawnDef {
     if (p.bot) {
+      if (this.drillMode !== 'alvos') this.placeBot(p, p.bot, 10, 45);
       return { pos: [p.bot.ax, p.bot.y, p.bot.az], yaw: Math.atan2(p.bot.ax, p.bot.az) };
     }
     const side = p.info.team === this.round.attackers ? this.map.teamSpawns.red : this.map.teamSpawns.blue;
@@ -820,6 +857,11 @@ export class HostServer {
       this.sendKit(p);
       this.sendRound();
       this.sendDrops();
+      return;
+    }
+    // Reflex targets wait out of sight until the drill brings them up.
+    if (p.bot && this.drillMode === 'reflexo') {
+      this.hideBot(p);
       return;
     }
     if (p.bot || this.config.arsenal !== 'all') {
@@ -881,6 +923,7 @@ export class HostServer {
     p.yaw = m.yw;
     p.pitch = clamp(m.pt, -1.6, 1.6);
     p.ads = m.a;
+    if (m.u && !p.using && !p.bot) this.drill.pressed = true;
     p.using = m.u;
     if (m.w !== p.weapon && this.allowed(p).includes(m.w)) {
       p.weapon = m.w;
@@ -987,6 +1030,8 @@ export class HostServer {
     const take = def.infiniteReserve ? need : Math.min(need, p.reserve[w]);
     p.mag[w] += take;
     if (!def.infiniteReserve) p.reserve[w] -= take;
+    // Practice never runs out.
+    if (this.offline) p.reserve[w] = Math.max(p.reserve[w], def.reserve);
     p.reloadW = -1;
     this.sendAmmo(p);
   }
@@ -1285,6 +1330,7 @@ export class HostServer {
     victim.deaths++;
     victim.reloadW = -1;
     victim.respawnAt = this.bombMode ? 0 : now() + RESPAWN_MS;
+    if (victim.bot && this.drillMode !== 'alvos') this.botKilled(victim, victim.bot);
     const suicide = killer === victim;
     const teamKill = teamMode(this.config.mode) && killer.info.team === victim.info.team;
     // In the bomb mode kills pay money, and it's rounds that score.
@@ -1299,6 +1345,11 @@ export class HostServer {
       if (hs) killer.headshots++;
       if (this.config.arsenal === 'gungame') this.gunGameKill(killer, victim, w);
       this.teamScore[scoreIndex(killer.info.team)] += point;
+      // Deathmatch and practice: a kill gives full health and a full weapon. The bomb mode has its economy instead.
+      if (!this.bombMode && killer.alive && !killer.bot) {
+        killer.hp = MAX_HP;
+        if (this.refillEquipped(killer)) this.sendAmmo(killer);
+      }
     }
     if (this.bombMode) {
       if (teamKill && !suicide) this.pay(killer, -ROUND.teamKillFine);
@@ -1767,10 +1818,197 @@ export class HostServer {
     }
   }
 
+  // ---------------------------------------------------------------- practice
+
+  /** A clear spot with floor under it, near a spawn, at a distance from every human. */
+  private findSpot(minDist: number, maxDist: number, seen: boolean): [number, number, number] | null {
+    const humans = [...this.players.values()].filter((o) => !o.bot && o.alive);
+    const bots = [...this.players.values()].filter((o) => o.bot && o.alive);
+    const bases = [...this.map.ffaSpawns, ...this.map.teamSpawns.red, ...this.map.teamSpawns.blue].map((s) => s.pos);
+    for (let i = 0; i < 60; i++) {
+      const [bx, by, bz] = bases[Math.floor(Math.random() * bases.length)];
+      const a = Math.random() * Math.PI * 2;
+      const r = i < 40 ? Math.random() * 4 : 0;
+      const x = bx + Math.cos(a) * r;
+      const z = bz + Math.sin(a) * r;
+      const y = r === 0 ? by : this.world.groundHeight(x, z, by + 0.6, 1.5);
+      if (!Number.isFinite(y) || Math.abs(y - by) > 0.7 || this.world.overlapsSolid(x, y + 0.05, z, PLAYER.height - 0.1, PLAYER.radius)) continue;
+      if (bots.some((o) => Math.hypot(o.x - x, o.z - z) < 2.5)) continue;
+      const ok = humans.every((h) => {
+        const d = Math.hypot(h.x - x, h.z - z);
+        if (d < minDist || d > maxDist) return false;
+        return !seen || this.world.lineOfSight(h.x, h.y + eyeHeight(h.crouch), h.z, x, y + 1.3, z);
+      });
+      if (ok) return [x, y, z];
+    }
+    return null;
+  }
+
+  /** Moves a target to a new spot, with a short side-to-side path when there is room. */
+  private placeBot(p: SPlayer, b: Bot, minDist: number, maxDist: number, seen = false): boolean {
+    const spot = this.findSpot(minDist, maxDist, seen) ?? this.findSpot(4, 200, false);
+    if (!spot) return false;
+    const [x, y, z] = spot;
+    b.ax = b.bx = x;
+    b.az = b.bz = z;
+    b.y = y;
+    b.speed = 0;
+    if (this.drillMode !== 'reflexo') {
+      const a = Math.random() * Math.PI * 2;
+      const len = 2 + Math.random() * 2;
+      const ex = x + Math.cos(a) * len;
+      const ez = z + Math.sin(a) * len;
+      const ey = this.world.groundHeight(ex, ez, y + 0.6, 1.5);
+      if (Number.isFinite(ey) && Math.abs(ey - y) < 0.3 && this.world.lineOfSight(x, y + 1, z, ex, y + 1, ez) && !this.world.overlapsSolid(ex, y + 0.05, ez, PLAYER.height - 0.1, PLAYER.radius)) {
+        b.bx = ex;
+        b.bz = ez;
+        b.speed = this.tuning.strafe;
+      }
+    }
+    p.x = x;
+    p.y = y;
+    p.z = z;
+    return true;
+  }
+
+  private hideBot(p: SPlayer): void {
+    p.alive = false;
+    p.respawnAt = 0;
+    p.y = -50;
+    p.history.clear();
+    p.history.push({ t: now(), x: p.x, y: p.y, z: p.z, yaw: p.yaw, crouch: false });
+  }
+
+  private botKilled(p: SPlayer, b: Bot): void {
+    if (this.drillMode !== 'reflexo') {
+      p.respawnAt = now() + this.tuning.respawnMs;
+      return;
+    }
+    if (this.drill.running && b.upAt > 0) {
+      this.drill.kills++;
+      this.drill.reactions.push(now() - b.upAt);
+    }
+    b.upAt = 0;
+    this.hideBot(p);
+  }
+
+  private tell(text: string): void {
+    this.broadcast({ type: 'sys', text });
+  }
+
+  /** Duelists shoot the closest human they can see, after a reaction time. */
+  private botFire(p: SPlayer, b: Bot, t: number): void {
+    const lv = this.tuning;
+    const ex = p.x;
+    const ey = p.y + eyeHeight(p.crouch);
+    const ez = p.z;
+    let target: SPlayer | null = null;
+    let best = Infinity;
+    for (const o of this.players.values()) {
+      if (o.bot || !o.alive) continue;
+      const d = Math.hypot(o.x - ex, o.z - ez);
+      if (d < best && d < 70 && this.world.lineOfSight(ex, ey, ez, o.x, o.y + 1.2, o.z)) {
+        best = d;
+        target = o;
+      }
+    }
+    if (!target) {
+      b.seenAt = 0;
+      return;
+    }
+    if (b.seenAt === 0) b.seenAt = t;
+    if (t - b.seenAt < lv.reaction || t < b.nextShotAt) return;
+    b.nextShotAt = t + lv.fireMs * (0.8 + Math.random() * 0.4);
+
+    const hit = Math.random() < lv.accuracy * clamp(1.25 - best / 40, 0.35, 1.2);
+    const head = hit && Math.random() < lv.headshot;
+    const aimY = target.y + (head ? eyeHeight(target.crouch) : target.crouch ? 0.8 : 1.15);
+    let tx = target.x;
+    let ty = aimY;
+    let tz = target.z;
+    if (!hit) {
+      // A miss goes past the target, not into it.
+      const side = (Math.random() < 0.5 ? -1 : 1) * (0.6 + Math.random() * 0.8);
+      const len = Math.max(best, 0.1);
+      tx += (-(target.z - ez) / len) * side;
+      tz += ((target.x - ex) / len) * side;
+      ty += (Math.random() - 0.4) * 0.8;
+    }
+    let dx = tx - ex;
+    let dy = ty - ey;
+    let dz = tz - ez;
+    const len = Math.hypot(dx, dy, dz);
+    dx /= len;
+    dy /= len;
+    dz /= len;
+    const end = hit ? len : 80;
+    const wall = hit ? null : this.world.raycast(ex, ey, ez, dx, dy, dz, end);
+    const dist = wall ? wall.dist : end;
+    this.broadcast({
+      type: 'shot',
+      i: p.info.id,
+      w: W.RIFLE,
+      o: [r2(ex), r2(ey), r2(ez)],
+      e: [r2(ex + dx * dist), r2(ey + dy * dist), r2(ez + dz * dist)],
+      h: [hit ? 2 : wall ? 1 : 0],
+      n: wall ? [wall.nx, wall.ny, wall.nz] : [0, 0, 0],
+    });
+    if (hit) this.dealDamage(p, new Map([[target, { dmg: lv.damage * (head ? 2 : 1), hs: head }]]), W.RIFLE);
+  }
+
+  /** Reflex drill: press E, targets come up one after another in sight, and each one is up for a moment only. */
+  private updateDrill(t: number): void {
+    if (this.drillMode !== 'reflexo') return;
+    const d = this.drill;
+    const human = [...this.players.values()].find((o) => !o.bot);
+    const pressed = d.pressed;
+    d.pressed = false;
+    const targets = [...this.players.values()].filter((o) => o.bot);
+    if (!d.running) {
+      if (!pressed || !human?.alive) return;
+      targets.forEach((o) => this.hideBot(o));
+      this.drill = { running: true, goAt: t + DRILL_COUNTDOWN_MS, nextAt: t + DRILL_COUNTDOWN_MS, shown: 0, kills: 0, reactions: [], pressed: false };
+      this.tell(`Reflexo ${PRACTICE_LEVELS[this.practice.level]}: ${DRILL_TARGETS} alvos. Começa em 3 segundos!`);
+      return;
+    }
+    if (t < d.goAt) return;
+    const lv = this.tuning;
+    for (const o of targets) {
+      if (o.alive && o.bot && o.bot.downAt > 0 && t >= o.bot.downAt) {
+        o.bot.upAt = 0;
+        this.hideBot(o);
+      }
+    }
+    const up = targets.filter((o) => o.alive).length;
+    const idle = targets.find((o) => !o.alive);
+    if (d.shown < DRILL_TARGETS && up < lv.together && idle?.bot && t >= d.nextAt) {
+      if (this.placeBot(idle, idle.bot, 7, 32, true)) {
+        idle.hp = 1;
+        idle.alive = true;
+        idle.protectedUntil = 0;
+        idle.bot.upAt = t;
+        idle.bot.downAt = t + lv.lifeMs;
+        idle.history.clear();
+        idle.history.push({ t, x: idle.x, y: idle.y, z: idle.z, yaw: idle.yaw, crouch: false });
+        d.shown++;
+      }
+      d.nextAt = t + lv.gapMs * (0.6 + Math.random() * 0.8);
+    }
+    if (d.shown >= DRILL_TARGETS && up === 0) {
+      d.running = false;
+      const avg = d.reactions.length ? Math.round(d.reactions.reduce((a, b) => a + b, 0) / d.reactions.length) : 0;
+      const bestMs = d.reactions.length ? Math.round(Math.min(...d.reactions)) : 0;
+      const pct = Math.round((d.kills / DRILL_TARGETS) * 100);
+      this.tell(d.kills ? `Fim: ${d.kills}/${DRILL_TARGETS} (${pct}%) · reação média ${avg} ms · melhor ${bestMs} ms` : `Fim: 0/${DRILL_TARGETS}. Bora de novo!`);
+      this.tell('Aperte E para tentar de novo.');
+    }
+  }
+
   private updateBots(t: number): void {
     for (const p of this.players.values()) {
       const b = p.bot;
       if (!b || !p.alive) continue;
+      if (this.drillMode === 'duelo') this.botFire(p, b, t);
       if (b.speed > 0) {
         const len = Math.hypot(b.bx - b.ax, b.bz - b.az);
         const k = (Math.sin((t / 1000) * (b.speed / Math.max(len, 0.1)) * Math.PI + b.phase) + 1) / 2;
@@ -1817,6 +2055,7 @@ export class HostServer {
         }
       });
       this.updateBots(t);
+      this.updateDrill(t);
       this.updateProjectiles(t);
       this.updateFires(t);
       if (this.endsAt > 0 && t >= this.endsAt) this.endMatch('time');

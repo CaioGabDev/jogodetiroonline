@@ -1,7 +1,8 @@
 import { progress } from '../core/progress';
 import { loadColor, loadNick, saveColor, saveNick } from '../core/settings';
 import { normalizeCode, sanitizeText } from '../core/util';
-import { ARSENAL_NAMES, FFA_COLORS, MAP_NAMES, MAX_PLAYERS, NAME_MAX, type MapId } from '../game/constants';
+import { ARSENAL_NAMES, BOMB_MAPS, FFA_COLORS, MAP_NAMES, MAX_PLAYERS, NAME_MAX, type MapId } from '../game/constants';
+import { PRACTICE_LEVELS, PRACTICE_MODES, type PracticeLevel, type PracticeMode, type PracticeSetup } from '../game/practice';
 import { skinById } from '../game/progression';
 import { rankOf } from '../game/ranks';
 import type { Profile } from '../net/account';
@@ -14,7 +15,7 @@ import { rankBadge } from './rankBadge';
 export interface MenuCallbacks {
   onCreate(nick: string, color: string): void;
   onJoin(nick: string, color: string, code: string): void;
-  onPractice(nick: string, color: string, map: MapId): void;
+  onPractice(nick: string, color: string, map: MapId, setup: PracticeSetup): void;
   onSettings(): void;
   onArmory(): void;
   onLogin(): void;
@@ -165,12 +166,28 @@ export class MainMenu {
       { attrs: { 'aria-label': 'Mapa do treino' } },
       (Object.keys(MAP_NAMES) as MapId[]).map((id) => el('option', { text: MAP_NAMES[id], attrs: { value: id } })),
     );
+    const options = <T extends string>(label: string, names: Record<T, string>): HTMLSelectElement =>
+      el(
+        'select',
+        { attrs: { 'aria-label': label } },
+        (Object.keys(names) as T[]).map((id) => el('option', { text: names[id], attrs: { value: id } })),
+      );
+    const practiceMode = options('Modo do treino', PRACTICE_MODES);
+    const practiceLevel = options('Dificuldade do treino', PRACTICE_LEVELS);
+    // Bomb maps have their own practice, with the real round rules.
+    const syncPractice = (): void => {
+      const bomb = BOMB_MAPS.includes(practiceMap.value as MapId);
+      practiceMode.disabled = practiceLevel.disabled = bomb;
+      practiceMode.title = bomb ? 'Nos mapas do modo Bomba o treino é a partida de verdade' : '';
+    };
+    practiceMap.addEventListener('change', syncPractice);
+    syncPractice();
     const practice = el('button', {
       class: 'btn',
       text: 'Treinar',
       onClick: () => {
         const n = validNick();
-        if (n) cb.onPractice(n, this.color, practiceMap.value as MapId);
+        if (n) cb.onPractice(n, this.color, practiceMap.value as MapId, { mode: practiceMode.value as PracticeMode, level: practiceLevel.value as PracticeLevel });
       },
     });
 
@@ -188,6 +205,7 @@ export class MainMenu {
       el('div', { class: 'join-row' }, [this.code, join]),
       el('div', { class: 'menu-divider', text: 'ou treine sozinho, contra alvos' }),
       el('div', { class: 'join-row practice-row' }, [practiceMap, practice]),
+      el('div', { class: 'join-row practice-row' }, [practiceMode, practiceLevel]),
       this.status,
       this.error,
     ]);

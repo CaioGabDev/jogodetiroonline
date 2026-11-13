@@ -8,6 +8,7 @@ import { GameLoop } from './core/loop';
 import { normalizeCode } from './core/util';
 import { teamMode, type GameMode, type MapId } from './game/constants';
 import { Game } from './game/game';
+import type { PracticeSetup } from './game/practice';
 import { rankOf } from './game/ranks';
 import { HostServer } from './net/host';
 import { RoomBrowser } from './net/directory';
@@ -85,7 +86,7 @@ class App {
     this.menu = new MainMenu(ui, {
       onCreate: (n, c) => void this.createRoom(n, c),
       onJoin: (n, c, code) => void this.joinRoom(n, c, code),
-      onPractice: (n, c, map) => void this.practice(n, c, map),
+      onPractice: (n, c, map, setup) => void this.practice(n, c, map, setup),
       onSettings: () => this.settingsUI.open(),
       onArmory: () => this.armory.open(),
       onLogin: () => this.auth.open(),
@@ -296,11 +297,11 @@ class App {
     this.busy = false;
   }
 
-  private async practice(nick: string, color: string, map: MapId): Promise<void> {
+  private async practice(nick: string, color: string, map: MapId, setup: PracticeSetup): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     audio.unlock();
-    const host = new HostServer(true, {}, map);
+    const host = new HostServer(true, {}, map, setup);
     await host.start();
     this.host = host;
     const ok = await this.connectLocal(host, nick, color);
