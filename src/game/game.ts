@@ -478,6 +478,8 @@ export class Game {
       this.viewmodel.visible = false;
       audio.death();
     } else if (k === this.localId) {
+      // Outside the bomb mode the host just refilled the weapon in hand; a reload finishing now would add to it.
+      if (!this.bombMode && this.reloadW === this.weapon) this.reloadW = -1;
       this.hud.notify(`Você eliminou ${victim.name}${hs ? ' (HEADSHOT)' : ''}`);
     }
   }
