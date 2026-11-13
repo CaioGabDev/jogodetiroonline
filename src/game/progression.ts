@@ -71,6 +71,9 @@ export interface MatchStats {
   damage: number;
   won: boolean;
   mvp: boolean;
+  shots: number;
+  hits: number;
+  headHits: number;
 }
 
 export interface Reward {

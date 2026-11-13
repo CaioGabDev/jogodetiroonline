@@ -82,6 +82,8 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 
 **Vida:** 100 pontos, que regeneram sozinhos depois de 5 s sem levar dano.
 
+**Perfil:** mostra K/D, acertos na cabeça, precisão, abates com headshot, taxa de vitória, abates e dano por partida, MVPs e melhor partida. Com conta, os números ficam no Supabase; como convidado, neste navegador.
+
 **Itens no chão** (reaparecem em 20 s): a munição recarrega por completo a arma em mãos.
 
 Headshot multiplica o dano por um valor de cada arma (de 1,25× na LMG a 2× na Desert Eagle), e a partir de certa distância o dano cai. Os números ficam em `src/game/weapons.ts`. O lança-granadas não fere quem atirou.

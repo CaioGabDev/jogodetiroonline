@@ -1,4 +1,5 @@
 import { account } from './account';
+import { EMPTY_STATS, type CareerStats } from '../game/stats';
 import { supabase } from './supabase';
 
 export interface RankRow {
@@ -46,6 +47,9 @@ export interface MatchReport {
   headshots: number;
   damage: number;
   mvp: boolean;
+  shots: number;
+  hits: number;
+  headHits: number;
   mode: RankedMode;
   result: MatchResult;
 }
@@ -73,6 +77,9 @@ export async function submitMatch(r: MatchReport): Promise<MatchPayout | null> {
     p_headshots: r.headshots,
     p_damage: Math.round(r.damage),
     p_mvp: r.mvp,
+    p_shots: r.shots,
+    p_hits: r.hits,
+    p_head_hits: r.headHits,
   });
   if (error || !data || typeof data !== 'object') {
     if (error) console.warn('Partida recusada pelo ranking', error.message);
@@ -96,4 +103,35 @@ export async function loadMyRating(): Promise<number | null> {
   const { data, error } = await supabase.from('player_stats').select('rating').eq('user_id', id).maybeSingle();
   if (error) console.warn('Falha ao carregar o elo', error.message);
   return error ? null : ((data?.rating as number | undefined) ?? 0);
+}
+
+/** The logged-in player's career totals. Null when they couldn't be read. */
+export async function loadMyStats(): Promise<CareerStats | null> {
+  const id = account.profile?.id;
+  if (!supabase || !id) return null;
+  const { data, error } = await supabase
+    .from('player_stats')
+    .select('matches, wins, kills, deaths, headshots, damage, shots, hits, head_hits, mvps, best_kills')
+    .eq('user_id', id)
+    .maybeSingle();
+  if (error) {
+    console.warn('Falha ao carregar as estatísticas', error.message);
+    return null;
+  }
+  if (!data) return { ...EMPTY_STATS };
+  const d = data as Record<string, unknown>;
+  const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || 0);
+  return {
+    matches: n(d.matches),
+    wins: n(d.wins),
+    kills: n(d.kills),
+    deaths: n(d.deaths),
+    headshots: n(d.headshots),
+    damage: n(d.damage),
+    shots: n(d.shots),
+    hits: n(d.hits),
+    headHits: n(d.head_hits),
+    mvps: n(d.mvps),
+    bestKills: n(d.best_kills),
+  };
 }

@@ -285,9 +285,13 @@ export class MainMenu {
       tags.push(el('span', { class: 'pc-elo' }, [rankBadge(elo), el('span', { text: elo.label })]));
     }
     const actions: HTMLElement[] = [];
-    if (this.accountAvailable && !p) {
-      actions.push(el('button', { class: 'btn small primary', text: 'Entrar', title: 'Guarde seu progresso numa conta', onClick: () => this.cb.onLogin() }));
-    } else if (p) {
+    if (!p) {
+      // Guests have stats too, kept in this browser.
+      actions.push(el('button', { class: 'btn small', text: 'Perfil', title: 'Suas estatísticas', onClick: () => this.cb.onProfile() }));
+      if (this.accountAvailable) {
+        actions.push(el('button', { class: 'btn small primary', text: 'Entrar', title: 'Guarde seu progresso numa conta', onClick: () => this.cb.onLogin() }));
+      }
+    } else {
       actions.push(
         el('button', { class: 'btn small', text: 'Perfil', onClick: () => this.cb.onProfile() }),
         el('button', { class: 'btn small ghost', text: 'Sair', onClick: () => this.cb.onLogout() }),

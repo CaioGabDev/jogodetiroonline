@@ -471,7 +471,7 @@ class App {
     if (lobby.players.filter((p) => !p.bot).length < 2) {
       return this.results.setRewards(null, 'Só partidas com outro jogador dão XP e moedas.');
     }
-    const stats: MatchStats = { kills: row.kills, deaths: row.deaths, headshots: row.headshots, damage: row.damage, won, mvp: m.mvp === localId };
+    const stats: MatchStats = { kills: row.kills, deaths: row.deaths, headshots: row.headshots, damage: row.damage, won, mvp: m.mvp === localId, shots: row.shots, hits: row.hits, headHits: row.headHits };
     if (!account.profile) {
       const note = account.available ? 'Entre numa conta para guardar o progresso e aparecer no ranking.' : '';
       return this.results.setRewards(progress.addMatch(stats), note);
