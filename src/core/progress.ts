@@ -1,3 +1,4 @@
+import { EMPTY_STATS, type CareerStats } from '../game/stats';
 import {
   DEFAULT_SKIN,
   LEVEL_UP_COINS,
@@ -22,6 +23,8 @@ export interface ProgressData {
   /** Skins bought. Level skins are owned by reaching the level and are not listed. */
   bought: string[];
   equipped: string;
+  /** Career totals; only shown for guests, an account reads them from player_stats. */
+  career: CareerStats;
   matches: number;
   wins: number;
   kills: number;
@@ -59,7 +62,7 @@ export interface ServerMatch {
 }
 
 function fresh(): ProgressData {
-  return { xp: 0, coins: 0, bought: [], equipped: DEFAULT_SKIN, matches: 0, wins: 0, kills: 0 };
+  return { xp: 0, coins: 0, bought: [], equipped: DEFAULT_SKIN, career: { ...EMPTY_STATS }, matches: 0, wins: 0, kills: 0 };
 }
 
 const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
@@ -73,6 +76,12 @@ export function sanitizeProgress(raw: unknown): ProgressData {
   d.matches = count(r.matches);
   d.wins = count(r.wins);
   d.kills = count(r.kills);
+  const c = r.career && typeof r.career === 'object' ? (r.career as Record<string, unknown>) : {};
+  for (const k of Object.keys(EMPTY_STATS) as Array<keyof CareerStats>) d.career[k] = count(c[k]);
+  // Saves from before the career totals already had these three.
+  d.career.matches = Math.max(d.career.matches, d.matches);
+  d.career.wins = Math.max(d.career.wins, d.wins);
+  d.career.kills = Math.max(d.career.kills, d.kills);
   if (Array.isArray(r.bought)) d.bought = [...new Set(r.bought.filter(isSkinId))];
   if (isSkinId(r.equipped)) d.equipped = r.equipped;
   return d;
@@ -123,6 +132,11 @@ class ProgressStore {
   get equipped(): string {
     return this.data.equipped;
   }
+  /** This browser's career totals (guests). */
+  get career(): CareerStats {
+    return { ...this.data.career };
+  }
+
   get stats(): Pick<ProgressData, 'matches' | 'wins' | 'kills'> {
     return { matches: this.data.matches, wins: this.data.wins, kills: this.data.kills };
   }
@@ -228,6 +242,19 @@ class ProgressStore {
     this.data.matches++;
     if (stats.won) this.data.wins++;
     this.data.kills += Math.max(0, Math.floor(stats.kills) || 0);
+    const c = this.data.career;
+    const add = (v: number): number => Math.max(0, Math.floor(v) || 0);
+    c.matches++;
+    if (stats.won) c.wins++;
+    c.kills += add(stats.kills);
+    c.deaths += add(stats.deaths);
+    c.headshots += add(stats.headshots);
+    c.damage += add(stats.damage);
+    c.shots += add(stats.shots);
+    c.hits += add(stats.hits);
+    c.headHits += add(stats.headHits);
+    if (stats.mvp) c.mvps++;
+    c.bestKills = Math.max(c.bestKills, add(stats.kills));
   }
 
   private summary(reward: Reward, xpBefore: number, levelCoins: number): MatchSummary {

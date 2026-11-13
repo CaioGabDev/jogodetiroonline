@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 15;
+export const PROTOCOL_VERSION = 16;
 /** Prefix added to the room code to form the host's PeerJS id (avoids collisions on the public server). */
 export const PEER_PREFIX = 'arenafps-v1-';
 

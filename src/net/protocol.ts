@@ -77,6 +77,10 @@ export interface ResultRow {
   deaths: number;
   damage: number;
   headshots: number;
+  /** Gun trigger pulls, the ones that hit someone, and those that hit a head. */
+  shots: number;
+  hits: number;
+  headHits: number;
 }
 
 export type RejectReason = 'full' | 'version' | 'name' | 'closed';

@@ -132,6 +132,9 @@ interface SPlayer {
   deaths: number;
   damage: number;
   headshots: number;
+  shots: number;
+  hits: number;
+  headHits: number;
   mag: number[];
   reserve: number[];
   reloadW: number;
@@ -517,6 +520,9 @@ export class HostServer {
       deaths: 0,
       damage: 0,
       headshots: 0,
+      shots: 0,
+      hits: 0,
+      headHits: 0,
       mag: ammo.mag,
       reserve: ammo.reserve,
       reloadW: -1,
@@ -789,6 +795,9 @@ export class HostServer {
       p.deaths = 0;
       p.damage = 0;
       p.headshots = 0;
+      p.shots = 0;
+      p.hits = 0;
+      p.headHits = 0;
       p.alive = false;
       p.y = -50;
     }
@@ -1142,6 +1151,12 @@ export class HostServer {
     }
     this.broadcast({ type: 'shot', i: p.info.id, w, o: [r2(ox), r2(oy), r2(oz)], e, h: hk, n }, p.info.id);
 
+    // Accuracy for the profile: guns only, one count per trigger pull whatever the pellets.
+    if (!def.melee) {
+      p.shots++;
+      if (dmgMap.size > 0) p.hits++;
+      if ([...dmgMap.values()].some((d) => d.hs)) p.headHits++;
+    }
     this.dealDamage(p, dmgMap, w);
   }
 
@@ -1780,6 +1795,9 @@ export class HostServer {
       deaths: p.deaths,
       damage: Math.round(p.damage),
       headshots: p.headshots,
+      shots: p.shots,
+      hits: p.hits,
+      headHits: p.headHits,
     }));
     let winnerTeam: Team | null = null;
     if (teamMode(this.config.mode)) {

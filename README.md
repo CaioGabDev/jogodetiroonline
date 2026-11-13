@@ -86,6 +86,9 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 
 **Treino:** munição infinita e quatro modos (alvos fixos, spawn aleatório, duelo em que os bots atiram em você e reflexo, em que você aperta E e os alvos aparecem por pouco tempo), cada um em Normal, Médio ou Difícil.
 
+**Perfil:** mostra K/D, acertos na cabeça, precisão, abates com headshot, taxa de vitória, abates e dano por partida, MVPs e melhor partida. Com conta, os números ficam no Supabase; como convidado, neste navegador.
+
+
 **Itens no chão** (reaparecem em 20 s): a munição recarrega por completo a arma em mãos.
 
 Headshot multiplica o dano por um valor de cada arma (de 1,25× na LMG a 2× na Desert Eagle), e a partir de certa distância o dano cai. Os números ficam em `src/game/weapons.ts`. O lança-granadas não fere quem atirou.
