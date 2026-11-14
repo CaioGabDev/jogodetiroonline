@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { DEFAULT_SKIN, skinById } from '../game/progression';
+import { DEFAULT_KNIFE, DEFAULT_SKIN, skinById } from '../game/progression';
+import { knifeModel, knifeSwing, releaseKnife, setKnifeInspect } from './knives';
 import { W } from '../game/weapons';
 import { assetsReady, gunAssets } from './assets';
 import { inspectPose, setKit, setKitInspect } from './skinKits';
@@ -151,25 +152,13 @@ function buildSniper(): GunParts {
   return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.78), hipPos: new THREE.Vector3(0.2, -0.2, -0.62), adsPos: new THREE.Vector3(0, -0.085, -0.4), mag };
 }
 
-function buildKnife(): GunParts {
-  // The group's origin is the fist, so swings pivot on the hand and the blade does the sweeping.
+/** The knife in hand: the model of the knife skin, held at the fist so swings pivot on the hand. */
+function buildKnife(model: THREE.Object3D): GunParts {
   const g = new THREE.Group();
-  const profile = new THREE.Shape();
-  profile.moveTo(-0.024, 0);
-  profile.lineTo(0.02, 0);
-  profile.lineTo(0.02, 0.25);
-  profile.lineTo(0.016, 0.31);
-  profile.quadraticCurveTo(-0.024, 0.24, -0.024, 0.14);
-  profile.closePath();
-  const bladeGeo = new THREE.ExtrudeGeometry(profile, { depth: 0.008, bevelEnabled: false });
-  bladeGeo.translate(0, 0.06, -0.004);
-
   // Turned on its long axis so the flat of the blade faces the camera, then tilted up and forward.
   const twist = new THREE.Group();
   twist.rotation.y = 0.85;
-  twist.add(new THREE.Mesh(bladeGeo, steel));
-  twist.add(box(dark, 0.07, 0.012, 0.03, 0, 0.06, 0));
-  twist.add(box(dark, 0.03, 0.13, 0.03, 0, -0.01, 0));
+  twist.add(model);
   twist.add(box(glove, 0.07, 0.09, 0.08, 0, -0.005, 0.008));
   const tilt = new THREE.Group();
   tilt.rotation.x = -0.95;
@@ -319,6 +308,10 @@ export class Viewmodel {
   private skin = '';
   /** How the equipped skin turns the gun when inspected. */
   private inspectStyle = skinById(DEFAULT_SKIN).fx?.inspect ?? 'default';
+  private knifeSkin = DEFAULT_KNIFE;
+  private knifeStyle = skinById(DEFAULT_KNIFE).knife?.inspect ?? 'default';
+  /** The knife model in hand, for its inspection and swing effects. */
+  private blade: THREE.Object3D = knifeModel(skinById(DEFAULT_KNIFE));
 
   constructor(scene: THREE.Scene) {
     this.guns = [
@@ -326,7 +319,7 @@ export class Viewmodel {
       buildPistol(),
       buildShotgun(),
       buildSniper(),
-      buildKnife(),
+      buildKnife(this.blade),
       buildSmg(),
       buildLmg(),
       buildCrossbow(),
@@ -380,8 +373,10 @@ export class Viewmodel {
   private paint(id: string): void {
     const skin = skinById(id);
     this.guns.forEach((g, w) => {
+      // The knife wears the knife skin instead.
+      if (w === W.KNIFE) return;
       applySkin(g.pivot, id, UNSKINNED);
-      setKit(g.pivot, w === W.KNIFE ? skinById(DEFAULT_SKIN) : skin, UNSKINNED);
+      setKit(g.pivot, skin, UNSKINNED);
     });
     this.flash.material.color.set(skin.fx?.flash ?? '#ffffff');
     this.inspectStyle = skin.fx?.inspect ?? 'default';
@@ -394,6 +389,24 @@ export class Viewmodel {
     this.paint(id);
   }
 
+  /** Swaps the knife for the knife skin's own model and finish. */
+  setKnifeSkin(id: string): void {
+    const skin = skinById(id);
+    const next = skin.slot === 'faca' ? skin : skinById(DEFAULT_KNIFE);
+    if (next.id === this.knifeSkin) return;
+    this.knifeSkin = next.id;
+    this.knifeStyle = next.knife?.inspect ?? 'default';
+    const old = this.guns[W.KNIFE];
+    old.group.removeFromParent();
+    releaseKnife(this.blade);
+    this.blade = knifeModel(next);
+    const knife = withPivot(buildKnife(this.blade));
+    knife.group.visible = this.current === W.KNIFE;
+    this.guns[W.KNIFE] = knife;
+    this.root.add(knife.group);
+    applySkin(knife.pivot, next.id, UNSKINNED);
+  }
+
   setWeapon(w: number): void {
     this.current = w;
     this.swingT = 0;
@@ -402,6 +415,7 @@ export class Viewmodel {
 
   swing(): void {
     this.swingT = SWING_TIME;
+    if (this.current === W.KNIFE) knifeSwing(this.blade);
   }
 
   fire(strength: number): void {
@@ -508,7 +522,9 @@ export class Viewmodel {
     g.group.updateMatrix();
 
     // Premium inspections: the gun turns in the hands, and its parts react.
-    const pose = inspectPose(this.current === W.KNIFE ? 'default' : this.inspectStyle, s.inspect);
+    const knife = this.current === W.KNIFE;
+    const pose = inspectPose(knife ? this.knifeStyle : this.inspectStyle, s.inspect);
+    setKnifeInspect(this.blade, knife ? s.inspect : -1);
     g.pivot.rotation.set(pose.rx, pose.ry, pose.rz);
     g.pivot.position.set(g.pivotBase.x, g.pivotBase.y + pose.dy, g.pivotBase.z);
     setKitInspect(g.pivot, pose.amount);

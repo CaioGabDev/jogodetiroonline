@@ -1,9 +1,12 @@
 import { EMPTY_STATS, type CareerStats } from '../game/stats';
 import {
+  DEFAULT_KNIFE,
   DEFAULT_SKIN,
   LEVEL_UP_COINS,
   SKINS,
+  isKnifeSkin,
   isSkinId,
+  isWeaponSkin,
   levelFromXp,
   matchReward,
   rankFor,
@@ -23,6 +26,8 @@ export interface ProgressData {
   /** Skins bought. Level skins are owned by reaching the level and are not listed. */
   bought: string[];
   equipped: string;
+  /** Knife skin, equipped apart from the weapon skin. */
+  equippedKnife: string;
   /** Career totals; only shown for guests, an account reads them from player_stats. */
   career: CareerStats;
   matches: number;
@@ -62,7 +67,7 @@ export interface ServerMatch {
 }
 
 function fresh(): ProgressData {
-  return { xp: 0, coins: 0, bought: [], equipped: DEFAULT_SKIN, career: { ...EMPTY_STATS }, matches: 0, wins: 0, kills: 0 };
+  return { xp: 0, coins: 0, bought: [], equipped: DEFAULT_SKIN, equippedKnife: DEFAULT_KNIFE, career: { ...EMPTY_STATS }, matches: 0, wins: 0, kills: 0 };
 }
 
 const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
@@ -83,7 +88,10 @@ export function sanitizeProgress(raw: unknown): ProgressData {
   d.career.wins = Math.max(d.career.wins, d.wins);
   d.career.kills = Math.max(d.career.kills, d.kills);
   if (Array.isArray(r.bought)) d.bought = [...new Set(r.bought.filter(isSkinId))];
-  if (isSkinId(r.equipped)) d.equipped = r.equipped;
+  if (isWeaponSkin(r.equipped)) d.equipped = r.equipped;
+  // The account sends it as equipped_knife; this browser saves it as equippedKnife.
+  const knife = r.equipped_knife ?? r.equippedKnife;
+  if (isKnifeSkin(knife)) d.equippedKnife = knife;
   return d;
 }
 
@@ -131,6 +139,20 @@ class ProgressStore {
   }
   get equipped(): string {
     return this.data.equipped;
+  }
+
+  get equippedKnife(): string {
+    return this.data.equippedKnife;
+  }
+
+  /** Equipped in its slot: the weapon skin or the knife skin. */
+  isEquipped(id: string): boolean {
+    return id === this.data.equipped || id === this.data.equippedKnife;
+  }
+
+  private wear(id: string): void {
+    if (skinById(id).slot === 'faca') this.data.equippedKnife = id;
+    else this.data.equipped = id;
   }
   /** This browser's career totals (guests). */
   get career(): CareerStats {
@@ -188,7 +210,7 @@ class ProgressStore {
     }
     this.data.coins -= s.price;
     this.data.bought.push(id);
-    this.data.equipped = id;
+    this.wear(id);
     this.commit();
     return 'ok';
   }
@@ -198,12 +220,12 @@ class ProgressStore {
     if (this.backend) {
       const ok = await this.backend.equip(id).catch(() => false);
       if (ok) {
-        this.data.equipped = id;
+        this.wear(id);
         this.notify();
       }
       return ok;
     }
-    this.data.equipped = id;
+    this.wear(id);
     this.commit();
     return true;
   }
@@ -275,6 +297,7 @@ class ProgressStore {
 
   private fixEquipped(): void {
     if (!this.owns(this.data.equipped)) this.data.equipped = DEFAULT_SKIN;
+    if (!this.owns(this.data.equippedKnife)) this.data.equippedKnife = DEFAULT_KNIFE;
   }
 
   private commit(): void {

@@ -273,8 +273,8 @@ class App {
   // ------------------------------------------------------------------ connection flows
 
   /** What the others see of this player's progress. */
-  private helloProfile(): { skin: string; lv: number } {
-    return { skin: progress.equipped, lv: progress.level };
+  private helloProfile(): { skin: string; knife: string; lv: number } {
+    return { skin: progress.equipped, knife: progress.equippedKnife, lv: progress.level };
   }
 
   private async createRoom(nick: string, color: string): Promise<void> {

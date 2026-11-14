@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { skinById } from '../game/progression';
 import { assetsReady, gunAssets } from './assets';
+import { knifeModel, releaseKnife, setKnifeInspect } from './knives';
 import { inspectPose, removeKit, setKit, setKitInspect } from './skinKits';
 import { applySkin, tickSkins } from './skins';
 
@@ -18,6 +19,8 @@ export class SkinPreview {
   /** Inspection tricks, around the gun's middle. */
   private pivot = new THREE.Group();
   private model: THREE.Object3D | null = null;
+  /** The knife model, when the skin shown is a knife skin. */
+  private knife: THREE.Object3D | null = null;
   private skinId = '';
   private weapon = 0;
   private raf = 0;
@@ -45,7 +48,9 @@ export class SkinPreview {
 
   show(skinId: string, weapon: number): void {
     if (skinId === this.skinId && weapon === this.weapon) return;
-    const sameGun = weapon === this.weapon && this.model !== null;
+    // Each knife skin has its own model, so it always rebuilds.
+    const knives = skinById(skinId).slot === 'faca' || skinById(this.skinId).slot === 'faca';
+    const sameGun = !knives && weapon === this.weapon && this.model !== null;
     this.skinId = skinId;
     this.weapon = weapon;
     if (sameGun) this.dress();
@@ -88,9 +93,22 @@ export class SkinPreview {
       this.pivot.remove(this.model);
       this.model = null;
     }
-    const asset = gunAssets.get(this.weapon);
-    if (!asset) return;
-    const model = asset.object.clone();
+    releaseKnife(this.knife);
+    this.knife = null;
+    const skin = skinById(this.skinId);
+    let model: THREE.Object3D;
+    if (skin.slot === 'faca') {
+      // Blade along -Z like the guns, with its flat side toward the camera.
+      const k = knifeModel(skin);
+      k.rotation.set(-Math.PI / 2, Math.PI / 2, 0);
+      model = new THREE.Group();
+      model.add(k);
+      this.knife = k;
+    } else {
+      const asset = gunAssets.get(this.weapon);
+      if (!asset) return;
+      model = asset.object.clone();
+    }
     // Centered and about 1.3 long, whatever the gun.
     const box = new THREE.Box3().setFromObject(model);
     const c = box.getCenter(new THREE.Vector3());
@@ -130,7 +148,8 @@ export class SkinPreview {
     this.holder.rotation.y = Math.sin(this.spin * 0.6) * 0.7;
     this.holder.position.y = Math.sin(this.spin * 1.3) * 0.02;
 
-    const fx = skinById(this.skinId).fx;
+    const shown = skinById(this.skinId);
+    const fx = shown.fx;
     let p = -1;
     if (this.inspectT >= 0) {
       this.inspectT += dt;
@@ -141,8 +160,9 @@ export class SkinPreview {
       }
     }
     // Skins without a trick of their own get a plain turn, so the button always does something.
-    const pose = inspectPose(fx?.inspect ?? 'twirl', p);
-    if (!fx && p >= 0) pose.ry /= 2;
+    const pose = inspectPose(shown.knife?.inspect ?? fx?.inspect ?? 'twirl', p);
+    if (!fx && !shown.knife && p >= 0) pose.ry /= 2;
+    setKnifeInspect(this.knife, p);
     this.pivot.rotation.set(pose.rx, pose.ry, pose.rz);
     this.pivot.position.y = pose.dy * 2;
     if (this.model) setKitInspect(this.model, pose.amount);
