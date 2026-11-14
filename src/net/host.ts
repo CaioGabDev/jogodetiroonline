@@ -36,7 +36,7 @@ import {
 import { MAPS, type MapDef, type SpawnDef } from '../game/mapData';
 import { CollisionWorld, eyeHeight } from '../game/physics';
 import { PositionHistory, rayPlayer } from '../game/hitbox';
-import { DEFAULT_SKIN } from '../game/progression';
+import { DEFAULT_KNIFE, DEFAULT_SKIN } from '../game/progression';
 import { DEFAULT_PRACTICE, DRILL_COUNTDOWN_MS, DRILL_TARGETS, LEVELS, PRACTICE_LEVELS, type LevelTuning, type PracticeSetup } from '../game/practice';
 import { DEFAULT_LOADOUT, W, WEAPONS, allowedWeapons, blastDamage, damageAt, fullAmmo, gunGameLadder, spawnEquipment, stunMs, validLoadout } from '../game/weapons';
 import { ITEM, MAX_THROWN, ROUND, SHOP, gunHit, inRect, isThrowable, isWeaponItem, lossBonus, siteAt } from '../game/bomb';
@@ -471,6 +471,7 @@ export class HostServer {
     const p = this.createPlayer(id, name, slot, null);
     p.info.color = this.pickColor(hello.color);
     p.info.skin = hello.skin ?? DEFAULT_SKIN;
+    p.info.knife = hello.knife ?? DEFAULT_KNIFE;
     p.info.lv = hello.lv ?? 1;
     if (local && this.hostId === 0) {
       this.hostId = id;
@@ -497,7 +498,7 @@ export class HostServer {
   private createPlayer(id: number, name: string, slot: Slot | null, bot: Bot | null): SPlayer {
     const ammo = fullAmmo();
     return {
-      info: { id, name, team: this.smallerTeam(), color: FFA_COLORS[0], host: false, bot: !!bot, skin: DEFAULT_SKIN, lv: 1 },
+      info: { id, name, team: this.smallerTeam(), color: FFA_COLORS[0], host: false, bot: !!bot, skin: DEFAULT_SKIN, knife: DEFAULT_KNIFE, lv: 1 },
       slot,
       bot,
       x: 0,

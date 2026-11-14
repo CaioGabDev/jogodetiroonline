@@ -282,6 +282,7 @@ export class Game {
     for (const p of lobby.players) {
       if (p.id === this.localId) {
         this.viewmodel.setSkin(p.skin);
+        this.viewmodel.setKnifeSkin(p.knife);
         continue;
       }
       let r = this.remotes.get(p.id);
@@ -292,6 +293,7 @@ export class Game {
       }
       r.model.setColor(this.displayColor(p.id));
       r.model.setSkin(p.skin);
+      r.model.setKnifeSkin(p.knife);
       r.model.setLabel(p.name, this.displayColor(p.id));
     }
     for (const [id, r] of this.remotes) {

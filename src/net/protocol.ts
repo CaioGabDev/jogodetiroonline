@@ -1,6 +1,6 @@
 import type { MatchConfig, Team } from '../game/constants';
 import { CHAT_MAX, NAME_MAX } from '../game/constants';
-import { MAX_LEVEL, isSkinId } from '../game/progression';
+import { MAX_LEVEL, isKnifeSkin, isWeaponSkin } from '../game/progression';
 import { WEAPON_COUNT } from '../game/weapons';
 import { isFiniteNum, isVec3 } from '../core/util';
 
@@ -21,6 +21,8 @@ export interface PlayerInfo {
   bot: boolean;
   /** Weapon skin everyone sees on this player's guns. */
   skin: string;
+  /** Knife skin, seen on the knife. */
+  knife: string;
   /** Level the player claims. Cosmetic: progress lives in each browser. */
   lv: number;
 }
@@ -95,6 +97,7 @@ export interface HelloMsg {
   color: string;
   v: number;
   skin?: string;
+  knife?: string;
   lv?: number;
 }
 
@@ -421,7 +424,8 @@ export function parseClientMsg(raw: unknown): ClientMsg | null {
       return isStr(m.name, NAME_MAX) &&
         isStr(m.color, 16) &&
         isFiniteNum(m.v) &&
-        (m.skin === undefined || isSkinId(m.skin)) &&
+        (m.skin === undefined || isWeaponSkin(m.skin)) &&
+        (m.knife === undefined || isKnifeSkin(m.knife)) &&
         (m.lv === undefined || (Number.isInteger(m.lv) && (m.lv as number) >= 1 && (m.lv as number) <= MAX_LEVEL))
         ? (m as unknown as HelloMsg)
         : null;

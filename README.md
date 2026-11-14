@@ -68,7 +68,7 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 | Revólver | 6 | 2 tiros de perto, preciso, recarga lenta |
 | Pistola Automática | 20 | dispara em rajada, recuo médio |
 
-**Faca:** mata com 1 golpe, em até 2,8 m. O `V` dá o golpe com qualquer arma em mãos. Com ela na mão o boneco corre muito mais rápido (até 17,5 m/s) e para na hora, menos no modo Bomba.
+**Faca:** mata com 2 golpes no corpo ou 1 na cabeça, em até 2,8 m. O `V` dá o golpe com qualquer arma em mãos. Com ela na mão o boneco corre muito mais rápido (até 17,5 m/s) e para na hora, menos no modo Bomba.
 
 **Pular enquanto corre** (toque no Shift, depois W + Espaço) dá um impulso de velocidade (+25%) e mais controle no ar, com qualquer arma. O boneco continua correndo durante o pulo, e segurar o Espaço emenda um pulo no outro.
 
@@ -88,6 +88,10 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 
 **Perfil:** mostra K/D, acertos na cabeça, precisão, abates com headshot, taxa de vitória, abates e dano por partida, MVPs e melhor partida. Com conta, os números ficam no Supabase; como convidado, neste navegador.
 
+
+**Facas:** sete skins de faca com modelo próprio (baioneta, tantō, cutelo, karambit e borboleta), equipadas separado da skin das armas. As premium têm o fio brilhando, que acende a cada golpe, e a borboleta abre e fecha os cabos ao inspecionar.
+
+**Conta de dev:** no SQL Editor do Supabase, `select public.make_dev('email@da.conta');` dá todas as skins, nível máximo e moedas sem fim, e as compras ficam de graça para ela. O site não consegue chamar essa função.
 
 **Itens no chão** (reaparecem em 20 s): a munição recarrega por completo a arma em mãos.
 

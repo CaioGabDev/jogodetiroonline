@@ -363,7 +363,152 @@ function vazio(f: Frame, skin: SkinDef): Kit {
   return kit;
 }
 
-const BUILDERS: Record<SkinKit, (f: Frame, skin: SkinDef) => Kit> = { plasma, cristal, brasa, vazio };
+/** Lightning arcs that jump across the gun, redrawn many times a second, and a crackling orb at the muzzle. */
+function tempestade(f: Frame, skin: SkinDef): Kit {
+  const g = new THREE.Group();
+  const fx = skin.fx!;
+  const bolt = new THREE.LineBasicMaterial({ color: fx.tracer, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  const orbMat = glowMat(fx.flash);
+  const POINTS = 9;
+  const arcs = Array.from({ length: 4 }, () => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(POINTS * 3), 3));
+    const line = part(new THREE.Line(geo, bolt));
+    g.add(line);
+    return line;
+  });
+  const onGun = (): THREE.Vector3 =>
+    new THREE.Vector3(
+      Math.random() < 0.5 ? f.minX - 0.003 : f.maxX + 0.003,
+      f.bottom + (f.bodyTop - f.bottom) * (0.3 + Math.random() * 0.7),
+      f.z0 + f.len * (0.1 + Math.random() * 0.8),
+    );
+  const zap = (line: THREE.Line, boost: number): void => {
+    const a = onGun();
+    const b = onGun();
+    b.z = a.z + (Math.random() - 0.5) * f.len * 0.35 * (1 + boost);
+    const pos = line.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const amp = Math.max(f.h, f.w) * (0.25 + boost * 0.4);
+    for (let i = 0; i < POINTS; i++) {
+      const k = i / (POINTS - 1);
+      const j = i === 0 || i === POINTS - 1 ? 0 : 1;
+      pos.setXYZ(i, a.x + (b.x - a.x) * k + (Math.random() - 0.5) * amp * j, a.y + (b.y - a.y) * k + (Math.random() - 0.3) * amp * j, a.z + (b.z - a.z) * k);
+    }
+    pos.needsUpdate = true;
+    line.geometry.computeBoundingSphere();
+  };
+  const orb = part(new THREE.Mesh(new THREE.IcosahedronGeometry(Math.max(f.w, f.h) * 0.2, 1), orbMat));
+  orb.position.set(f.cx, f.barrelY, f.z0 - f.len * 0.02);
+  g.add(orb);
+  const timers = arcs.map(() => 0);
+  const kit: Kit = {
+    group: g,
+    inspect: 0,
+    update(dt) {
+      arcs.forEach((line, i) => {
+        timers[i] -= dt;
+        if (timers[i] > 0) return;
+        zap(line, kit.inspect);
+        timers[i] = 0.05 + Math.random() * 0.12 * (1 - kit.inspect * 0.6);
+        line.visible = Math.random() < 0.75 + kit.inspect * 0.25;
+      });
+      bolt.opacity = 0.6 + Math.random() * 0.4;
+      orb.scale.setScalar(0.7 + Math.random() * 0.5 + kit.inspect * 0.8);
+      orb.rotation.y += dt * 6;
+    },
+    dispose() {
+      bolt.dispose();
+      orbMat.dispose();
+    },
+  };
+  return kit;
+}
+
+/** Hexagonal plates orbiting the gun and a scanning ring that sweeps along it. */
+function holograma(f: Frame, skin: SkinDef): Kit {
+  const g = new THREE.Group();
+  const fx = skin.fx!;
+  const plateMat = glowMat(fx.tracer);
+  plateMat.opacity = 0.5;
+  plateMat.side = THREE.DoubleSide;
+  const ringMat = glowMat(fx.flash);
+  ringMat.side = THREE.DoubleSide;
+  const r = Math.max(f.w, f.h) * 0.9 + f.len * 0.04;
+  const plates: THREE.Mesh[] = [];
+  for (let i = 0; i < 6; i++) {
+    const plate = part(new THREE.Mesh(new THREE.CircleGeometry(f.len * 0.035, 6), plateMat));
+    g.add(plate);
+    plates.push(plate);
+  }
+  const scan = part(new THREE.Mesh(new THREE.RingGeometry(r * 0.88, r, 6, 1), ringMat));
+  g.add(scan);
+  const kit: Kit = {
+    group: g,
+    inspect: 0,
+    update(_dt, t) {
+      const speed = 1.4 * (1 + kit.inspect * 2.5);
+      plates.forEach((plate, i) => {
+        const a = t * speed + (i * Math.PI) / 3;
+        const z = f.z0 + f.len * (0.25 + 0.25 * (i % 3));
+        const rr = r * (1.15 + kit.inspect * 0.5);
+        plate.position.set(f.cx + Math.cos(a) * rr, f.cy + Math.sin(a) * rr, z);
+        plate.rotation.set(t * 2 + i, t * 1.5, a);
+      });
+      scan.position.set(f.cx, f.cy, f.z0 + f.len * (0.5 + 0.47 * Math.sin(t * 1.8)));
+      scan.rotation.z = t;
+      scan.scale.setScalar(1 + kit.inspect * 0.4);
+      ringMat.opacity = 0.5 + Math.sin(t * 9) * 0.3;
+    },
+    dispose() {
+      plateMat.dispose();
+      ringMat.dispose();
+    },
+  };
+  return kit;
+}
+
+/** Three ribbons of light, one per color, waving along the gun. */
+function aurora(f: Frame, skin: SkinDef): Kit {
+  const g = new THREE.Group();
+  const fx = skin.fx!;
+  const colors = [fx.tracer, fx.kill, '#7af7ff'];
+  const ribbons = colors.map((color, i) => {
+    const geo = new THREE.PlaneGeometry(f.len * 0.95, Math.max(0.01, f.h * 0.16), 32, 1);
+    geo.rotateY(Math.PI / 2);
+    const mat = glowMat(color);
+    mat.opacity = 0.45;
+    mat.side = THREE.DoubleSide;
+    const mesh = part(new THREE.Mesh(geo, mat));
+    mesh.position.set(i === 1 ? f.cx : i === 0 ? f.minX - 0.012 : f.maxX + 0.012, i === 1 ? f.bodyTop + f.h * 0.25 : f.cy, f.z0 + f.len * 0.5);
+    mesh.frustumCulled = false;
+    g.add(mesh);
+    const base = Float32Array.from(geo.getAttribute('position').array as Float32Array);
+    return { mesh, mat, base };
+  });
+  const kit: Kit = {
+    group: g,
+    inspect: 0,
+    update(_dt, t) {
+      const amp = f.h * (0.18 + kit.inspect * 0.4);
+      ribbons.forEach(({ mesh, mat, base }, i) => {
+        const pos = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+        for (let v = 0; v < pos.count; v++) {
+          const z = base[v * 3 + 2];
+          const wave = Math.sin((z / f.len) * 9 + t * (2.2 + i * 0.5) + i * 2);
+          pos.setXYZ(v, base[v * 3] + Math.cos(z * 7 + t * 2 + i) * amp * 0.35, base[v * 3 + 1] + wave * amp, z);
+        }
+        pos.needsUpdate = true;
+        mat.opacity = 0.35 + Math.sin(t * 2 + i) * 0.12 + kit.inspect * 0.3;
+      });
+    },
+    dispose() {
+      ribbons.forEach((r) => r.mat.dispose());
+    },
+  };
+  return kit;
+}
+
+const BUILDERS: Record<SkinKit, (f: Frame, skin: SkinDef) => Kit> = { plasma, cristal, brasa, vazio, tempestade, holograma, aurora };
 
 /**
  * Puts the skin's parts around the gun under `root`, replacing any earlier ones. A skin without parts just removes them.
@@ -392,7 +537,7 @@ export function removeKit(root: THREE.Object3D): void {
   if (!old) return;
   old.group.removeFromParent();
   old.group.traverse((o) => {
-    if (o instanceof THREE.Mesh || o instanceof THREE.Points) o.geometry.dispose();
+    if (o instanceof THREE.Mesh || o instanceof THREE.Points || o instanceof THREE.Line) o.geometry.dispose();
   });
   old.dispose();
   active.delete(old);
@@ -430,6 +575,14 @@ export function inspectPose(style: InspectStyle, p: number): InspectPose {
       const a = smooth(p, 0.28, 0.64);
       pose.rx = -a * Math.PI * 2;
       pose.dy = Math.sin(a * Math.PI) * 0.09;
+      break;
+    }
+    case 'butterfly': {
+      // Held up and rocked while the handles fly open and shut (knives.ts moves them).
+      const a = smooth(p, 0.12, 0.88);
+      pose.ry = Math.sin(a * Math.PI * 2) * 0.6;
+      pose.rz = Math.sin(a * Math.PI * 4) * 0.25;
+      pose.dy = Math.sin(a * Math.PI) * 0.03;
       break;
     }
     case 'twirl': {

@@ -218,6 +218,7 @@ export class PlayerModel {
   private gunModels = new Map<number, THREE.Object3D>();
   private weapon = -1;
   private skin = '';
+  private knifeSkin = '';
   private disposed = false;
   private swingT = 0;
   /** Rest position of the right hand along the arm, set by the weapon in hand. */
@@ -297,9 +298,16 @@ export class PlayerModel {
     this.gunModels.forEach((m, w) => this.dress(m, w));
   }
 
-  /** Pattern, and premium parts on everything but the knife. */
+  /** Knife skin of this player: its finish on the knife they hold. */
+  setKnifeSkin(id: string): void {
+    if (id === this.knifeSkin) return;
+    this.knifeSkin = id;
+    this.gunModels.forEach((m, w) => WEAPONS[w]?.melee && this.dress(m, w));
+  }
+
+  /** Pattern, and premium parts on everything but the knife, which wears the knife skin. */
   private dress(model: THREE.Object3D, w: number): void {
-    applySkin(model, this.skin);
+    applySkin(model, WEAPONS[w]?.melee ? this.knifeSkin : this.skin);
     if (WEAPONS[w]?.melee) removeKit(model);
     else setKit(model, skinById(this.skin));
   }
@@ -350,7 +358,7 @@ export class PlayerModel {
       model = asset.object.clone();
       model.scale.setScalar(s.len / asset.len);
       model.traverse((o) => (o.castShadow = o instanceof THREE.Mesh));
-      if (this.skin) this.dress(model, w);
+      if (this.skin || this.knifeSkin) this.dress(model, w);
       this.armGroup.add(model);
       this.gunModels.set(w, model);
     }

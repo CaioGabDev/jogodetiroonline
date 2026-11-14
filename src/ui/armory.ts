@@ -1,6 +1,6 @@
 import { progress } from '../core/progress';
 import { account } from '../net/account';
-import { RANKS, SKINS, rankFor, skinById, type InspectStyle, type Rank, type SkinDef } from '../game/progression';
+import { RANKS, SKINS, rankFor, skinById, type BladeShape, type InspectStyle, type Rank, type SkinDef } from '../game/progression';
 import { W, WEAPONS } from '../game/weapons';
 import { SkinPreview } from '../render/skinPreview';
 import { clear, el, show } from './dom';
@@ -88,6 +88,18 @@ function drawPreview(canvas: HTMLCanvasElement, skin: SkinDef): void {
           c = glow ? cols[1] : cols[0];
           break;
         }
+        case 'scan': {
+          const band = (y * 38) % 1 > 0.84 ? 1 : 0;
+          glow = band;
+          c = band ? cols[2] : mix(cols[0], cols[1], Math.min(1, z * 1.6));
+          break;
+        }
+        case 'prisma': {
+          const hue = (z * 1.4 + y * 2 + fbm(x * 6, y * 6, z * 6) * 0.25) % 1;
+          c = [0, 4, 2].map((o) => Math.min(1, Math.max(0, Math.abs(((hue * 6 + o) % 6) - 3) - 1)) * 255);
+          glow = 0.6;
+          break;
+        }
         default: {
           const n = fbm(x * 9, y * 9, z * 9);
           glow = smooth(0.5, 0.68, n);
@@ -132,7 +144,8 @@ export function xpBar(into: number, need: number): HTMLElement {
   ]);
 }
 
-const INSPECT_NAMES: Record<InspectStyle, string> = { default: 'normal', spin: 'giro no cano', flip: 'arremesso', twirl: 'rodopio' };
+const INSPECT_NAMES: Record<InspectStyle, string> = { default: 'normal', spin: 'giro no cano', flip: 'arremesso', twirl: 'rodopio', butterfly: 'abre e fecha' };
+const BLADE_NAMES: Record<BladeShape, string> = { baioneta: 'baioneta', karambit: 'karambit', borboleta: 'borboleta', cutelo: 'cutelo', tanto: 'tantō' };
 
 /** Guns the showcase can show, all with a loaded model. */
 const SHOWCASE_GUNS = [W.RIFLE, W.SMG, W.SNIPER, W.SHOTGUN, W.DEAGLE, W.PISTOL];
@@ -147,6 +160,7 @@ export class Armory {
   private head: HTMLElement;
   private grid: HTMLElement;
   private premiumGrid: HTMLElement;
+  private knifeGrid: HTMLElement;
   private where: HTMLElement;
   private preview = new SkinPreview();
   private showcaseInfo: HTMLElement;
@@ -162,6 +176,7 @@ export class Armory {
     this.head = el('div', { class: 'armory-head' });
     this.grid = el('div', { class: 'skin-grid' });
     this.premiumGrid = el('div', { class: 'skin-grid premium' });
+    this.knifeGrid = el('div', { class: 'skin-grid knives' });
     this.where = el('p', { class: 'hint' });
     this.showcaseInfo = el('div', { class: 'showcase-info' });
     this.gunChips = el('div', { class: 'gun-chips' });
@@ -177,6 +192,9 @@ export class Armory {
       el('h3', { text: 'Coleção premium' }),
       el('p', { class: 'hint', text: 'Mudam o formato da arma, a cor dos tiros, têm efeito de abate que todo mundo vê e inspeção própria (Y).' }),
       this.premiumGrid,
+      el('h3', { text: 'Facas' }),
+      el('p', { class: 'hint', text: 'Cada faca tem modelo e inspeção próprios, e se equipa separada da skin das armas.' }),
+      this.knifeGrid,
       el('h3', { text: 'Skins' }),
       el('p', { class: 'hint', text: 'A skin vale para todas as suas armas, e os outros jogadores também a veem. As de patente são grátis ao chegar no nível; as outras se compram com moedas.' }),
       this.grid,
@@ -242,11 +260,12 @@ export class Armory {
         : 'O progresso fica salvo neste navegador.';
     clear(this.grid);
     clear(this.premiumGrid);
+    clear(this.knifeGrid);
     if (progress.loading) {
       this.grid.append(el('p', { class: 'hint', text: 'Carregando o progresso da conta…' }));
       return;
     }
-    for (const s of SKINS) (s.fx ? this.premiumGrid : this.grid).append(this.card(s, info.level));
+    for (const s of SKINS) (s.slot === 'faca' ? this.knifeGrid : s.fx ? this.premiumGrid : this.grid).append(this.card(s, info.level));
     this.renderShowcase(info.level);
   }
 
@@ -259,7 +278,7 @@ export class Armory {
     const s = skinById(this.selected);
     this.preview.show(s.id, this.gun);
     clear(this.gunChips);
-    for (const w of SHOWCASE_GUNS) {
+    for (const w of s.slot === 'faca' ? [] : SHOWCASE_GUNS) {
       this.gunChips.append(
         el('button', {
           class: 'gun-chip' + (w === this.gun ? ' active' : ''),
@@ -272,9 +291,11 @@ export class Armory {
       );
     }
     const { status, action } = this.actionFor(s, level);
-    const feats: string[] = s.fx
-      ? ['Formato próprio', 'Tiros coloridos', 'Efeito de abate', `Inspeção: ${INSPECT_NAMES[s.fx.inspect]}`]
-      : [s.pattern === 'solid' ? 'Cor sólida' : 'Padrão na arma toda'];
+    const feats: string[] = s.knife
+      ? [`Modelo: ${BLADE_NAMES[s.knife.blade]}`, s.knife.edge ? 'Fio que brilha e acende no golpe' : 'Acabamento próprio', `Inspeção: ${INSPECT_NAMES[s.knife.inspect]}`]
+      : s.fx
+        ? ['Formato próprio', 'Tiros coloridos', 'Efeito de abate', `Inspeção: ${INSPECT_NAMES[s.fx.inspect]}`]
+        : [s.pattern === 'solid' ? 'Cor sólida' : 'Padrão na arma toda'];
     clear(this.showcaseInfo);
     this.showcaseInfo.append(
       s.fx ? el('span', { class: 'premium-tag', text: 'PREMIUM' }) : '',
@@ -303,7 +324,7 @@ export class Armory {
     const canvas = el('canvas', { class: 'skin-preview' });
     drawPreview(canvas, s);
     const { status, action } = this.actionFor(s, level);
-    const classes = ['skin-card', s.fx ? 'premium' : '', progress.equipped === s.id ? 'equipped' : '', level < s.level ? 'locked' : '', this.selected === s.id ? 'selected' : ''];
+    const classes = ['skin-card', s.fx ? 'premium' : '', progress.isEquipped(s.id) ? 'equipped' : '', level < s.level ? 'locked' : '', this.selected === s.id ? 'selected' : ''];
     const card = el('div', { class: classes.filter(Boolean).join(' '), title: 'Ver na vitrine' }, [
       canvas,
       s.fx ? el('span', { class: 'premium-tag small', text: 'PREMIUM' }) : null,
@@ -322,7 +343,7 @@ export class Armory {
 
   private actionFor(s: SkinDef, level: number): { status: string; action: HTMLElement } {
     const owned = progress.owns(s.id);
-    const equipped = progress.equipped === s.id;
+    const equipped = progress.isEquipped(s.id);
     const locked = level < s.level;
 
     let status: string;

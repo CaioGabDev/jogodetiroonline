@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { DEFAULT_SKIN, skinById, type SkinDef, type SkinPattern } from '../game/progression';
+import { tickKnives } from './knives';
 import { isKitPart, tickKits } from './skinKits';
 
 /**
@@ -8,7 +9,7 @@ import { isKitPart, tickKits } from './skinKits';
  * Every part of the gun keeps its own brightness, so dark grips stay darker than the body.
  */
 
-const PATTERN_ID: Record<SkinPattern, number> = { solid: 0, camo: 1, digital: 2, stripes: 3, flow: 4 };
+const PATTERN_ID: Record<SkinPattern, number> = { solid: 0, camo: 1, digital: 2, stripes: 3, flow: 4, scan: 5, prisma: 6 };
 
 /** Shared clock, so animated skins (lava, galaxy) move. */
 const skinTime = { value: 0 };
@@ -16,6 +17,7 @@ const skinTime = { value: 0 };
 export function tickSkins(dt: number): void {
   skinTime.value = (skinTime.value + dt) % 1000;
   tickKits(dt);
+  tickKnives(dt);
 }
 
 /** #rrggbb as a number, for tracers and flashes. */
@@ -71,12 +73,24 @@ vec4 skinPattern(vec3 p) {
   float s = sin(p.z * 48.0 + p.y * 20.0 + skFbm(p * 9.0) * 7.0);
   float m = step(0.3, s);
   return vec4(mix(uSkinA, uSkinB, m), m);
-#else
+#elif SKIN_PATTERN == 4
   float n = skFbm(p * 9.0 + vec3(0.0, uSkinTime * 0.12, uSkinTime * 0.05));
   float hot = smoothstep(0.5, 0.68, n);
   vec3 c = mix(uSkinA, uSkinB, smoothstep(0.36, 0.56, n));
   c = mix(c, uSkinC, smoothstep(0.62, 0.76, n));
   return vec4(c, hot);
+#elif SKIN_PATTERN == 5
+  // Hologram: a gradient along the gun, scan lines running down it and a bright sweep along it.
+  float scanBand = smoothstep(0.84, 1.0, fract(p.y * 38.0 - uSkinTime * 1.6));
+  float sweep = smoothstep(0.9, 1.0, fract(p.z * 1.2 - uSkinTime * 0.45));
+  vec3 c = mix(uSkinA, uSkinB, clamp(p.z * 1.6 + 0.5, 0.0, 1.0));
+  c = mix(c, uSkinC, max(scanBand, sweep));
+  return vec4(c, 0.35 + max(scanBand, sweep) * 0.65);
+#else
+  // Prism: every hue, flowing along the gun.
+  float hue = fract(p.z * 1.4 + p.y * 2.0 + uSkinTime * 0.18 + skFbm(p * 6.0) * 0.25);
+  vec3 c = clamp(abs(mod(hue * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+  return vec4(mix(uSkinA, c, 0.85), 0.6);
 #endif
 }
 `;

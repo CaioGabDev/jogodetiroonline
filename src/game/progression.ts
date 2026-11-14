@@ -112,13 +112,23 @@ export const LEVEL_UP_COINS = 100;
 // ---------------------------------------------------------------------------
 
 /** How the colors are laid over the gun. Must match the shader in `render/skins.ts`. */
-export type SkinPattern = 'solid' | 'camo' | 'digital' | 'stripes' | 'flow';
+export type SkinPattern = 'solid' | 'camo' | 'digital' | 'stripes' | 'flow' | 'scan' | 'prisma';
 
 /** Extra parts that change the gun's shape. Built in render/skinKits.ts. */
-export type SkinKit = 'plasma' | 'cristal' | 'brasa' | 'vazio';
+export type SkinKit = 'plasma' | 'cristal' | 'brasa' | 'vazio' | 'tempestade' | 'holograma' | 'aurora';
 
 /** How the gun moves in hand when inspected (Y). */
-export type InspectStyle = 'default' | 'spin' | 'flip' | 'twirl';
+export type InspectStyle = 'default' | 'spin' | 'flip' | 'twirl' | 'butterfly';
+
+/** Knife models, built in render/knives.ts. */
+export type BladeShape = 'baioneta' | 'karambit' | 'borboleta' | 'cutelo' | 'tanto';
+
+export interface KnifeLook {
+  blade: BladeShape;
+  /** Glowing edge that pulses and flares on a swing, as #rrggbb. */
+  edge?: string;
+  inspect: InspectStyle;
+}
 
 /** What only premium skins have: their own parts, shot colors, kill effect and inspection. */
 export interface SkinFx {
@@ -146,11 +156,15 @@ export interface SkinDef {
   glow: number;
   /** Premium only. */
   fx?: SkinFx;
+  /** Knife skins go on the knife only, equipped apart from the weapon skin. */
+  slot?: 'faca';
+  knife?: KnifeLook;
   /** One line about the skin, shown in the Arsenal. */
   tagline?: string;
 }
 
 export const DEFAULT_SKIN = 'padrao';
+export const DEFAULT_KNIFE = 'faca_padrao';
 
 export const SKINS: SkinDef[] = [
   { id: 'padrao', name: 'Padrão', pattern: 'solid', colors: [], level: 1, price: 0, shine: 0, glow: 0 },
@@ -216,6 +230,50 @@ export const SKINS: SkinDef[] = [
     tagline: 'Fragmentos de outra dimensão orbitam a arma.',
     fx: { kit: 'vazio', tracer: '#c08bff', flash: '#d4a8ff', kill: '#a34dff', inspect: 'flip' },
   },
+  {
+    id: 'tempestade',
+    name: 'Tempestade',
+    pattern: 'flow',
+    colors: ['#070b1a', '#1b2f6b', '#8fd8ff'],
+    level: 16,
+    price: 9000,
+    shine: 0.5,
+    glow: 0.9,
+    tagline: 'Raios estalam pela arma o tempo todo, e uma esfera de energia pulsa no cano.',
+    fx: { kit: 'tempestade', tracer: '#9fe8ff', flash: '#d6f6ff', kill: '#6fd0ff', inspect: 'spin' },
+  },
+  {
+    id: 'holograma',
+    name: 'Holograma',
+    pattern: 'scan',
+    colors: ['#06202a', '#0b5f73', '#7dfff0'],
+    level: 22,
+    price: 11000,
+    shine: 0.4,
+    glow: 1,
+    tagline: 'Arma de luz: linhas de varredura descem por ela e placas hexagonais orbitam.',
+    fx: { kit: 'holograma', tracer: '#7dfff0', flash: '#bafff7', kill: '#36f0d8', inspect: 'twirl' },
+  },
+  {
+    id: 'aurora',
+    name: 'Aurora',
+    pattern: 'prisma',
+    colors: ['#ffffff'],
+    level: 30,
+    price: 14000,
+    shine: 0.7,
+    glow: 0.8,
+    tagline: 'Todas as cores correndo pela arma, com fitas de luz ondulando em volta.',
+    fx: { kit: 'aurora', tracer: '#ff7ad9', flash: '#ffffff', kill: '#9b7bff', inspect: 'flip' },
+  },
+  // Knives: their own model, finish and inspection. Equipped apart from the weapon skin.
+  { id: 'faca_padrao', name: 'Baioneta', pattern: 'solid', colors: [], level: 1, price: 0, shine: 0, glow: 0, slot: 'faca', knife: { blade: 'baioneta', inspect: 'default' }, tagline: 'A faca de sempre.' },
+  { id: 'faca_tanto', name: 'Tantō Carbono', pattern: 'digital', colors: ['#1a1c20', '#2c3036', '#0e0f12', '#3d424a'], level: 1, price: 1500, shine: 0.4, glow: 0, slot: 'faca', knife: { blade: 'tanto', inspect: 'twirl' }, tagline: 'Ponta reta japonesa, em fibra de carbono.' },
+  { id: 'faca_cutelo', name: 'Cutelo Rubro', pattern: 'solid', colors: ['#8f1020'], level: 5, price: 2500, shine: 0.9, glow: 0, slot: 'faca', knife: { blade: 'cutelo', inspect: 'flip' }, tagline: 'Lâmina larga e vermelha polida. Girada no ar ao inspecionar.' },
+  { id: 'faca_karambit', name: 'Karambit Sombrio', pattern: 'stripes', colors: ['#0b0b10', '#6b2bff'], level: 10, price: 4500, shine: 0.5, glow: 0.6, slot: 'faca', knife: { blade: 'karambit', edge: '#8b5cff', inspect: 'spin' }, tagline: 'Garra curva com argola, e o fio da lâmina brilhando roxo.' },
+  { id: 'faca_borboleta', name: 'Borboleta Neon', pattern: 'stripes', colors: ['#0c0c14', '#ff2bd6'], level: 15, price: 7000, shine: 0.3, glow: 0.9, slot: 'faca', knife: { blade: 'borboleta', edge: '#ff4fe0', inspect: 'butterfly' }, tagline: 'Canivete borboleta: inspecione e ele abre e fecha os cabos.' },
+  { id: 'faca_dragao', name: 'Tantō do Dragão', pattern: 'flow', colors: ['#120502', '#8a1c05', '#ffb020'], level: 24, price: 9500, shine: 0.3, glow: 1, slot: 'faca', knife: { blade: 'tanto', edge: '#ffb020', inspect: 'twirl' }, tagline: 'Brasa correndo pela lâmina e o fio em chamas.' },
+  { id: 'faca_plasma', name: 'Lâmina de Plasma', pattern: 'scan', colors: ['#03141c', '#0a6b8a', '#5ff4ff'], level: 35, price: 15000, shine: 0.6, glow: 1, slot: 'faca', knife: { blade: 'baioneta', edge: '#5ff4ff', inspect: 'flip' }, tagline: 'Energia pura: linhas de varredura e um fio que acende a cada golpe.' },
 ];
 
 const SKIN_BY_ID = new Map(SKINS.map((s) => [s.id, s]));
@@ -226,4 +284,12 @@ export function skinById(id: string): SkinDef {
 
 export function isSkinId(id: unknown): id is string {
   return typeof id === 'string' && SKIN_BY_ID.has(id);
+}
+
+export function isKnifeSkin(id: unknown): id is string {
+  return isSkinId(id) && SKIN_BY_ID.get(id)!.slot === 'faca';
+}
+
+export function isWeaponSkin(id: unknown): id is string {
+  return isSkinId(id) && !SKIN_BY_ID.get(id)!.slot;
 }
