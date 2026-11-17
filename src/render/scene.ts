@@ -135,7 +135,7 @@ export class SceneManager {
 
   private applySettings(s: Settings): void {
     // Only rebuild render state when something visual changed (sliders fire many updates).
-    const key = `${s.quality}|${s.shadows}|${s.resolutionScale}`;
+    const key = `${s.quality}|${s.shadows}|${s.resolutionScale}|${s.aspect}`;
     if (key === this.appliedKey) return;
     this.appliedKey = key;
     const q = QUALITY[s.quality];
@@ -186,15 +186,18 @@ export class SceneManager {
   resize(): void {
     const s = settings.get();
     const q = QUALITY[s.quality];
-    const w = window.innerWidth;
     const h = window.innerHeight;
+    // Stretched: drawn narrower than the screen (same height) and stretched by CSS to fill it.
+    // Only ever narrower, so a stretched setting never widens what is seen.
+    const aspect = s.aspect > 0 ? Math.min(s.aspect, window.innerWidth / h) : window.innerWidth / h;
+    const w = Math.round(h * aspect);
     const pr = Math.min(window.devicePixelRatio || 1, q.pixelRatioCap) * s.resolutionScale;
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, false);
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
-    this.camera.aspect = w / h;
-    this.vmCamera.aspect = w / h;
+    this.camera.aspect = aspect;
+    this.vmCamera.aspect = aspect;
     this.updateProjection();
     this.vmCamera.updateProjectionMatrix();
   }
