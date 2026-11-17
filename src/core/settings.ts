@@ -81,7 +81,8 @@ export const SENS_MAX = 10;
 export interface Settings {
   /** In Valorant's scale (see DEG_PER_COUNT). */
   sensitivity: number;
-  adsSensitivity: number;
+  /** Like Valorant's scoped sensitivity multiplier: 1 keeps the same feel through any zoom. */
+  adsMultiplier: number;
   invertY: boolean;
   adsMode: HoldMode;
   crouchMode: HoldMode;
@@ -110,7 +111,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   // About what 2.5 was before the Valorant scale, and Valorant's own default.
   sensitivity: 1,
-  adsSensitivity: 1,
+  adsMultiplier: 1,
   invertY: false,
   adsMode: 'hold',
   crouchMode: 'hold',
@@ -167,6 +168,11 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export const FPS_LIMITS = [0, 30, 60, 90, 120, 144, 165, 240];
+/** Width/height the 3D view is drawn at: the stretched ratio, never wider than the screen. */
+export function renderAspect(aspect: number, w: number, h: number): number {
+  return aspect > 0 ? Math.min(aspect, w / h) : w / h;
+}
+
 /** Stretched aspect ratios, like the stretched resolutions of other shooters. 0 = native. */
 export const ASPECTS: Array<[number, string]> = [
   [0, 'Nativa'],
@@ -206,7 +212,9 @@ function sanitize(raw: unknown): Settings {
     return typeof v === 'number' && Number.isFinite(v) ? clamp(Math.round(v * k * 1000) / 1000, SENS_MIN, SENS_MAX) : def;
   };
   s.sensitivity = sens('sensitivity', s.sensitivity);
-  s.adsSensitivity = sens('adsSensitivity', s.adsSensitivity);
+  // Saves from before kept an ADS sensitivity of its own: the multiplier keeps the same turn.
+  if (typeof r.adsMultiplier === 'number' && Number.isFinite(r.adsMultiplier)) s.adsMultiplier = clamp(r.adsMultiplier, 0.01, 5);
+  else if (typeof r.adsSensitivity === 'number') s.adsMultiplier = clamp(Math.round((sens('adsSensitivity', s.sensitivity) / s.sensitivity) * 1000) / 1000, 0.01, 5);
   s.invertY = bool('invertY', s.invertY);
   s.adsMode = r.adsMode === 'toggle' ? 'toggle' : 'hold';
   s.crouchMode = r.crouchMode === 'toggle' ? 'toggle' : 'hold';

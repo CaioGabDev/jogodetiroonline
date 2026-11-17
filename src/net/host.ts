@@ -37,7 +37,7 @@ import { MAPS, type MapDef, type SpawnDef } from '../game/mapData';
 import { CollisionWorld, eyeHeight } from '../game/physics';
 import { PositionHistory, rayPlayer } from '../game/hitbox';
 import { DEFAULT_KNIFE, DEFAULT_SKIN } from '../game/progression';
-import { DEFAULT_PRACTICE, DRILL_COUNTDOWN_MS, DRILL_TARGETS, LEVELS, PRACTICE_LEVELS, type LevelTuning, type PracticeSetup } from '../game/practice';
+import { AIM_RUN_MS, AIM_TARGETS_UP, DEFAULT_PRACTICE, DRILL_COUNTDOWN_MS, DRILL_TARGETS, LEVELS, PRACTICE_LEVELS, type LevelTuning, type PracticeSetup } from '../game/practice';
 import { DEFAULT_LOADOUT, W, WEAPONS, allowedWeapons, blastDamage, damageAt, fullAmmo, gunGameLadder, spawnEquipment, stunMs, validLoadout } from '../game/weapons';
 import { ITEM, MAX_THROWN, ROUND, SHOP, gunHit, inRect, isThrowable, isWeaponItem, lossBonus, siteAt } from '../game/bomb';
 import { clamp, now, r2, r3, randomCode, sanitizeText } from '../core/util';
@@ -102,6 +102,9 @@ interface Drill {
   shown: number;
   kills: number;
   reactions: number[];
+  /** Aim training: shots fired and when the run ends. */
+  shots: number;
+  endAt: number;
   /** The use key went down since the last tick. Kept until read, so a quick tap between ticks still counts. */
   pressed: boolean;
 }
@@ -315,7 +318,7 @@ export class HostServer {
   private round: Round = this.newRound();
   private drops: Drop[] = [];
   private nextDrop = 1;
-  private drill: Drill = { running: false, goAt: 0, nextAt: 0, shown: 0, kills: 0, reactions: [], pressed: false };
+  private drill: Drill = { running: false, goAt: 0, nextAt: 0, shown: 0, kills: 0, reactions: [], shots: 0, endAt: 0, pressed: false };
 
   constructor(
     offline: boolean,
@@ -552,7 +555,7 @@ export class HostServer {
 
   private addBots(): void {
     const mode = this.drillMode;
-    const count = mode === 'duelo' ? this.tuning.duelists : mode === 'aleatorio' ? 6 : mode === 'reflexo' ? 3 : BOT_DEFS.length;
+    const count = mode === 'duelo' ? this.tuning.duelists : mode === 'aleatorio' ? 6 : mode === 'reflexo' ? 3 : mode === 'mira' ? AIM_TARGETS_UP : BOT_DEFS.length;
     const label = mode === 'duelo' ? 'Inimigo' : 'Alvo';
     for (let i = 0; i < count; i++) {
       const d: BotDef = mode === 'alvos' ? BOT_DEFS[i] : { ...BOT_DEFS[0], name: `${label} ${i + 1}` };
@@ -869,8 +872,8 @@ export class HostServer {
       this.sendDrops();
       return;
     }
-    // Reflex targets wait out of sight until the drill brings them up.
-    if (p.bot && this.drillMode === 'reflexo') {
+    // Reflex and aim targets wait out of sight until the drill brings them up.
+    if (p.bot && (this.drillMode === 'reflexo' || this.drillMode === 'mira')) {
       this.hideBot(p);
       return;
     }
@@ -1091,6 +1094,9 @@ export class HostServer {
     if (!def.melee) p.mag[w]--;
     p.lastShotSeq = m.s;
     p.protectedUntil = 0;
+    // Aim training counts shots for the accuracy.
+    const d = this.drill;
+    if (d.running && this.drillMode === 'mira' && !p.bot && !def.melee && t >= d.goAt) d.shots++;
 
     if (def.projectile) {
       this.launch(p, w, m);
@@ -1864,15 +1870,36 @@ export class HostServer {
   }
 
   /** Moves a target to a new spot, with a short side-to-side path when there is room. */
-  private placeBot(p: SPlayer, b: Bot, minDist: number, maxDist: number, seen = false): boolean {
-    const spot = this.findSpot(minDist, maxDist, seen) ?? this.findSpot(4, 200, false);
+  /** Aim training: a clear spot on the floor in front of the player (within 55° of the view), in sight. */
+  private aimSpot(h: SPlayer, minDist: number, maxDist: number): [number, number, number] | null {
+    const bots = [...this.players.values()].filter((o) => o.bot && o.alive);
+    const eye = h.y + eyeHeight(h.crouch);
+    for (let i = 0; i < 40; i++) {
+      // yaw 0 looks down -z.
+      const a = h.yaw + (Math.random() - 0.5) * ((110 * Math.PI) / 180);
+      const r = minDist + Math.random() * (maxDist - minDist);
+      const x = h.x - Math.sin(a) * r;
+      const z = h.z - Math.cos(a) * r;
+      const y = this.world.groundHeight(x, z, h.y + 3, 6);
+      if (!Number.isFinite(y) || this.world.overlapsSolid(x, y + 0.05, z, PLAYER.height - 0.1, PLAYER.radius)) continue;
+      if (bots.some((o) => Math.hypot(o.x - x, o.z - z) < 1.6)) continue;
+      if (!this.world.lineOfSight(h.x, eye, h.z, x, y + 1.3, z)) continue;
+      return [x, y, z];
+    }
+    return null;
+  }
+
+  private placeBot(p: SPlayer, b: Bot, minDist: number, maxDist: number, seen = false, near: SPlayer | null = null): boolean {
+    const spot = (near ? this.aimSpot(near, minDist, maxDist) : null) ?? this.findSpot(minDist, maxDist, seen) ?? this.findSpot(4, 200, false);
     if (!spot) return false;
     const [x, y, z] = spot;
     b.ax = b.bx = x;
     b.az = b.bz = z;
     b.y = y;
     b.speed = 0;
-    if (this.drillMode !== 'reflexo') {
+    // Aim training targets only strafe above Normal.
+    const strafes = this.drillMode === 'mira' ? this.practice.level !== 'normal' : this.drillMode !== 'reflexo';
+    if (strafes) {
       const a = Math.random() * Math.PI * 2;
       const len = 2 + Math.random() * 2;
       const ex = x + Math.cos(a) * len;
@@ -1899,7 +1926,7 @@ export class HostServer {
   }
 
   private botKilled(p: SPlayer, b: Bot): void {
-    if (this.drillMode !== 'reflexo') {
+    if (this.drillMode !== 'reflexo' && this.drillMode !== 'mira') {
       p.respawnAt = now() + this.tuning.respawnMs;
       return;
     }
@@ -1975,8 +2002,50 @@ export class HostServer {
     if (hit) this.dealDamage(p, new Map([[target, { dmg: lv.damage * (head ? 2 : 1), hs: head }]]), W.RIFLE);
   }
 
+  /** Aim training: press E, three targets always up in sight for a minute, a new one as soon as one falls. */
+  private updateAim(t: number): void {
+    const d = this.drill;
+    const human = [...this.players.values()].find((o) => !o.bot);
+    const pressed = d.pressed;
+    d.pressed = false;
+    const targets = [...this.players.values()].filter((o) => o.bot);
+    if (!d.running) {
+      if (!pressed || !human?.alive) return;
+      targets.forEach((o) => this.hideBot(o));
+      const goAt = t + DRILL_COUNTDOWN_MS;
+      this.drill = { running: true, goAt, nextAt: goAt, shown: 0, kills: 0, reactions: [], shots: 0, endAt: goAt + AIM_RUN_MS, pressed: false };
+      this.tell(`Treino de mira ${PRACTICE_LEVELS[this.practice.level]}: ${AIM_RUN_MS / 1000} segundos. Começa em 3 segundos!`);
+      return;
+    }
+    if (t < d.goAt) return;
+    if (t >= d.endAt || !human?.alive) {
+      d.running = false;
+      targets.forEach((o) => this.hideBot(o));
+      const acc = d.shots ? Math.round((d.kills / d.shots) * 100) : 0;
+      const avg = d.reactions.length ? Math.round(d.reactions.reduce((a, b) => a + b, 0) / d.reactions.length) : 0;
+      this.tell(`Fim: ${d.kills} alvos · precisão ${acc}% · ${d.shots} tiros · ${avg} ms por alvo`);
+      this.tell('Aperte E para tentar de novo.');
+      return;
+    }
+    for (const idle of targets) {
+      if (idle.alive || !idle.bot) continue;
+      if (!this.placeBot(idle, idle.bot, 6, 22, true, human)) continue;
+      idle.hp = 1;
+      idle.alive = true;
+      idle.protectedUntil = 0;
+      idle.bot.upAt = t;
+      idle.bot.downAt = 0;
+      idle.history.clear();
+      idle.history.push({ t, x: idle.x, y: idle.y, z: idle.z, yaw: idle.yaw, crouch: false });
+    }
+  }
+
   /** Reflex drill: press E, targets come up one after another in sight, and each one is up for a moment only. */
   private updateDrill(t: number): void {
+    if (this.drillMode === 'mira') {
+      this.updateAim(t);
+      return;
+    }
     if (this.drillMode !== 'reflexo') return;
     const d = this.drill;
     const human = [...this.players.values()].find((o) => !o.bot);
@@ -1986,7 +2055,7 @@ export class HostServer {
     if (!d.running) {
       if (!pressed || !human?.alive) return;
       targets.forEach((o) => this.hideBot(o));
-      this.drill = { running: true, goAt: t + DRILL_COUNTDOWN_MS, nextAt: t + DRILL_COUNTDOWN_MS, shown: 0, kills: 0, reactions: [], pressed: false };
+      this.drill = { running: true, goAt: t + DRILL_COUNTDOWN_MS, nextAt: t + DRILL_COUNTDOWN_MS, shown: 0, kills: 0, reactions: [], shots: 0, endAt: 0, pressed: false };
       this.tell(`Reflexo ${PRACTICE_LEVELS[this.practice.level]}: ${DRILL_TARGETS} alvos. Começa em 3 segundos!`);
       return;
     }

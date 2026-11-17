@@ -951,11 +951,19 @@ export class Game {
     // Recoil
     const stance = this.me.crouch && this.me.onGround ? CROUCH_RECOIL : 1;
     const adsMul = (1 - this.aimT * 0.35) * stance;
-    this.recoilP += def.kick * (0.85 + Math.random() * 0.3) * adsMul;
-    const pat = RECOIL_PATTERN[this.burst % RECOIL_PATTERN.length];
-    this.recoilY += (def.pattern ? pat : (Math.random() - 0.5) * 2) * def.kickYaw * adsMul;
+    if (def.spray) {
+      // Fixed pattern: the same every time, so it can be learned. Little bloom, or the pattern would be noise.
+      const [up, side] = def.spray[Math.min(this.burst, def.spray.length - 1)];
+      this.recoilP += up * def.kick * adsMul;
+      this.recoilY += side * def.kick * adsMul;
+      this.bloom = Math.min(0.012, this.bloom + def.kick * 0.08 * stance);
+    } else {
+      this.recoilP += def.kick * (0.85 + Math.random() * 0.3) * adsMul;
+      const pat = RECOIL_PATTERN[this.burst % RECOIL_PATTERN.length];
+      this.recoilY += (def.pattern ? pat : (Math.random() - 0.5) * 2) * def.kickYaw * adsMul;
+      this.bloom = Math.min(0.03, this.bloom + def.kick * 0.25 * stance);
+    }
     this.burst++;
-    this.bloom = Math.min(0.03, this.bloom + def.kick * 0.25 * stance);
 
     if (def.melee) {
       this.viewmodel.swing();
@@ -1202,7 +1210,7 @@ export class Game {
     this.frameLookY = mdy;
     if (this.alive && !this.ended) {
       const zoom = 1 + (def.zoom - 1) * this.aimT;
-      const sens = (this.aimT > 0.5 ? s.adsSensitivity / zoom : s.sensitivity) * (dazed ? CONCUSSED_LOOK : 1);
+      const sens = (this.aimT > 0.5 ? (s.sensitivity * s.adsMultiplier) / zoom : s.sensitivity) * (dazed ? CONCUSSED_LOOK : 1);
       this.yaw -= mdx * sens * LOOK_RAD_PER_COUNT;
       this.pitch -= mdy * sens * LOOK_RAD_PER_COUNT * (s.invertY ? -1 : 1);
       this.pitch = clamp(this.pitch, -1.55, 1.55);

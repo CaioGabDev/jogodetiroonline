@@ -1039,7 +1039,8 @@ kbd {
   position: absolute;
   left: 50%;
   top: 50%;
-  transform: translate(-50%, -50%);
+  /* --stretch: set by the HUD when the screen is stretched (4:3 and the like). */
+  transform: translate(-50%, -50%) scaleX(var(--stretch, 1));
 }
 
 .hitmarker {
@@ -1104,14 +1105,14 @@ kbd {
 @keyframes hit {
   0% {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1.25);
+    transform: translate(-50%, -50%) scale(calc(1.25 * var(--stretch, 1)), 1.25);
   }
   60% {
     opacity: 1;
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, -50%) scale(var(--stretch, 1), 1);
   }
 }
 

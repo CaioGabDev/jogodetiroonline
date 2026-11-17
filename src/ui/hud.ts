@@ -1,4 +1,4 @@
-import { settings } from '../core/settings';
+import { renderAspect, settings } from '../core/settings';
 import { formatTime } from '../core/util';
 import { WEAPONS } from '../game/weapons';
 import { clear, el, show } from './dom';
@@ -187,11 +187,22 @@ export class Hud {
       this.lastSpread = -1;
       this.redrawCrosshair(0);
       this.trimFeed();
+      this.stretchCrosshair();
     });
+    window.addEventListener('resize', () => this.stretchCrosshair());
+    this.stretchCrosshair();
   }
 
   show(v: boolean): void {
     show(this.root, v);
+  }
+
+  /** With a stretched screen, the crosshair and hit marker stretch along with the 3D view. */
+  private stretchCrosshair(): void {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const k = w / h / renderAspect(settings.get().aspect, w, h);
+    this.root.style.setProperty('--stretch', k.toFixed(4));
   }
 
   redrawCrosshair(spread: number): void {

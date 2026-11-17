@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { settings, type Settings } from '../core/settings';
+import { renderAspect, settings, type Settings } from '../core/settings';
 import type { MapId } from '../game/constants';
 import { MAPS } from '../game/mapData';
 import { buildMap, buildSky, PickupView, STATIC_LAYER } from './map';
@@ -189,7 +189,7 @@ export class SceneManager {
     const h = window.innerHeight;
     // Stretched: drawn narrower than the screen (same height) and stretched by CSS to fill it.
     // Only ever narrower, so a stretched setting never widens what is seen.
-    const aspect = s.aspect > 0 ? Math.min(s.aspect, window.innerWidth / h) : window.innerWidth / h;
+    const aspect = renderAspect(s.aspect, window.innerWidth, h);
     const w = Math.round(h * aspect);
     const pr = Math.min(window.devicePixelRatio || 1, q.pixelRatioCap) * s.resolutionScale;
     this.renderer.setPixelRatio(pr);
