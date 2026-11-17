@@ -1,4 +1,4 @@
-import type { MatchConfig, Team } from '../game/constants';
+import type { MapId, MatchConfig, Team } from '../game/constants';
 import { CHAT_MAX, NAME_MAX } from '../game/constants';
 import { MAX_LEVEL, isKnifeSkin, isWeaponSkin } from '../game/progression';
 import { WEAPON_COUNT } from '../game/weapons';
@@ -25,6 +25,8 @@ export interface PlayerInfo {
   knife: string;
   /** Level the player claims. Cosmetic: progress lives in each browser. */
   lv: number;
+  /** The player's id for this browser tab, kept across reconnects: their score comes back with it. */
+  rid: string;
 }
 
 export interface LobbyState {
@@ -99,6 +101,8 @@ export interface HelloMsg {
   skin?: string;
   knife?: string;
   lv?: number;
+  /** Rejoin id (see PlayerInfo.rid). */
+  rid?: string;
 }
 
 export interface InputMsg {
@@ -169,7 +173,13 @@ export interface BuyMsg {
   item: number;
 }
 
-export type ClientMsg = HelloMsg | InputMsg | ShootMsg | ReloadMsg | ChatSendMsg | PongMsg | SetTeamMsg | SetColorMsg | LoadoutMsg | BuyMsg;
+/** Vote for the next map at the end of a match: index into the vote's options. */
+export interface VoteSendMsg {
+  type: 'vote';
+  i: number;
+}
+
+export type ClientMsg = HelloMsg | InputMsg | ShootMsg | ReloadMsg | ChatSendMsg | PongMsg | SetTeamMsg | SetColorMsg | LoadoutMsg | BuyMsg | VoteSendMsg;
 
 // ---------------------------------------------------------------------------
 // Host -> Client
@@ -362,6 +372,22 @@ export interface ChatMsg {
   team: boolean;
 }
 
+/** Map vote after a match: the options, votes for each, ms left, and the winner once it closes. */
+export interface VoteMsg {
+  type: 'vote';
+  options: MapId[];
+  counts: number[];
+  left: number;
+  winner: MapId | null;
+}
+
+/** A practice drill finished (offline only): counted by the missions. */
+export interface DrillMsg {
+  type: 'drill';
+  mode: 'mira' | 'reflexo';
+  kills: number;
+}
+
 export interface SysMsg {
   type: 'sys';
   text: string;
@@ -405,6 +431,8 @@ export type HostMsg =
   | PickupMsg
   | ChatMsg
   | SysMsg
+  | DrillMsg
+  | VoteMsg
   | PingMsg
   | EndMsg;
 
@@ -426,7 +454,8 @@ export function parseClientMsg(raw: unknown): ClientMsg | null {
         isFiniteNum(m.v) &&
         (m.skin === undefined || isWeaponSkin(m.skin)) &&
         (m.knife === undefined || isKnifeSkin(m.knife)) &&
-        (m.lv === undefined || (Number.isInteger(m.lv) && (m.lv as number) >= 1 && (m.lv as number) <= MAX_LEVEL))
+        (m.lv === undefined || (Number.isInteger(m.lv) && (m.lv as number) >= 1 && (m.lv as number) <= MAX_LEVEL)) &&
+        (m.rid === undefined || (typeof m.rid === 'string' && /^[a-z0-9]{8,24}$/.test(m.rid)))
         ? (m as unknown as HelloMsg)
         : null;
     case 'input':
@@ -460,6 +489,8 @@ export function parseClientMsg(raw: unknown): ClientMsg | null {
       return Array.isArray(m.w) && m.w.length === 5 && m.w.every(isWeapon) && typeof m.go === 'boolean' ? (m as unknown as LoadoutMsg) : null;
     case 'buy':
       return isFiniteNum(m.item) ? (m as unknown as BuyMsg) : null;
+    case 'vote':
+      return Number.isInteger(m.i) && (m.i as number) >= 0 && (m.i as number) < 8 ? (m as unknown as VoteSendMsg) : null;
     case 'chat':
       return isStr(m.text, CHAT_MAX) && typeof m.team === 'boolean' ? (m as unknown as ChatSendMsg) : null;
     case 'pong':

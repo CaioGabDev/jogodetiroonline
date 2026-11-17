@@ -37,7 +37,7 @@ import { MAPS, type MapDef, type SpawnDef } from '../game/mapData';
 import { CollisionWorld, eyeHeight } from '../game/physics';
 import { PositionHistory, rayPlayer } from '../game/hitbox';
 import { DEFAULT_KNIFE, DEFAULT_SKIN } from '../game/progression';
-import { DEFAULT_PRACTICE, DRILL_COUNTDOWN_MS, DRILL_TARGETS, LEVELS, PRACTICE_LEVELS, type LevelTuning, type PracticeSetup } from '../game/practice';
+import { AIM_RUN_MS, AIM_TARGETS_UP, DEFAULT_PRACTICE, DRILL_COUNTDOWN_MS, DRILL_TARGETS, LEVELS, PRACTICE_LEVELS, type LevelTuning, type PracticeSetup } from '../game/practice';
 import { DEFAULT_LOADOUT, W, WEAPONS, allowedWeapons, blastDamage, damageAt, fullAmmo, gunGameLadder, spawnEquipment, stunMs, validLoadout } from '../game/weapons';
 import { ITEM, MAX_THROWN, ROUND, SHOP, gunHit, inRect, isThrowable, isWeaponItem, lossBonus, siteAt } from '../game/bomb';
 import { clamp, now, r2, r3, randomCode, sanitizeText } from '../core/util';
@@ -94,6 +94,31 @@ interface Bot {
   downAt: number;
 }
 
+/** What a player who left keeps for a while: coming back with the same rid restores it. */
+export interface Stash {
+  team: Team;
+  kills: number;
+  deaths: number;
+  damage: number;
+  headshots: number;
+  shots: number;
+  hits: number;
+  headHits: number;
+  level: number;
+  at: number;
+}
+
+/** What a player who takes over as host brings from the old host: config, scores and the phase. */
+export interface MigrationSeed {
+  config: MatchConfig;
+  playing: boolean;
+  teams: [number, number];
+  stash: Array<[string, Stash]>;
+}
+
+/** How long a player who dropped keeps their score. */
+const STASH_MS = 120000;
+
 /** One run of the reflex drill. */
 interface Drill {
   running: boolean;
@@ -102,6 +127,9 @@ interface Drill {
   shown: number;
   kills: number;
   reactions: number[];
+  /** Aim training: shots fired and when the run ends. */
+  shots: number;
+  endAt: number;
   /** The use key went down since the last tick. Kept until read, so a quick tap between ticks still counts. */
   pressed: boolean;
 }
@@ -205,6 +233,8 @@ interface Round {
   why: RoundEnd | null;
 }
 
+/** How long the map vote stays open after a match. */
+const VOTE_MS = 15000;
 const otherTeam = (t: Team): Team => (t === 'red' ? 'blue' : 'red');
 const scoreIndex = (t: Team): 0 | 1 => (t === 'red' ? 0 : 1);
 
@@ -300,6 +330,12 @@ export class HostServer {
   private nextId = 1;
   private hostId = 0;
   private phase: Phase = 'lobby';
+  /** Players who left recently, by rid: reconnecting brings their score back. */
+  private stash = new Map<string, Stash>();
+  /** Team score to restore when a migrated match starts again. */
+  private seedTeams: [number, number] | null = null;
+  /** Map vote after a match: who voted for which option. */
+  private vote: { options: MapId[]; votes: Map<number, number>; endsAt: number; timer: number } | null = null;
   private config: MatchConfig;
   private pickups: PickupState[] = this.map.pickups.map(() => ({ active: true, respawnAt: 0 }));
   private teamScore: [number, number] = [0, 0];
@@ -315,7 +351,7 @@ export class HostServer {
   private round: Round = this.newRound();
   private drops: Drop[] = [];
   private nextDrop = 1;
-  private drill: Drill = { running: false, goAt: 0, nextAt: 0, shown: 0, kills: 0, reactions: [], pressed: false };
+  private drill: Drill = { running: false, goAt: 0, nextAt: 0, shown: 0, kills: 0, reactions: [], shots: 0, endAt: 0, pressed: false };
 
   constructor(
     offline: boolean,
@@ -348,16 +384,17 @@ export class HostServer {
   }
 
   /** Registers the room with PeerJS (retrying on code collisions). Returns the room code. */
-  async start(): Promise<string> {
+  /** `code`: take over that room's code (host migration); fails if someone still holds it. */
+  async start(code?: string): Promise<string> {
     if (this.offline) {
       this.code = 'TREINO';
     } else {
       let lastErr: unknown = null;
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const code = randomCode(6);
+      for (let attempt = 0; attempt < (code ? 1 : 4); attempt++) {
+        const tryCode = code ?? randomCode(6);
         try {
-          this.peer = await openPeer(peerIdForCode(code));
-          this.code = code;
+          this.peer = await openPeer(peerIdForCode(tryCode));
+          this.code = tryCode;
           break;
         } catch (e) {
           lastErr = e;
@@ -388,6 +425,14 @@ export class HostServer {
     return this.code;
   }
 
+  /** Carries on the old host's room: same settings, and everyone's score waits for them to reconnect. */
+  adopt(seed: MigrationSeed): void {
+    this.config = { ...seed.config };
+    const t = now();
+    for (const [rid, st] of seed.stash) this.stash.set(rid, { ...st, at: t });
+    if (seed.playing && !this.bombMode) this.seedTeams = seed.teams;
+  }
+
   /** Creates the host's own in-memory client connection. */
   connectLocal(): Conn {
     const [serverEnd, clientEnd] = createLoopback();
@@ -398,6 +443,7 @@ export class HostServer {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    if (this.vote) window.clearTimeout(this.vote.timer);
     this.ticker?.stop();
     this.announcer?.stop();
     for (const p of this.players.values()) {
@@ -450,6 +496,25 @@ export class HostServer {
     };
   }
 
+  /** Gives a returning player their team and score back. True when there was one. */
+  private restore(p: SPlayer): boolean {
+    const t = now();
+    for (const [rid, st] of this.stash) if (t - st.at > STASH_MS) this.stash.delete(rid);
+    const st = p.info.rid ? this.stash.get(p.info.rid) : undefined;
+    if (!st) return false;
+    this.stash.delete(p.info.rid);
+    if (this.config.mode !== 'ffa') p.info.team = st.team;
+    p.kills = st.kills;
+    p.deaths = st.deaths;
+    p.damage = st.damage;
+    p.headshots = st.headshots;
+    p.shots = st.shots;
+    p.hits = st.hits;
+    p.headHits = st.headHits;
+    p.level = st.level;
+    return true;
+  }
+
   private humanCount(): number {
     let n = 0;
     for (const p of this.players.values()) if (!p.bot) n++;
@@ -473,6 +538,8 @@ export class HostServer {
     p.info.skin = hello.skin ?? DEFAULT_SKIN;
     p.info.knife = hello.knife ?? DEFAULT_KNIFE;
     p.info.lv = hello.lv ?? 1;
+    p.info.rid = hello.rid ?? '';
+    const back = this.restore(p);
     if (local && this.hostId === 0) {
       this.hostId = id;
       p.info.host = true;
@@ -491,14 +558,14 @@ export class HostServer {
     const match = this.phase === 'playing' ? this.matchInfo() : null;
     this.send(p, { type: 'welcome', id, lobby: this.lobbyState(), match });
     this.broadcastLobby();
-    if (!local) this.broadcast({ type: 'sys', text: `${name} entrou na sala` }, id);
+    if (!local) this.broadcast({ type: 'sys', text: back ? `${name} voltou` : `${name} entrou na sala` }, id);
     if (this.phase === 'playing') this.beginSpawn(p);
   }
 
   private createPlayer(id: number, name: string, slot: Slot | null, bot: Bot | null): SPlayer {
     const ammo = fullAmmo();
     return {
-      info: { id, name, team: this.smallerTeam(), color: FFA_COLORS[0], host: false, bot: !!bot, skin: DEFAULT_SKIN, knife: DEFAULT_KNIFE, lv: 1 },
+      info: { id, name, team: this.smallerTeam(), color: FFA_COLORS[0], host: false, bot: !!bot, skin: DEFAULT_SKIN, knife: DEFAULT_KNIFE, lv: 1, rid: '' },
       slot,
       bot,
       x: 0,
@@ -552,7 +619,7 @@ export class HostServer {
 
   private addBots(): void {
     const mode = this.drillMode;
-    const count = mode === 'duelo' ? this.tuning.duelists : mode === 'aleatorio' ? 6 : mode === 'reflexo' ? 3 : BOT_DEFS.length;
+    const count = mode === 'duelo' ? this.tuning.duelists : mode === 'aleatorio' ? 6 : mode === 'reflexo' ? 3 : mode === 'mira' ? AIM_TARGETS_UP : BOT_DEFS.length;
     const label = mode === 'duelo' ? 'Inimigo' : 'Alvo';
     for (let i = 0; i < count; i++) {
       const d: BotDef = mode === 'alvos' ? BOT_DEFS[i] : { ...BOT_DEFS[0], name: `${label} ${i + 1}` };
@@ -599,6 +666,10 @@ export class HostServer {
     const p = this.players.get(id);
     if (!p) return;
     this.players.delete(id);
+    if (!p.bot && p.info.rid && !this.offline) {
+      this.stash.set(p.info.rid, { team: p.info.team, kills: p.kills, deaths: p.deaths, damage: p.damage, headshots: p.headshots, shots: p.shots, hits: p.hits, headHits: p.headHits, level: p.level, at: now() });
+    }
+    if (this.vote?.votes.delete(id)) this.sendVote();
     this.projectiles = this.projectiles.filter((pr) => pr.owner !== p);
     this.fires = this.fires.filter((f) => f.owner !== p);
     this.broadcast({ type: 'sys', text: `${p.info.name} saiu da partida` });
@@ -680,6 +751,12 @@ export class HostServer {
         break;
       case 'buy':
         this.onBuy(p, m.item);
+        break;
+      case 'vote':
+        if (this.vote && m.i < this.vote.options.length) {
+          this.vote.votes.set(p.info.id, m.i);
+          this.sendVote();
+        }
         break;
       case 'setColor':
         if (this.phase !== 'playing') {
@@ -782,8 +859,16 @@ export class HostServer {
 
   startMatch(): void {
     if (this.destroyed) return;
+    this.closeVote();
     this.phase = 'playing';
-    this.teamScore = [0, 0];
+    // A match carried on from an old host keeps its team score; a new one starts clean, old scores gone.
+    if (this.seedTeams) {
+      this.teamScore = this.seedTeams;
+      this.seedTeams = null;
+    } else {
+      this.teamScore = [0, 0];
+      this.stash.clear();
+    }
     this.endsAt = this.config.timeLimit > 0 && !this.bombMode ? now() + this.config.timeLimit * 60000 : 0;
     this.map = MAPS[this.config.map];
     this.world = new CollisionWorld(this.map);
@@ -822,6 +907,7 @@ export class HostServer {
 
   backToLobby(): void {
     if (this.offline) return;
+    this.closeVote();
     this.phase = 'lobby';
     for (const p of this.players.values()) p.alive = false;
     this.broadcastLobby();
@@ -869,8 +955,8 @@ export class HostServer {
       this.sendDrops();
       return;
     }
-    // Reflex targets wait out of sight until the drill brings them up.
-    if (p.bot && this.drillMode === 'reflexo') {
+    // Reflex and aim targets wait out of sight until the drill brings them up.
+    if (p.bot && (this.drillMode === 'reflexo' || this.drillMode === 'mira')) {
       this.hideBot(p);
       return;
     }
@@ -1091,6 +1177,9 @@ export class HostServer {
     if (!def.melee) p.mag[w]--;
     p.lastShotSeq = m.s;
     p.protectedUntil = 0;
+    // Aim training counts shots for the accuracy.
+    const d = this.drill;
+    if (d.running && this.drillMode === 'mira' && !p.bot && !def.melee && t >= d.goAt) d.shots++;
 
     if (def.projectile) {
       this.launch(p, w, m);
@@ -1819,6 +1908,50 @@ export class HostServer {
     for (const p of this.players.values()) p.alive = false;
     this.broadcast(msg);
     this.broadcastLobby();
+    if (!this.offline) this.openVote();
+  }
+
+  // ---------------------------------------------------------------- map vote
+
+  /** The current map and two others of the same kind (bomb maps only for the bomb mode). */
+  private openVote(): void {
+    const pool = (Object.keys(MAP_NAMES) as MapId[]).filter((m) => BOMB_MAPS.includes(m) === this.bombMode && m !== this.config.map);
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const options = [this.config.map, ...pool.slice(0, 2)];
+    const endsAt = now() + VOTE_MS;
+    this.vote = { options, votes: new Map(), endsAt, timer: window.setTimeout(() => this.closeVote(), VOTE_MS) };
+    this.sendVote();
+  }
+
+  private tally(): number[] {
+    const v = this.vote;
+    const counts = v ? v.options.map(() => 0) : [];
+    v?.votes.forEach((i) => counts[i]++);
+    return counts;
+  }
+
+  private sendVote(winner: MapId | null = null): void {
+    const v = this.vote;
+    if (!v) return;
+    this.broadcast({ type: 'vote', options: v.options, counts: this.tally(), left: Math.max(0, Math.round(v.endsAt - now())), winner });
+  }
+
+  /** Most votes wins, a tie is drawn among the tied, and no votes keeps the map. The rematch uses it. */
+  private closeVote(): void {
+    const v = this.vote;
+    if (!v) return;
+    window.clearTimeout(v.timer);
+    const counts = this.tally();
+    const top = Math.max(...counts);
+    const tied = v.options.filter((_, i) => counts[i] === top);
+    const winner = top === 0 ? v.options[0] : tied[Math.floor(Math.random() * tied.length)];
+    this.config.map = winner;
+    this.sendVote(winner);
+    this.vote = null;
+    this.broadcastLobby();
   }
 
   private sendScores(): void {
@@ -1864,15 +1997,36 @@ export class HostServer {
   }
 
   /** Moves a target to a new spot, with a short side-to-side path when there is room. */
-  private placeBot(p: SPlayer, b: Bot, minDist: number, maxDist: number, seen = false): boolean {
-    const spot = this.findSpot(minDist, maxDist, seen) ?? this.findSpot(4, 200, false);
+  /** Aim training: a clear spot on the floor in front of the player (within 55° of the view), in sight. */
+  private aimSpot(h: SPlayer, minDist: number, maxDist: number): [number, number, number] | null {
+    const bots = [...this.players.values()].filter((o) => o.bot && o.alive);
+    const eye = h.y + eyeHeight(h.crouch);
+    for (let i = 0; i < 40; i++) {
+      // yaw 0 looks down -z.
+      const a = h.yaw + (Math.random() - 0.5) * ((110 * Math.PI) / 180);
+      const r = minDist + Math.random() * (maxDist - minDist);
+      const x = h.x - Math.sin(a) * r;
+      const z = h.z - Math.cos(a) * r;
+      const y = this.world.groundHeight(x, z, h.y + 3, 6);
+      if (!Number.isFinite(y) || this.world.overlapsSolid(x, y + 0.05, z, PLAYER.height - 0.1, PLAYER.radius)) continue;
+      if (bots.some((o) => Math.hypot(o.x - x, o.z - z) < 1.6)) continue;
+      if (!this.world.lineOfSight(h.x, eye, h.z, x, y + 1.3, z)) continue;
+      return [x, y, z];
+    }
+    return null;
+  }
+
+  private placeBot(p: SPlayer, b: Bot, minDist: number, maxDist: number, seen = false, near: SPlayer | null = null): boolean {
+    const spot = (near ? this.aimSpot(near, minDist, maxDist) : null) ?? this.findSpot(minDist, maxDist, seen) ?? this.findSpot(4, 200, false);
     if (!spot) return false;
     const [x, y, z] = spot;
     b.ax = b.bx = x;
     b.az = b.bz = z;
     b.y = y;
     b.speed = 0;
-    if (this.drillMode !== 'reflexo') {
+    // Aim training targets only strafe above Normal.
+    const strafes = this.drillMode === 'mira' ? this.practice.level !== 'normal' : this.drillMode !== 'reflexo';
+    if (strafes) {
       const a = Math.random() * Math.PI * 2;
       const len = 2 + Math.random() * 2;
       const ex = x + Math.cos(a) * len;
@@ -1899,7 +2053,7 @@ export class HostServer {
   }
 
   private botKilled(p: SPlayer, b: Bot): void {
-    if (this.drillMode !== 'reflexo') {
+    if (this.drillMode !== 'reflexo' && this.drillMode !== 'mira') {
       p.respawnAt = now() + this.tuning.respawnMs;
       return;
     }
@@ -1975,8 +2129,51 @@ export class HostServer {
     if (hit) this.dealDamage(p, new Map([[target, { dmg: lv.damage * (head ? 2 : 1), hs: head }]]), W.RIFLE);
   }
 
+  /** Aim training: press E, three targets always up in sight for a minute, a new one as soon as one falls. */
+  private updateAim(t: number): void {
+    const d = this.drill;
+    const human = [...this.players.values()].find((o) => !o.bot);
+    const pressed = d.pressed;
+    d.pressed = false;
+    const targets = [...this.players.values()].filter((o) => o.bot);
+    if (!d.running) {
+      if (!pressed || !human?.alive) return;
+      targets.forEach((o) => this.hideBot(o));
+      const goAt = t + DRILL_COUNTDOWN_MS;
+      this.drill = { running: true, goAt, nextAt: goAt, shown: 0, kills: 0, reactions: [], shots: 0, endAt: goAt + AIM_RUN_MS, pressed: false };
+      this.tell(`Treino de mira ${PRACTICE_LEVELS[this.practice.level]}: ${AIM_RUN_MS / 1000} segundos. Começa em 3 segundos!`);
+      return;
+    }
+    if (t < d.goAt) return;
+    if (t >= d.endAt || !human?.alive) {
+      d.running = false;
+      targets.forEach((o) => this.hideBot(o));
+      const acc = d.shots ? Math.round((d.kills / d.shots) * 100) : 0;
+      const avg = d.reactions.length ? Math.round(d.reactions.reduce((a, b) => a + b, 0) / d.reactions.length) : 0;
+      this.tell(`Fim: ${d.kills} alvos · precisão ${acc}% · ${d.shots} tiros · ${avg} ms por alvo`);
+      this.broadcast({ type: 'drill', mode: 'mira', kills: d.kills });
+      this.tell('Aperte E para tentar de novo.');
+      return;
+    }
+    for (const idle of targets) {
+      if (idle.alive || !idle.bot) continue;
+      if (!this.placeBot(idle, idle.bot, 6, 22, true, human)) continue;
+      idle.hp = 1;
+      idle.alive = true;
+      idle.protectedUntil = 0;
+      idle.bot.upAt = t;
+      idle.bot.downAt = 0;
+      idle.history.clear();
+      idle.history.push({ t, x: idle.x, y: idle.y, z: idle.z, yaw: idle.yaw, crouch: false });
+    }
+  }
+
   /** Reflex drill: press E, targets come up one after another in sight, and each one is up for a moment only. */
   private updateDrill(t: number): void {
+    if (this.drillMode === 'mira') {
+      this.updateAim(t);
+      return;
+    }
     if (this.drillMode !== 'reflexo') return;
     const d = this.drill;
     const human = [...this.players.values()].find((o) => !o.bot);
@@ -1986,7 +2183,7 @@ export class HostServer {
     if (!d.running) {
       if (!pressed || !human?.alive) return;
       targets.forEach((o) => this.hideBot(o));
-      this.drill = { running: true, goAt: t + DRILL_COUNTDOWN_MS, nextAt: t + DRILL_COUNTDOWN_MS, shown: 0, kills: 0, reactions: [], pressed: false };
+      this.drill = { running: true, goAt: t + DRILL_COUNTDOWN_MS, nextAt: t + DRILL_COUNTDOWN_MS, shown: 0, kills: 0, reactions: [], shots: 0, endAt: 0, pressed: false };
       this.tell(`Reflexo ${PRACTICE_LEVELS[this.practice.level]}: ${DRILL_TARGETS} alvos. Começa em 3 segundos!`);
       return;
     }
@@ -2018,6 +2215,7 @@ export class HostServer {
       const avg = d.reactions.length ? Math.round(d.reactions.reduce((a, b) => a + b, 0) / d.reactions.length) : 0;
       const bestMs = d.reactions.length ? Math.round(Math.min(...d.reactions)) : 0;
       const pct = Math.round((d.kills / DRILL_TARGETS) * 100);
+      this.broadcast({ type: 'drill', mode: 'reflexo', kills: d.kills });
       this.tell(d.kills ? `Fim: ${d.kills}/${DRILL_TARGETS} (${pct}%) · reação média ${avg} ms · melhor ${bestMs} ms` : `Fim: 0/${DRILL_TARGETS}. Bora de novo!`);
       this.tell('Aperte E para tentar de novo.');
     }

@@ -3,14 +3,16 @@ import { audio } from './core/audio';
 import { input } from './core/input';
 import { progress } from './core/progress';
 import type { MatchStats } from './game/progression';
-import { accountProgress } from './net/progressApi';
+import { accountProgress, claimMission } from './net/progressApi';
+import { missions } from './core/missions';
 import { GameLoop } from './core/loop';
 import { normalizeCode } from './core/util';
-import { teamMode, type GameMode, type MapId } from './game/constants';
+import { MAP_NAMES, teamMode, type GameMode, type MapId } from './game/constants';
 import { Game } from './game/game';
+import { WEAPONS } from './game/weapons';
 import type { PracticeSetup } from './game/practice';
 import { rankOf } from './game/ranks';
-import { HostServer } from './net/host';
+import { HostServer, type MigrationSeed } from './net/host';
 import { RoomBrowser } from './net/directory';
 import { NetClient, joinRemote, type DisconnectReason } from './net/client';
 import { account } from './net/account';
@@ -31,6 +33,10 @@ import { MainMenu } from './ui/menu';
 import { PauseMenu } from './ui/pause';
 import { ProfileScreen } from './ui/profile';
 import { RankingScreen } from './ui/ranking';
+import { MissionsScreen } from './ui/missions';
+import { SocialScreen } from './ui/social';
+import { QueueScreen } from './ui/queue';
+import { ranked, social } from './net/social';
 import { Results } from './ui/results';
 import { Scoreboard } from './ui/scoreboard';
 import { SettingsUI } from './ui/settingsUI';
@@ -52,6 +58,14 @@ class App {
   private auth: AuthScreen;
   private profile: ProfileScreen;
   private ranking: RankingScreen;
+  private missions: MissionsScreen;
+  private social: SocialScreen;
+  private queue: QueueScreen;
+  /** Friends poll: running while logged in. */
+  private socialTimer = 0;
+  private socialBusy = false;
+  /** Ranked queue poll, while searching. */
+  private queueTimer = 0;
   private roomBrowser: RoomBrowser;
   private loadout: LoadoutPicker;
   private inventory: Inventory;
@@ -93,6 +107,9 @@ class App {
       onLogout: () => void account.signOut(),
       onProfile: () => this.profile.open(),
       onRanking: () => this.ranking.open(),
+      onMissions: () => this.missions.open(),
+      onFriends: () => this.social.open(),
+      onRanked: () => void this.startQueue(),
     });
     this.lobby = new Lobby(ui, {
       onStart: () => {
@@ -105,6 +122,13 @@ class App {
       onColor: (color) => this.net?.send({ type: 'setColor', color }),
       onConfig: (patch) => this.host?.setConfig(patch),
       onBalance: () => this.host?.autoBalance(),
+      onFriends: () => {
+        if (account.profile) this.social.open();
+        else {
+          toast('Entre numa conta para ter amigos e chamar eles para a sala.', 'info');
+          this.auth.open();
+        }
+      },
     });
     this.results = new Results(ui, {
       onRematch: () => {
@@ -113,6 +137,7 @@ class App {
       },
       onLobby: () => this.host?.backToLobby(),
       onLeave: () => this.leave(),
+      onVote: (i) => this.net?.send({ type: 'vote', i }),
     });
     this.pause = new PauseMenu(ui, {
       onResume: () => input.requestLock(),
@@ -134,8 +159,19 @@ class App {
     account.onRecovery(() => this.auth.openReset());
     this.profile = new ProfileScreen(ui);
     this.ranking = new RankingScreen(ui);
+    this.missions = new MissionsScreen(ui);
+    this.social = new SocialScreen(ui, {
+      currentRoom: () => this.onlineRoom(),
+      joinRoom: (code) => this.followTo(code),
+      refresh: () => void this.pollSocial(),
+    });
+    this.queue = new QueueScreen(ui, () => void this.cancelQueue());
+    missions.onChange(() => this.menu.setMissionsReady(missions.ready));
+    this.menu.setMissionsReady(missions.ready);
     account.onChange(() => {
       void progress.useBackend(account.profile ? accountProgress : null);
+      missions.use(account.profile?.id ?? null, account.profile ? claimMission : null);
+      this.startSocial();
       this.menu.setAccount(account.profile, account.available);
       void this.refreshRating();
     });
@@ -198,11 +234,20 @@ class App {
 
     this.showScreen('menu');
     const code = normalizeCode(new URLSearchParams(location.search).get('sala') ?? '');
+    const last = lastRoom();
     if (code.length === 6) {
       this.menu.setCode(code);
       toast(`Convite para a sala ${code}: digite seu nickname e clique em "Entrar na Sala".`, 'info', 6000);
+    } else if (last) {
+      // Reloaded the page in the middle of a match: the code is there, and the score comes back on joining.
+      this.menu.setCode(last);
+      toast(`Você estava na sala ${last}. Clique em "Entrar" para voltar com o seu placar.`, 'info', 8000);
     }
     this.loop.start();
+    // Closing or reloading the tab mid-match keeps the room on offer for a quick way back.
+    window.addEventListener('pagehide', () => {
+      if (this.net && this.lobbyState && !this.lobbyState.offline) rememberRoom(this.lobbyState.code);
+    });
 
     if (this.sm.softwareRenderer()) {
       toast(
@@ -273,9 +318,9 @@ class App {
 
   // ------------------------------------------------------------------ connection flows
 
-  /** What the others see of this player's progress. */
-  private helloProfile(): { skin: string; knife: string; lv: number } {
-    return { skin: progress.equipped, knife: progress.equippedKnife, lv: progress.level };
+  /** What the others see of this player's progress, and the id that brings their score back on a reconnect. */
+  private helloProfile(): { skin: string; knife: string; lv: number; rid: string } {
+    return { skin: progress.equipped, knife: progress.equippedKnife, lv: progress.level, rid: rejoinId() };
   }
 
   private async createRoom(nick: string, color: string): Promise<void> {
@@ -359,6 +404,7 @@ class App {
   private attach(net: NetClient, welcome: WelcomeMsg): void {
     this.net = net;
     this.lobbyState = welcome.lobby;
+    if (!welcome.lobby.offline) rememberRoom(welcome.lobby.code);
     net.onDisconnect = (r) => this.onHostLost(r);
     this.pause.setRoom(welcome.lobby.code, welcome.lobby.offline);
     if (welcome.match) {
@@ -424,6 +470,16 @@ class App {
         toast(m.text, 'info');
         this.game?.onMessage(m);
         break;
+      case 'kill':
+        this.countKill(m.k, m.v, m.w, m.hs, net.localId);
+        this.game?.onMessage(m);
+        break;
+      case 'vote':
+        this.results.setVote(m);
+        break;
+      case 'drill':
+        if (m.mode === 'mira' && this.lobbyState?.offline) missions.record('aimRun');
+        break;
       case 'kit':
       case 'round':
       case 'score':
@@ -462,6 +518,20 @@ class App {
    * Pays the match once. Practice targets and empty rooms don't count: XP, coins and rating need another human.
    * With an account the database validates the match and pays it; a guest is paid in this browser.
    */
+  /** Kills for the missions: targets in practice, players online. */
+  private countKill(killer: number, victim: number, w: number, hs: boolean, localId: number): void {
+    if (killer !== localId || victim === localId || !this.lobbyState) return;
+    if (this.lobbyState.offline) {
+      missions.record('practiceKill');
+      if (hs) missions.record('practiceHeadshot');
+    } else {
+      missions.record('kill');
+      if (hs) missions.record('headshot');
+      // Kill counters only count real players.
+      progress.addCounterKill(WEAPONS[w]?.melee ? progress.equippedKnife : progress.equipped);
+    }
+  }
+
   private reportMatch(m: EndMsg, localId: number, won: boolean): void {
     const lobby = this.lobbyState;
     const row = m.results.find((r) => r.id === localId);
@@ -470,9 +540,23 @@ class App {
     if (!lobby || !row || this.rewarded) return;
     this.rewarded = true;
     if (lobby.offline) return this.results.setRewards(null, 'Treino offline não dá XP nem moedas.');
+    progress.flushCounters();
+    missions.addHistory({
+      t: Date.now(),
+      map: lobby.config.map,
+      mode: lobby.config.arsenal === 'gungame' ? 'gungame' : lobby.config.mode,
+      kills: row.kills,
+      deaths: row.deaths,
+      headshots: row.headshots,
+      damage: row.damage,
+      won,
+      mvp: m.mvp === localId,
+    });
     if (lobby.players.filter((p) => !p.bot).length < 2) {
       return this.results.setRewards(null, 'Só partidas com outro jogador dão XP e moedas.');
     }
+    missions.record('match');
+    if (won) missions.record('win');
     const stats: MatchStats = { kills: row.kills, deaths: row.deaths, headshots: row.headshots, damage: row.damage, won, mvp: m.mvp === localId, shots: row.shots, hits: row.hits, headHits: row.headHits };
     if (!account.profile) {
       const note = account.available ? 'Entre numa conta para guardar o progresso e aparecer no ranking.' : '';
@@ -577,17 +661,244 @@ class App {
     }
   }
 
-  private onHostLost(r: DisconnectReason): void {
-    const wasClient = !this.host;
-    this.leave();
-    if (wasClient) {
-      const msg = r === 'timeout' ? 'Conexão com o host perdida (tempo esgotado).' : 'Host saiu da partida.';
-      this.menu.setError(msg);
-      toast(msg, 'error', 5000);
+  // ------------------------------------------------------------------ friends, party and ranked
+
+  /** Online room this player is in, or null. */
+  private onlineRoom(): string | null {
+    return this.net && this.lobbyState && !this.lobbyState.offline ? this.lobbyState.code : null;
+  }
+
+  /** Polls friends, invites and the party every 5 s while logged in. */
+  private startSocial(): void {
+    window.clearInterval(this.socialTimer);
+    if (!account.profile) {
+      this.social.update({ friends: [], invites: [], party: null });
+      return;
+    }
+    void this.pollSocial();
+    this.socialTimer = window.setInterval(() => void this.pollSocial(), 5000);
+  }
+
+  private async pollSocial(): Promise<void> {
+    if (!account.profile || this.socialBusy) return;
+    this.socialBusy = true;
+    try {
+      const st = await social.poll(this.onlineRoom());
+      if (!st || !account.profile) return;
+      this.social.update(st);
+      this.menu.setFriends(this.social.pending, st.friends.filter((f) => f.online && f.status === 'accepted').length);
+      // Party members go where the leader goes, from the menu or a lobby (never out of a match).
+      const p = st.party;
+      const me = account.profile.id;
+      if (p && p.leader !== me && p.room && p.room !== this.onlineRoom() && !this.busy && (this.screen === 'menu' || this.screen === 'lobby')) {
+        toast('Entrando na sala do líder do grupo…', 'info');
+        this.followTo(p.room);
+      }
+    } finally {
+      this.socialBusy = false;
     }
   }
 
+  /** Joins a room by code, leaving the current one first. */
+  private followTo(code: string): void {
+    if (this.busy || code === this.onlineRoom()) return;
+    this.social.close();
+    if (this.net) this.leave();
+    const nick = this.menu.nickname;
+    if (nick.length < 3) {
+      this.menu.setCode(code);
+      toast('Digite um nickname e clique em Entrar.', 'warn');
+      return;
+    }
+    void this.joinRoom(nick, this.menu.chosenColor, code);
+  }
+
+  private async startQueue(): Promise<void> {
+    if (!account.profile || this.busy || this.queue.visible) return;
+    this.queue.open();
+    await ranked.join();
+    this.queue.setStatus('Procurando jogadores…');
+    window.clearInterval(this.queueTimer);
+    this.queueTimer = window.setInterval(() => void this.pollQueue(), 2500);
+  }
+
+  private async cancelQueue(): Promise<void> {
+    window.clearInterval(this.queueTimer);
+    this.queue.close();
+    await ranked.leave();
+  }
+
+  private queuePolling = false;
+
+  private async pollQueue(): Promise<void> {
+    if (this.queuePolling || !this.queue.visible) return;
+    this.queuePolling = true;
+    try {
+      const q = await ranked.poll();
+      if (!q || !this.queue.visible) return;
+      if (q.state === 'searching') {
+        this.queue.setStatus(`${q.nearby} na fila perto do seu elo (±${q.window}).`);
+        return;
+      }
+      if (q.state !== 'found' || !q.code) return;
+      window.clearInterval(this.queueTimer);
+      this.queue.setStatus('Partida encontrada!');
+      this.queue.close();
+      audio.matchEnd(true);
+      if (q.host) await this.hostRanked(q.code, q.map ?? 'arena', q.players ?? 2);
+      else await this.joinRanked(q.code);
+    } finally {
+      this.queuePolling = false;
+    }
+  }
+
+  /** The player who formed the match hosts it: ranked deathmatch, and it starts once everyone is in. */
+  private async hostRanked(code: string, map: string, expected: number): Promise<void> {
+    const nick = account.profile?.username ?? this.menu.nickname;
+    for (let attempt = 0; attempt < 4 && !this.net; attempt++) {
+      this.menu.setBusy('Criando a sala ranqueada…');
+      const host = new HostServer(false, { onStatus: (t) => toast(t, 'warn') });
+      host.setConfig({ mode: 'ffa', arsenal: 'all', map: (Object.hasOwn(MAP_NAMES, map) ? map : 'arena') as MapId, killLimit: 30, timeLimit: 10 });
+      try {
+        await host.start(code);
+      } catch {
+        host.destroy();
+        await new Promise((r) => window.setTimeout(r, 1500));
+        continue;
+      }
+      this.host = host;
+      if (!(await this.connectLocal(host, nick, this.menu.chosenColor))) return;
+      this.menu.setBusy(null);
+      toast(`Sala ranqueada ${code}: esperando ${expected} jogadores…`, 'info', 6000);
+      const began = performance.now();
+      const wait = window.setInterval(() => {
+        if (this.host !== host) return window.clearInterval(wait);
+        const humans = host.lobbyState().players.filter((p) => !p.bot).length;
+        const waited = performance.now() - began;
+        if (humans >= expected || (humans >= 2 && waited > 25000)) {
+          window.clearInterval(wait);
+          host.startMatch();
+          this.lockForMatch();
+        } else if (waited > 60000) {
+          window.clearInterval(wait);
+          toast('Os outros jogadores não chegaram. A sala fica aberta para quem quiser entrar.', 'warn', 7000);
+        }
+      }, 1000);
+      return;
+    }
+    this.menu.setBusy(null);
+    this.menu.setError('Não deu para criar a sala ranqueada. Tente a fila de novo.');
+  }
+
+  /** Everyone else joins the host's code, giving the host time to open it. */
+  private async joinRanked(code: string): Promise<void> {
+    const nick = account.profile?.username ?? this.menu.nickname;
+    this.busy = true;
+    let ok = false;
+    for (let attempt = 1; attempt <= 10 && !ok; attempt++) {
+      this.menu.setBusy(`Entrando na partida ranqueada… (${attempt}/10)`);
+      await new Promise((r) => window.setTimeout(r, attempt === 1 ? 2500 : 2000));
+      ok = await this.rejoin(code, nick, this.menu.chosenColor);
+    }
+    this.busy = false;
+    if (!ok) {
+      this.menu.setBusy(null);
+      this.menu.setError('Não deu para entrar na partida ranqueada. Tente a fila de novo.');
+    }
+  }
+
+  private onHostLost(r: DisconnectReason): void {
+    const wasClient = !this.host;
+    const lobby = this.lobbyState;
+    const nick = lobby?.players.find((p) => p.id === this.net?.localId);
+    const scores = this.game?.scoreSnapshot() ?? null;
+    const localId = this.net?.localId ?? -1;
+    this.leave();
+    if (!wasClient || !lobby || lobby.offline || !nick) return;
+    void this.recover(r, lobby, localId, nick.name, nick.color, scores);
+  }
+
+  /**
+   * After losing the host: the player with the lowest id left takes over the same room code with everyone's
+   * score, and the others reconnect to it. If the host only dropped for a moment, they reconnect to it instead.
+   */
+  private async recover(r: DisconnectReason, lobby: LobbyState, localId: number, nick: string, color: string, scores: ReturnType<Game['scoreSnapshot']> | null): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    const successor = lobby.players.filter((p) => !p.bot && p.id !== lobby.hostId).reduce((a, p) => (p.id < a ? p.id : a), Infinity);
+    const mine = successor === localId;
+    const why = r === 'timeout' ? 'Conexão com o host perdida.' : 'O host saiu.';
+    toast(mine ? `${why} Você vai assumir a sala…` : `${why} Reconectando…`, 'warn', 5000);
+    let ok = false;
+    for (let attempt = 1; attempt <= 12 && !ok && !this.net; attempt++) {
+      this.menu.setBusy(mine ? `Assumindo a sala ${lobby.code}… (${attempt}/12)` : `Reconectando à sala ${lobby.code}… (${attempt}/12)`);
+      // The successor first gives the old host a moment to come back; the others give the successor time to take over.
+      await new Promise((res) => window.setTimeout(res, attempt === 1 ? (mine ? 2500 : 4000) : 2500));
+      ok = mine ? await this.takeOver(lobby, nick, color, scores) : await this.rejoin(lobby.code, nick, color);
+      // Someone else holds the code (the old host came back): join it instead.
+      if (!ok && mine && attempt >= 3) ok = await this.rejoin(lobby.code, nick, color);
+    }
+    this.busy = false;
+    if (ok) {
+      toast(mine ? 'Você é o novo host. A partida continua!' : 'Reconectado!', 'ok', 4000);
+      return;
+    }
+    this.menu.setBusy(null);
+    const msg = 'Não deu para voltar para a sala.';
+    this.menu.setError(msg);
+    toast(msg, 'error', 5000);
+  }
+
+  private async rejoin(code: string, nick: string, color: string): Promise<boolean> {
+    let net: NetClient | null = null;
+    try {
+      net = await joinRemote(code);
+      const welcome = await net.handshake(nick, color, this.helloProfile());
+      this.menu.setBusy(null);
+      this.attach(net, welcome);
+      if (welcome.match) this.lockForMatch();
+      return true;
+    } catch {
+      net?.close();
+      return false;
+    }
+  }
+
+  /** Opens the old room's code as its host, with its settings and everyone's score. */
+  private async takeOver(lobby: LobbyState, nick: string, color: string, scores: ReturnType<Game['scoreSnapshot']> | null): Promise<boolean> {
+    const host = new HostServer(false, { onStatus: (t) => toast(t, 'warn') });
+    // Bomb rounds can't be rebuilt: that match goes back to the lobby.
+    const playing = lobby.phase === 'playing' && lobby.config.mode !== 'bomb';
+    const seed: MigrationSeed = {
+      config: lobby.config,
+      playing,
+      teams: scores?.teams ?? [0, 0],
+      stash: lobby.players
+        .filter((p) => !p.bot && p.rid)
+        .map((p) => {
+          const sc = scores?.rows.get(p.id);
+          return [p.rid, { team: p.team, kills: sc?.k ?? 0, deaths: sc?.d ?? 0, damage: 0, headshots: 0, shots: 0, hits: 0, headHits: 0, level: sc?.lv ?? 0, at: 0 }];
+        }),
+    };
+    host.adopt(seed);
+    try {
+      await host.start(lobby.code);
+    } catch {
+      host.destroy();
+      return false;
+    }
+    this.host = host;
+    // The match goes on before anyone arrives, so each player's score is restored as they come in.
+    if (playing) host.startMatch();
+    this.menu.setBusy(null);
+    const ok = await this.connectLocal(host, nick, color);
+    if (ok && playing) this.lockForMatch();
+    return ok;
+  }
+
   private leave(): void {
+    forgetRoom();
+    progress.flushCounters();
     this.stopGame();
     const net = this.net;
     this.net = null;
@@ -613,6 +924,49 @@ function matchResult(m: EndMsg, localId: number, mode: GameMode): MatchResult {
   const place = m.results.findIndex((r) => r.id === localId) + 1;
   const middle = (m.results.length + 1) / 2;
   return place < middle ? 'win' : place === middle ? 'draw' : 'loss';
+}
+
+const LAST_ROOM = 'arenafps.lastroom';
+
+/** The room this tab is in, so a reload can offer to go back. */
+function rememberRoom(code: string): void {
+  try {
+    sessionStorage.setItem(LAST_ROOM, JSON.stringify({ code, at: Date.now() }));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function forgetRoom(): void {
+  try {
+    sessionStorage.removeItem(LAST_ROOM);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Code of the room this tab was in during the last 2 minutes, or null. */
+function lastRoom(): string | null {
+  try {
+    const r = JSON.parse(sessionStorage.getItem(LAST_ROOM) ?? 'null') as { code?: unknown; at?: unknown } | null;
+    return r && typeof r.code === 'string' && typeof r.at === 'number' && Date.now() - r.at < 120000 ? r.code : null;
+  } catch {
+    return null;
+  }
+}
+
+/** This tab's id in rooms, kept across reconnects and reloads so the host can give the score back. */
+function rejoinId(): string {
+  try {
+    let id = sessionStorage.getItem('arenafps.rid');
+    if (!id || !/^[a-z0-9]{8,24}$/.test(id)) {
+      id = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join('');
+      sessionStorage.setItem('arenafps.rid', id);
+    }
+    return id;
+  } catch {
+    return Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join('');
+  }
 }
 
 const app = new App();

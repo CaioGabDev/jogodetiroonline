@@ -70,6 +70,11 @@ export interface WeaponDef {
   shape: { len: number; h: number };
   /** Horizontal recoil follows RECOIL_PATTERN instead of being random. */
   pattern?: boolean;
+  /**
+   * Fixed spray: [up, sideways] per shot, in multiples of `kick` (positive sideways = left). No randomness,
+   * so the pattern can be learned and pulled down. Replaces `pattern` and the random kick.
+   */
+  spray?: ReadonlyArray<readonly [number, number]>;
   /** Aiming looks through a full-screen scope. */
   scoped?: boolean;
   /** Movement speed multiplier while holding this weapon. */
@@ -162,6 +167,20 @@ function thrown(d: ThrownDef): WeaponDef {
   };
 }
 
+/**
+ * Rifle spray, in the style of Valorant's Vandal: the first shots stay put, then a strong climb up to the
+ * tenth shot, then the climb stops and the aim swings left and right for the rest of the 30.
+ */
+export const RIFLE_SPRAY: ReadonlyArray<readonly [number, number]> = [
+  [0.15, 0], [0.35, 0], [0.6, 0.05],
+  [1.3, 0.1], [1.45, -0.1], [1.45, 0.15], [1.3, -0.1], [1.1, 0.1], [0.9, 0],
+  [0.45, 0.7], [0.3, 0.9], [0.2, 1.0],
+  [0.12, 0.7], [0.1, 0.3], [0.1, -0.5], [0.1, -1.0], [0.1, -1.2],
+  [0.08, -1.1], [0.08, -0.8], [0.08, -0.2], [0.08, 0.6], [0.08, 1.1],
+  [0.08, 1.2], [0.08, 0.9], [0.08, 0.2], [0.08, -0.6], [0.08, -1.1],
+  [0.08, -1.0], [0.08, -0.5], [0.08, 0.3],
+];
+
 export const WEAPONS: WeaponDef[] = [
   {
     id: W.RIFLE,
@@ -194,7 +213,7 @@ export const WEAPONS: WeaponDef[] = [
     sound: 'rifle',
     fireKick: 1,
     shape: { len: 0.75, h: 0.12 },
-    pattern: true,
+    spray: RIFLE_SPRAY,
     headMul: 1.4,
     sprintOut: 200,
     moveMul: 0.95,

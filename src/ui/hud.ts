@@ -1,4 +1,4 @@
-import { settings } from '../core/settings';
+import { renderAspect, settings } from '../core/settings';
 import { formatTime } from '../core/util';
 import { WEAPONS } from '../game/weapons';
 import { clear, el, show } from './dom';
@@ -147,8 +147,9 @@ export class Hud {
     this.workBar = el('div', { class: 'work-bar hidden' }, [this.workFill]);
     this.deathBy = el('div', { class: 'death-by' });
     this.deathTimer = el('div', { class: 'death-timer' });
+    this.deathTitle = el('div', { class: 'death-title', text: 'VOCÊ FOI ELIMINADO' });
     this.death = el('div', { class: 'death hidden' }, [
-      el('div', { class: 'death-title', text: 'VOCÊ FOI ELIMINADO' }),
+      this.deathTitle,
       this.deathBy,
       this.deathTimer,
     ]);
@@ -187,11 +188,22 @@ export class Hud {
       this.lastSpread = -1;
       this.redrawCrosshair(0);
       this.trimFeed();
+      this.stretchCrosshair();
     });
+    window.addEventListener('resize', () => this.stretchCrosshair());
+    this.stretchCrosshair();
   }
 
   show(v: boolean): void {
     show(this.root, v);
+  }
+
+  /** With a stretched screen, the crosshair and hit marker stretch along with the 3D view. */
+  private stretchCrosshair(): void {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const k = w / h / renderAspect(settings.get().aspect, w, h);
+    this.root.style.setProperty('--stretch', k.toFixed(4));
   }
 
   redrawCrosshair(spread: number): void {
@@ -395,8 +407,13 @@ export class Hud {
     this.indicators = [];
   }
 
-  setDeath(byName: string | null, color: string, secondsLeft: number): void {
+  private deathTitle!: HTMLElement;
+
+  /** `killcam`: the replay is on, so the box moves out of the way and says so. */
+  setDeath(byName: string | null, color: string, secondsLeft: number, killcam = false): void {
     show(this.death, byName !== null);
+    this.death.classList.toggle('killcam', killcam);
+    this.text(this.deathTitle, killcam ? 'KILLCAM' : 'VOCÊ FOI ELIMINADO');
     if (byName === null) {
       this.cache.delete(this.deathBy);
       return;

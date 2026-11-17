@@ -22,9 +22,15 @@ export const accountProgress: ProgressBackend = {
     }
     const r = (data ?? {}) as Record<string, unknown>;
     if (r.result === 'coins') return { result: 'coins' };
+    if (r.result === 'closed') return { result: 'closed' };
     if (r.result !== 'ok' || !isSkinId(r.skin)) return { result: 'error' };
     const refund = typeof r.refund === 'number' && r.refund > 0 ? Math.floor(r.refund) : 0;
-    return { result: 'ok', skin: r.skin, dup: r.dup === true, refund } satisfies CaseResult;
+    return { result: 'ok', skin: r.skin, dup: r.dup === true, refund, counter: r.counter === true } satisfies CaseResult;
+  },
+  async addCounterKills(id, kills) {
+    if (!supabase) return;
+    const { error } = await supabase.rpc('add_counter_kills', { p_skin: id, p_kills: kills });
+    if (error) console.warn('Contador não salvo', error.message);
   },
   async equip(id) {
     if (!supabase) return false;
@@ -33,3 +39,14 @@ export const accountProgress: ProgressBackend = {
     return !error && data === true;
   },
 };
+
+/** Pays a finished mission in the account, once per day or week. The database knows the rewards. */
+export async function claimMission(id: string): Promise<'ok' | 'claimed' | 'error'> {
+  if (!supabase) return 'error';
+  const { data, error } = await supabase.rpc('claim_mission', { p_mission: id });
+  if (error) {
+    console.warn('Não deu para resgatar a missão', error.message);
+    return 'error';
+  }
+  return data === 'ok' || data === 'claimed' ? data : 'error';
+}

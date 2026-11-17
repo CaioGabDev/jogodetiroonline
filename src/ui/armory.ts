@@ -2,7 +2,7 @@ import { progress } from '../core/progress';
 import { account } from '../net/account';
 import { RANKS, SKINS, rankFor, skinById, type BladeShape, type InspectStyle, type Rank, type SkinDef } from '../game/progression';
 import { W, WEAPONS } from '../game/weapons';
-import { CASES, TIERS, caseFor, caseItems, rollCase, tierOf, type CaseDef } from '../game/cases';
+import { CASES, TIERS, caseFor, caseItems, caseOpen, rollCase, tierOf, type CaseDef } from '../game/cases';
 import { SkinPreview } from '../render/skinPreview';
 import { clear, el, show } from './dom';
 import { toast } from './toast';
@@ -276,7 +276,9 @@ export class Armory {
     clear(this.premiumGrid);
     clear(this.knifeGrid);
     clear(this.caseRow);
-    for (const c of CASES) this.caseRow.append(this.caseCard(c));
+    // Open seasonal cases come first; ones out of season show when they come back.
+    const order = [...CASES].sort((a, b) => Number(!!b.season && caseOpen(b)) - Number(!!a.season && caseOpen(a)) || Number(caseOpen(b)) - Number(caseOpen(a)));
+    for (const c of order) this.caseRow.append(this.caseCard(c));
     if (progress.loading) {
       this.grid.append(el('p', { class: 'hint', text: 'Carregando o progresso da conta…' }));
       return;
@@ -312,6 +314,8 @@ export class Armory {
       : s.fx
         ? ['Formato próprio', 'Tiros coloridos', 'Efeito de abate', `Inspeção: ${INSPECT_NAMES[s.fx.inspect]}`]
         : [s.pattern === 'solid' ? 'Cor sólida' : 'Padrão na arma toda'];
+    if (progress.hasCounter(s.id)) feats.push(`Contador: ${fmt(progress.counterKills(s.id))} abates`);
+    if (s.season) feats.push(s.season === 'natal' ? 'Temporada de Natal' : 'Temporada de Halloween');
     clear(this.showcaseInfo);
     this.showcaseInfo.append(
       s.fx ? el('span', { class: 'premium-tag', text: 'PREMIUM' }) : '',
@@ -344,6 +348,7 @@ export class Armory {
     const card = el('div', { class: classes.filter(Boolean).join(' '), title: 'Ver na vitrine' }, [
       canvas,
       s.fx ? el('span', { class: 'premium-tag small', text: 'PREMIUM' }) : null,
+      progress.hasCounter(s.id) ? el('span', { class: 'counter-tag', text: `CONTADOR · ${fmt(progress.counterKills(s.id))}` }) : null,
       el('div', { class: 'skin-name', text: s.name }),
       el('div', { class: 'skin-status', text: status }),
       action,
@@ -398,6 +403,9 @@ export class Armory {
   private caseCard(c: CaseDef): HTMLElement {
     const items = caseItems(c);
     const afford = progress.coins >= c.price;
+    const open_ = caseOpen(c);
+    const pad = (n: number): string => String(n).padStart(2, '0');
+    const when = c.window ? `${pad(c.window.from[1])}/${pad(c.window.from[0])} a ${pad(c.window.to[1])}/${pad(c.window.to[0])}` : '';
     const odds = (Object.keys(c.odds) as Array<keyof typeof TIERS>).map((t) =>
       el('span', { class: 'tier-tag', text: `${TIERS[t].name} ${c.odds[t]}%`, style: { color: TIERS[t].color, borderColor: TIERS[t].color } }),
     );
@@ -414,14 +422,15 @@ export class Armory {
     );
     const open = el('button', {
       class: 'btn' + (afford ? ' primary' : ''),
-      text: afford ? `Abrir · ${fmt(c.price)}` : `Faltam ${fmt(c.price - progress.coins)} moedas`,
+      text: !open_ ? 'Fora da temporada' : afford ? `Abrir · ${fmt(c.price)}` : `Faltam ${fmt(c.price - progress.coins)} moedas`,
       onClick: () => void this.buyCase(c),
     }) as HTMLButtonElement;
-    open.disabled = !afford || progress.loading;
-    const card = el('div', { class: 'case-card' }, [
+    open.disabled = !open_ || !afford || progress.loading;
+    const card = el('div', { class: 'case-card' + (open_ ? '' : ' closed') + (c.season ? ' seasonal' : '') }, [
       el('div', { class: 'case-box' }, [el('div', { class: 'case-lid' }), el('span', { text: '?' })]),
       el('div', { class: 'case-info' }, [
         el('div', { class: 'case-name', text: c.name }),
+        c.window ? el('div', { class: 'hint', text: open_ ? `Temporada: ${when}. Só agora!` : `Volta na temporada: ${when}` }) : '',
         el('div', { class: 'case-odds' }, odds),
         strip,
         el('div', { class: 'case-actions' }, [coinLabel(c.price), open]),
@@ -439,16 +448,20 @@ export class Armory {
         toast(`Faltam moedas para a ${c.name}.`, 'warn');
         return;
       }
+      if (r.result === 'closed') {
+        toast(`A ${c.name} está fora da temporada.`, 'warn');
+        return;
+      }
       if (r.result !== 'ok' || !r.skin) {
         toast('Não deu para abrir a caixa. Tente de novo.', 'error');
         return;
       }
-      await this.spin(c, skinById(r.skin), r.dup === true, r.refund ?? 0);
+      await this.spin(c, skinById(r.skin), r.dup === true, r.refund ?? 0, r.counter === true);
     });
   }
 
   /** The reel: tiles slide past and stop on the skin won. */
-  private spin(c: CaseDef, won: SkinDef, dup: boolean, refund: number): Promise<void> {
+  private spin(c: CaseDef, won: SkinDef, dup: boolean, refund: number, counter: boolean): Promise<void> {
     const TILE = 132;
     const COUNT = 46;
     const WIN_AT = 39;
@@ -493,7 +506,7 @@ export class Armory {
         done = true;
         this.spinning = false;
         reel.children[WIN_AT]?.classList.add('won');
-        this.showResult(result, won, dup, refund);
+        this.showResult(result, won, dup, refund, counter);
         resolve();
       };
       reel.addEventListener('transitionend', finish, { once: true });
@@ -502,7 +515,7 @@ export class Armory {
     });
   }
 
-  private showResult(box: HTMLElement, s: SkinDef, dup: boolean, refund: number): void {
+  private showResult(box: HTMLElement, s: SkinDef, dup: boolean, refund: number, counter: boolean): void {
     const t = tierOf(s);
     const info = t ? TIERS[t] : null;
     const equip = el('button', {
@@ -519,8 +532,12 @@ export class Armory {
     clear(box);
     box.append(
       info ? el('div', { class: 'tier-tag big', text: info.name, style: { color: info.color, borderColor: info.color } }) : '',
+      counter ? el('span', { class: 'counter-tag big', text: 'COM CONTADOR DE ABATES!' }) : '',
       el('div', { class: 'showcase-name', text: s.name }),
-      el('p', { class: 'hint', text: dup ? `Você já tinha essa: ${fmt(refund)} moedas de volta.` : (s.tagline ?? 'Nova skin na sua coleção!') }),
+      el('p', {
+        class: 'hint',
+        text: dup && counter ? 'Você já tinha essa, e agora ela ganhou o contador de abates.' : dup ? `Você já tinha essa: ${fmt(refund)} moedas de volta.` : (s.tagline ?? 'Nova skin na sua coleção!'),
+      }),
       el('div', { class: 'showcase-actions' }, [
         progress.isEquipped(s.id) ? '' : equip,
         el('button', {

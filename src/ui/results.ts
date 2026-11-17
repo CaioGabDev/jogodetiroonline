@@ -1,6 +1,6 @@
 import { progress, type MatchSummary } from '../core/progress';
-import { TEAM_COLORS, TEAM_NAMES, teamMode, type GameMode } from '../game/constants';
-import type { EndMsg } from '../net/protocol';
+import { MAP_NAMES, TEAM_COLORS, TEAM_NAMES, teamMode, type GameMode } from '../game/constants';
+import type { EndMsg, VoteMsg } from '../net/protocol';
 import { coinLabel, levelBadge, xpBar } from './armory';
 import { clear, el, show } from './dom';
 
@@ -8,6 +8,8 @@ export interface ResultsCallbacks {
   onRematch(): void;
   onLobby(): void;
   onLeave(): void;
+  /** Votes for option `i` of the map vote. */
+  onVote(i: number): void;
 }
 
 export class Results {
@@ -18,6 +20,10 @@ export class Results {
   private table: HTMLElement;
   private rewards: HTMLElement;
   private actions: HTMLElement;
+  private voteBox: HTMLElement;
+  private myVote = -1;
+  private voteEnds = 0;
+  private voteTimer = 0;
 
   constructor(
     parent: HTMLElement,
@@ -29,13 +35,50 @@ export class Results {
     this.table = el('div', { class: 'res-table' });
     this.rewards = el('div', { class: 'res-rewards' });
     this.actions = el('div', { class: 'lobby-actions' });
-    const panel = el('div', { class: 'panel results-panel' }, [this.banner, this.sub, this.mvp, this.rewards, this.table, this.actions]);
+    this.voteBox = el('div', { class: 'res-vote hidden' });
+    const panel = el('div', { class: 'panel results-panel' }, [this.banner, this.sub, this.mvp, this.rewards, this.table, this.voteBox, this.actions]);
     this.root = el('div', { class: 'overlay results hidden' }, [panel]);
     parent.append(this.root);
   }
 
   show(v: boolean): void {
     show(this.root, v);
+    if (!v) {
+      show(this.voteBox, false);
+      this.myVote = -1;
+      window.clearInterval(this.voteTimer);
+    }
+  }
+
+  /** The next map vote: one button per map with its votes, and the time left. */
+  setVote(m: VoteMsg): void {
+    if (m.counts.every((c) => c === 0) && m.winner === null) this.myVote = -1;
+    this.voteEnds = performance.now() + m.left;
+    clear(this.voteBox);
+    const title = el('div', { class: 'res-vote-title' });
+    const tick = (): void => {
+      title.textContent = m.winner ? `Próximo mapa: ${MAP_NAMES[m.winner]}` : `Vote no próximo mapa · ${Math.max(0, Math.ceil((this.voteEnds - performance.now()) / 1000))}s`;
+    };
+    tick();
+    window.clearInterval(this.voteTimer);
+    if (!m.winner) this.voteTimer = window.setInterval(tick, 250);
+    const row = el(
+      'div',
+      { class: 'res-vote-row' },
+      m.options.map((map, i) => {
+        const b = el('button', {
+          class: 'btn res-vote-btn' + (i === this.myVote ? ' primary' : '') + (m.winner === map ? ' winner' : ''),
+          onClick: () => {
+            this.myVote = i;
+            this.cb.onVote(i);
+          },
+        }, [el('b', { text: MAP_NAMES[map] }), el('span', { text: `${m.counts[i]} ${m.counts[i] === 1 ? 'voto' : 'votos'}` })]) as HTMLButtonElement;
+        b.disabled = m.winner !== null;
+        return b;
+      }),
+    );
+    this.voteBox.append(title, row);
+    show(this.voteBox, true);
   }
 
   get visible(): boolean {

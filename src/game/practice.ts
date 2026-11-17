@@ -1,5 +1,5 @@
 /** Offline practice: what the targets do, and how hard they make it. Bomb maps keep their own practice. */
-export type PracticeMode = 'alvos' | 'aleatorio' | 'duelo' | 'reflexo';
+export type PracticeMode = 'alvos' | 'aleatorio' | 'duelo' | 'reflexo' | 'mira';
 export type PracticeLevel = 'normal' | 'medio' | 'dificil';
 
 export interface PracticeSetup {
@@ -14,6 +14,7 @@ export const PRACTICE_MODES: Record<PracticeMode, string> = {
   aleatorio: 'Spawn aleatório',
   duelo: 'Duelo (atiram em você)',
   reflexo: 'Reflexo (aperte E)',
+  mira: 'Treino de mira (aperte E)',
 };
 
 export const PRACTICE_LEVELS: Record<PracticeLevel, string> = {
@@ -49,6 +50,10 @@ export const LEVELS: Record<PracticeLevel, LevelTuning> = {
   medio: { strafe: 2.6, duelists: 3, reaction: 450, fireMs: 380, accuracy: 0.4, headshot: 0.14, damage: 15, respawnMs: 1300, lifeMs: 1500, gapMs: 450, together: 2 },
   dificil: { strafe: 3.6, duelists: 4, reaction: 260, fireMs: 260, accuracy: 0.55, headshot: 0.22, damage: 18, respawnMs: 900, lifeMs: 950, gapMs: 300, together: 2 },
 };
+
+/** Aim training: length of a run, targets up at once and how far they appear. */
+export const AIM_RUN_MS = 60000;
+export const AIM_TARGETS_UP = 3;
 
 /** Targets in one reflex drill. */
 export const DRILL_TARGETS = 30;

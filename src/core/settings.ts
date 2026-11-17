@@ -81,7 +81,8 @@ export const SENS_MAX = 10;
 export interface Settings {
   /** In Valorant's scale (see DEG_PER_COUNT). */
   sensitivity: number;
-  adsSensitivity: number;
+  /** Like Valorant's scoped sensitivity multiplier: 1 keeps the same feel through any zoom. */
+  adsMultiplier: number;
   invertY: boolean;
   adsMode: HoldMode;
   crouchMode: HoldMode;
@@ -100,6 +101,8 @@ export interface Settings {
   showFps: boolean;
   showPing: boolean;
   showDamage: boolean;
+  /** Replay of the last seconds from the killer's eyes after dying. */
+  killcam: boolean;
   killfeedSize: number;
   /** Mouse wheel order of the slots (0-1 primaries, 2 pistol, 3 knife). The first one is the starting weapon. */
   wheel: number[];
@@ -110,7 +113,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   // About what 2.5 was before the Valorant scale, and Valorant's own default.
   sensitivity: 1,
-  adsSensitivity: 1,
+  adsMultiplier: 1,
   invertY: false,
   adsMode: 'hold',
   crouchMode: 'hold',
@@ -161,12 +164,18 @@ export const DEFAULT_SETTINGS: Settings = {
   showFps: false,
   showPing: true,
   showDamage: true,
+  killcam: true,
   killfeedSize: 5,
   wheel: [0, 1, 2, 3],
   sensScale: 'valorant',
 };
 
 export const FPS_LIMITS = [0, 30, 60, 90, 120, 144, 165, 240];
+/** Width/height the 3D view is drawn at: the stretched ratio, never wider than the screen. */
+export function renderAspect(aspect: number, w: number, h: number): number {
+  return aspect > 0 ? Math.min(aspect, w / h) : w / h;
+}
+
 /** Stretched aspect ratios, like the stretched resolutions of other shooters. 0 = native. */
 export const ASPECTS: Array<[number, string]> = [
   [0, 'Nativa'],
@@ -206,7 +215,9 @@ function sanitize(raw: unknown): Settings {
     return typeof v === 'number' && Number.isFinite(v) ? clamp(Math.round(v * k * 1000) / 1000, SENS_MIN, SENS_MAX) : def;
   };
   s.sensitivity = sens('sensitivity', s.sensitivity);
-  s.adsSensitivity = sens('adsSensitivity', s.adsSensitivity);
+  // Saves from before kept an ADS sensitivity of its own: the multiplier keeps the same turn.
+  if (typeof r.adsMultiplier === 'number' && Number.isFinite(r.adsMultiplier)) s.adsMultiplier = clamp(r.adsMultiplier, 0.01, 5);
+  else if (typeof r.adsSensitivity === 'number') s.adsMultiplier = clamp(Math.round((sens('adsSensitivity', s.sensitivity) / s.sensitivity) * 1000) / 1000, 0.01, 5);
   s.invertY = bool('invertY', s.invertY);
   s.adsMode = r.adsMode === 'toggle' ? 'toggle' : 'hold';
   s.crouchMode = r.crouchMode === 'toggle' ? 'toggle' : 'hold';
@@ -222,6 +233,7 @@ function sanitize(raw: unknown): Settings {
   s.showFps = bool('showFps', s.showFps);
   s.showPing = bool('showPing', s.showPing);
   s.showDamage = bool('showDamage', s.showDamage);
+  s.killcam = bool('killcam', s.killcam);
   s.killfeedSize = Math.round(num('killfeedSize', 2, 10, s.killfeedSize));
   if (Array.isArray(r.wheel) && s.wheel.every((slot) => (r.wheel as unknown[]).includes(slot)) && r.wheel.length === s.wheel.length) {
     s.wheel = r.wheel as number[];

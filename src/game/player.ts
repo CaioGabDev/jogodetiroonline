@@ -2,6 +2,9 @@ import { lerp, lerpAngle } from '../core/util';
 import { F_ADS, F_ALIVE, F_CROUCH, F_GROUND, F_PROTECTED, type SnapPlayer } from '../net/protocol';
 import { PlayerModel } from '../render/models';
 
+/** Snapshot history kept per player, long enough for the killcam. */
+const KEEP_MS = 4000;
+
 interface Sample {
   t: number;
   x: number;
@@ -49,7 +52,8 @@ export class RemotePlayer {
     const last = this.buf[this.buf.length - 1];
     if (last && t <= last.t) return;
     this.buf.push({ t, x: s.p[0], y: s.p[1], z: s.p[2], yaw: s.yw, pitch: s.pt, f: s.f, w: s.w, hp: s.hp });
-    while (this.buf.length > 2 && this.buf[1].t < t - 1000) this.buf.shift();
+    // A few seconds kept: the killcam replays them.
+    while (this.buf.length > 2 && this.buf[1].t < t - KEEP_MS) this.buf.shift();
   }
 
   /** Interpolates the buffered snapshots at host time `rt`. Returns horizontal distance moved this frame. */
