@@ -87,7 +87,7 @@ function loadProp(model: string): Promise<THREE.Object3D> {
   return p;
 }
 
-/** Stretches a copy of the model to fill the prop's box. Copies share geometry, so scene.ts leaves them undisposed. */
+/** Stretches a copy of the model to fill the prop's box. Only used to bake the props together. */
 function placeProp(source: THREE.Object3D, def: PropDef): THREE.Object3D {
   const box = new THREE.Box3().setFromObject(source);
   const size = box.getSize(new THREE.Vector3());
@@ -100,24 +100,72 @@ function placeProp(source: THREE.Object3D, def: PropDef): THREE.Object3D {
   holder.position.set(def.x, def.y, def.z);
   holder.rotation.y = (def.turn * Math.PI) / 2;
   holder.add(model);
-  holder.traverse((o) => {
-    o.userData.shared = true;
-    if (o instanceof THREE.Mesh) o.castShadow = o.receiveShadow = true;
-  });
   return holder;
 }
 
-/** Props appear as their files arrive. Collision doesn't wait for them. */
-function addProps(def: MapDef, group: THREE.Group): void {
-  for (const p of def.props ?? []) {
-    loadProp(p.model).then(
-      (m) => group.add(placeProp(m, p)),
-      (e: unknown) => console.warn('Modelo não carregou:', p.model, e),
-    );
-  }
+/** Layer of everything that never moves: the static shadow map draws only this layer (scene.ts). */
+export const STATIC_LAYER = 1;
+
+/**
+ * Props are baked together once their files arrive: one mesh per material instead of one per part of
+ * every model, which cuts hundreds of draw calls on the bigger maps. Collision doesn't wait for them.
+ * Resolves when they are in the scene, so the static shadow can be drawn again.
+ */
+function addProps(def: MapDef, group: THREE.Group): Promise<void> {
+  const props = def.props ?? [];
+  if (!props.length) return Promise.resolve();
+  return Promise.all(
+    props.map((p) =>
+      loadProp(p.model).then(
+        (m) => placeProp(m, p),
+        (e: unknown) => {
+          console.warn('Modelo não carregou:', p.model, e);
+          return null;
+        },
+      ),
+    ),
+  ).then((placed) => {
+    const byKey = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[] }>();
+    for (const holder of placed) {
+      if (!holder) continue;
+      holder.updateMatrixWorld(true);
+      holder.traverse((o) => {
+        if (!(o instanceof THREE.Mesh)) return;
+        if (Array.isArray(o.material)) {
+          // Rare: kept as it is, already placed.
+          const keep = new THREE.Mesh(o.geometry, o.material);
+          keep.applyMatrix4(o.matrixWorld);
+          keep.castShadow = keep.receiveShadow = true;
+          keep.userData.shared = true;
+          keep.layers.enable(STATIC_LAYER);
+          group.add(keep);
+          return;
+        }
+        const geo = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+        geo.applyMatrix4(o.matrixWorld);
+        // Only geometries with the same attributes can be merged.
+        const key = o.material.uuid + '|' + Object.keys(geo.attributes).sort().join(',');
+        let b = byKey.get(key);
+        if (!b) byKey.set(key, (b = { mat: o.material, geos: [] }));
+        b.geos.push(geo);
+      });
+    }
+    for (const { mat, geos } of byKey.values()) {
+      const merged = mergeGeometries(geos, false);
+      geos.forEach((g) => g.dispose());
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, mat);
+      mesh.castShadow = mesh.receiveShadow = true;
+      // The geometry is this map's own; the material belongs to the cached model.
+      mesh.userData.sharedMaterial = true;
+      mesh.layers.enable(STATIC_LAYER);
+      mesh.name = 'map-props';
+      group.add(mesh);
+    }
+  });
 }
 
-export function buildMap(def: MapDef, anisotropy: number): { group: THREE.Group; materials: THREE.Material[] } {
+export function buildMap(def: MapDef, anisotropy: number): { group: THREE.Group; materials: THREE.Material[]; ready: Promise<void> } {
   const group = new THREE.Group();
   group.name = 'map';
   const byMat = new Map<MatKind, THREE.BufferGeometry[]>();
@@ -150,6 +198,7 @@ export function buildMap(def: MapDef, anisotropy: number): { group: THREE.Group;
     const mesh = new THREE.Mesh(merged, mat);
     mesh.castShadow = kind !== 'floor';
     mesh.receiveShadow = true;
+    mesh.layers.enable(STATIC_LAYER);
     mesh.name = 'map-' + kind;
     group.add(mesh);
   }
@@ -165,8 +214,8 @@ export function buildMap(def: MapDef, anisotropy: number): { group: THREE.Group;
     group.add(m);
   }
   for (const site of def.bomb?.sites ?? []) group.add(siteMark(site.name, site.rect));
-  addProps(def, group);
-  return { group, materials };
+  const ready = addProps(def, group);
+  return { group, materials, ready };
 }
 
 /** Painted area of a bomb site, with its letter. */

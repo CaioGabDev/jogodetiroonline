@@ -2,12 +2,16 @@ import * as THREE from 'three';
 import { settings, type Settings } from '../core/settings';
 import type { MapId } from '../game/constants';
 import { MAPS } from '../game/mapData';
-import { buildMap, buildSky, PickupView } from './map';
+import { buildMap, buildSky, PickupView, STATIC_LAYER } from './map';
 
+/**
+ * `liveShadows`: the shadow map is drawn again every frame, with the players in it. Without it, only the
+ * map casts shadows and they are drawn once per map (a whole render pass saved every frame).
+ */
 const QUALITY = {
-  low: { pixelRatioCap: 1, antialias: false, shadowSize: 512, shadowType: THREE.BasicShadowMap, anisotropy: 1 },
-  medium: { pixelRatioCap: 1, antialias: true, shadowSize: 1024, shadowType: THREE.PCFShadowMap, anisotropy: 4 },
-  high: { pixelRatioCap: 2, antialias: true, shadowSize: 2048, shadowType: THREE.PCFSoftShadowMap, anisotropy: 8 },
+  low: { pixelRatioCap: 1, antialias: false, shadowSize: 512, shadowType: THREE.BasicShadowMap, anisotropy: 1, liveShadows: false },
+  medium: { pixelRatioCap: 1, antialias: true, shadowSize: 1024, shadowType: THREE.PCFShadowMap, anisotropy: 4, liveShadows: false },
+  high: { pixelRatioCap: 2, antialias: true, shadowSize: 2048, shadowType: THREE.PCFSoftShadowMap, anisotropy: 8, liveShadows: true },
 };
 
 /** Owns the WebGL renderer, world scene, camera and the separate viewmodel (first-person weapon) scene. */
@@ -76,7 +80,7 @@ export class SceneManager {
     this.mapGroup?.traverse((o) => {
       if (o instanceof THREE.Mesh && !o.userData.shared) {
         o.geometry.dispose();
-        (o.material as THREE.Material).dispose();
+        if (!o.userData.sharedMaterial) (o.material as THREE.Material).dispose();
       }
     });
     this.pickups?.dispose();
@@ -85,6 +89,10 @@ export class SceneManager {
     this.mapGroup = map.group;
     this.mapMaterials = map.materials;
     this.scene.add(map.group);
+    // The static shadow is drawn again once the props are in.
+    void map.ready.then(() => {
+      if (this.mapId === id) this.renderer.shadowMap.needsUpdate = true;
+    });
     this.pickups = new PickupView(def);
     this.scene.add(this.pickups.group);
 
@@ -100,6 +108,7 @@ export class SceneManager {
     sc.near = 10 * k;
     sc.far = 160 * k;
     sc.updateProjectionMatrix();
+    this.renderer.shadowMap.needsUpdate = true;
   }
 
   private createRenderer(): void {
@@ -137,6 +146,11 @@ export class SceneManager {
     const shadows = s.shadows;
     r.shadowMap.enabled = shadows;
     r.shadowMap.type = q.shadowType;
+    r.shadowMap.autoUpdate = q.liveShadows;
+    r.shadowMap.needsUpdate = true;
+    // Live: everything casts (layer 0). Static: only the map's own layer.
+    if (q.liveShadows) this.sun.shadow.camera.layers.set(0);
+    else this.sun.shadow.camera.layers.set(STATIC_LAYER);
     this.sun.castShadow = shadows;
     if (this.sun.shadow.mapSize.x !== q.shadowSize) {
       this.sun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
