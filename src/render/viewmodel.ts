@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { DEFAULT_KNIFE, DEFAULT_SKIN, skinById } from '../game/progression';
 import { knifeModel, knifeSwing, releaseKnife, setKnifeInspect } from './knives';
 import { W } from '../game/weapons';
@@ -20,7 +21,6 @@ const steel = new THREE.MeshStandardMaterial({ color: 0xe4e8ee, roughness: 0.35,
 const UNSKINNED = new Set<THREE.Material>([glove, sleeve, lens]);
 
 const HAND_TMP = new THREE.Vector3();
-const HAND_Q = new THREE.Quaternion();
 const HAND_E = new THREE.Euler();
 
 /** Duration of a knife swing, in seconds. */
@@ -123,6 +123,34 @@ function rounded(mat: THREE.Material, w: number, h: number, d: number, x: number
   return m;
 }
 
+/** Bakes a hand's pieces into one mesh per material: a hand is 3 draw calls instead of ~13. */
+function bakeHand(g: THREE.Group): THREE.Group {
+  g.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(g.matrixWorld).invert();
+  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const meshes: THREE.Mesh[] = [];
+  g.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    meshes.push(o);
+    const geo = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
+    const mat = o.material as THREE.Material;
+    if (!byMat.has(mat)) byMat.set(mat, []);
+    byMat.get(mat)!.push(geo);
+  });
+  for (const m of meshes) {
+    m.removeFromParent();
+    m.geometry.dispose();
+  }
+  // Empty pose groups would be left behind; the baked meshes go straight on the hand.
+  g.clear();
+  for (const [mat, geos] of byMat) {
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((x) => x.dispose());
+    if (merged) g.add(new THREE.Mesh(merged, mat));
+  }
+  return g;
+}
+
 function handGroup(): THREE.Group {
   const g = new THREE.Group();
   g.userData.hand = true;
@@ -153,7 +181,7 @@ function gripHand(y: number, z: number): THREE.Group {
   g.add(limb(glove, v(-0.004, y + 0.044, z + 0.004), v(-0.03, y + 0.036, z - 0.012), 0.0095));
   const wrist = v(0.034, y - 0.03, z + 0.05);
   forearm(g, wrist, v(0.1, y - 0.18, z + 0.42));
-  return g;
+  return bakeHand(g);
 }
 
 /** Left hand under the handguard at (0, y, z): palm up, fingers up the right side, thumb on the left. */
@@ -168,7 +196,7 @@ function supportHand(y: number, z: number, width = 0.066): THREE.Group {
   }
   g.add(limb(glove, v(-half * 0.6, y - 0.014, z + 0.03), v(-half - 0.004, y + 0.008, z - 0.012), 0.0105));
   forearm(g, v(-0.01, y - 0.026, z + 0.045), v(-0.16, y - 0.2, z + 0.42));
-  return g;
+  return bakeHand(g);
 }
 
 /** Left hand cupped round the right one on a handgun. */
@@ -181,7 +209,7 @@ function cupHand(y: number, z: number): THREE.Group {
   }
   g.add(limb(glove, v(-0.03, y + 0.022, z + 0.02), v(-0.02, y + 0.05, z - 0.03), 0.0105));
   forearm(g, v(-0.036, y - 0.04, z + 0.05), v(-0.17, y - 0.2, z + 0.4));
-  return g;
+  return bakeHand(g);
 }
 
 function hands(group: THREE.Group, gripZ: number, foreZ: number, foreY = -0.02): void {
@@ -276,7 +304,7 @@ function buildKnife(model: THREE.Object3D): GunParts {
   const fist = handGroup();
   fist.add(pose(knifeFist()));
   forearm(fist, v(0.01, -0.06, 0.05), v(0.06, -0.2, 0.42));
-  g.add(fist);
+  g.add(bakeHand(fist));
   const pos = new THREE.Vector3(0.2, -0.2, -0.46);
   return { group: g, muzzle: new THREE.Vector3(0, 0.21, -0.3), hipPos: pos, adsPos: pos, mag: null };
 }
@@ -636,15 +664,19 @@ export class Viewmodel {
     // Tossed tricks: the gun goes up clear of the hands, which drop and open a little, then catch it.
     const lift = pose.toss * (knife ? 0.07 : 0.13);
     g.pivot.position.set(g.pivotBase.x, g.pivotBase.y + pose.dy + lift, g.pivotBase.z - pose.toss * 0.03);
-    // Tricks done in hand (the butterfly knife) carry the hands along; once tossed, the turn is
-    // a whole one and leaves them alone.
-    const held = g.pivot.quaternion;
-    const base = HAND_TMP.copy(g.pivotBase).applyQuaternion(held);
+    // Only tricks done in hand (the butterfly knife) carry the hands along. Tossed tricks and the normal
+    // inspection leave them still: the arms never spin with the gun.
+    const inHand = (knife ? this.knifeStyle : this.inspectStyle) === 'butterfly';
+    const base = HAND_TMP.copy(g.pivotBase).applyQuaternion(g.pivot.quaternion);
     for (const h of g.hands) {
-      h.quaternion.copy(held).multiply(HAND_Q.setFromEuler(HAND_E.set(pose.toss * 0.25, 0, 0)));
-      h.position.copy(g.pivotBase).sub(base);
-      h.position.y += pose.dy * (1 - pose.toss) - pose.toss * 0.07;
-      h.position.z += pose.toss * 0.02;
+      if (inHand) {
+        h.quaternion.copy(g.pivot.quaternion);
+        h.position.copy(g.pivotBase).sub(base);
+        h.position.y += pose.dy;
+      } else {
+        h.quaternion.setFromEuler(HAND_E.set(pose.toss * 0.25, 0, 0));
+        h.position.set(0, -pose.toss * 0.07, pose.toss * 0.02);
+      }
     }
     setKitInspect(g.pivot, pose.amount);
 
