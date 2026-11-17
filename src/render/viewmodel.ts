@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { DEFAULT_KNIFE, DEFAULT_SKIN, skinById } from '../game/progression';
 import { knifeModel, knifeSwing, releaseKnife, setKnifeInspect } from './knives';
 import { W } from '../game/weapons';
@@ -17,6 +18,10 @@ const lens = new THREE.MeshStandardMaterial({ color: 0x113355, emissive: 0x0a224
 const steel = new THREE.MeshStandardMaterial({ color: 0xe4e8ee, roughness: 0.35, metalness: 0.2 });
 /** Never painted by a skin. */
 const UNSKINNED = new Set<THREE.Material>([glove, sleeve, lens]);
+
+const HAND_TMP = new THREE.Vector3();
+const HAND_Q = new THREE.Quaternion();
+const HAND_E = new THREE.Euler();
 
 /** Duration of a knife swing, in seconds. */
 const SWING_TIME = 0.28;
@@ -49,9 +54,12 @@ interface GunModel extends GunParts {
   pivot: THREE.Group;
   /** Where the pivot rests. */
   pivotBase: THREE.Vector3;
+  /** Hand groups, which drop a little while the gun is tossed. */
+  hands: THREE.Object3D[];
 }
 
-const isHand = (o: THREE.Object3D): boolean => o instanceof THREE.Mesh && (o.material === glove || o.material === sleeve);
+/** Hands are kept out of the pivot: the gun turns and is tossed between them. */
+const isHand = (o: THREE.Object3D): boolean => o.userData.hand === true || (o instanceof THREE.Mesh && (o.material === glove || o.material === sleeve));
 
 /** Moves the pivot to the middle of what it holds, without moving anything on screen. */
 function recenter(pivot: THREE.Group): void {
@@ -81,17 +89,104 @@ function recenter(pivot: THREE.Group): void {
 function withPivot(parts: GunParts): GunModel {
   const pivot = new THREE.Group();
   const gun = parts.group.children.filter((c) => !isHand(c));
+  const hands = parts.group.children.filter(isHand);
   parts.group.add(pivot);
   pivot.add(...gun);
   recenter(pivot);
-  return { ...parts, pivot, pivotBase: pivot.position.clone() };
+  return { ...parts, pivot, pivotBase: pivot.position.clone(), hands };
+}
+
+// ---------------------------------------------------------------------------
+// Hands: palm, fingers wrapped around the gun, thumb and a forearm that runs off screen.
+// ---------------------------------------------------------------------------
+
+const UP = new THREE.Vector3(0, 1, 0);
+const cuffMat = new THREE.MeshStandardMaterial({ color: 0x2a2f24, roughness: 0.95 });
+UNSKINNED.add(cuffMat);
+
+/** A capsule or tapered cylinder from a to b. */
+function limb(mat: THREE.Material, a: THREE.Vector3, b: THREE.Vector3, r0: number, r1 = r0, capped = true): THREE.Mesh {
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const len = dir.length();
+  const geo = capped && r0 === r1 ? new THREE.CapsuleGeometry(r0, Math.max(0.001, len), 4, 10) : new THREE.CylinderGeometry(r1, r0, len, 12);
+  const m = new THREE.Mesh(geo, mat);
+  m.position.copy(a).add(b).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(UP, dir.normalize());
+  return m;
+}
+
+const v = (x: number, y: number, z: number): THREE.Vector3 => new THREE.Vector3(x, y, z);
+
+function rounded(mat: THREE.Material, w: number, h: number, d: number, x: number, y: number, z: number): THREE.Mesh {
+  const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, Math.min(w, h, d) * 0.35), mat);
+  m.position.set(x, y, z);
+  return m;
+}
+
+function handGroup(): THREE.Group {
+  const g = new THREE.Group();
+  g.userData.hand = true;
+  return g;
+}
+
+/** Forearm from the wrist back past the edge of the screen, with a cuff at the glove. */
+function forearm(g: THREE.Group, wrist: THREE.Vector3, elbow: THREE.Vector3): void {
+  const dir = new THREE.Vector3().subVectors(elbow, wrist).normalize();
+  g.add(limb(cuffMat, wrist, wrist.clone().addScaledVector(dir, 0.04), 0.03, 0.033, false));
+  g.add(limb(sleeve, wrist.clone().addScaledVector(dir, 0.03), elbow, 0.034, 0.05, false));
+}
+
+/**
+ * Right hand around a vertical grip at (0, y, z): palm on the right side,
+ * four fingers wrapped round the front and the thumb over the left.
+ */
+function gripHand(y: number, z: number): THREE.Group {
+  const g = handGroup();
+  g.add(rounded(glove, 0.03, 0.08, 0.07, 0.03, y - 0.005, z + 0.006));
+  for (let i = 0; i < 4; i++) {
+    const fy = y + 0.026 - i * 0.019;
+    const fz = z - 0.034 + i * 0.002;
+    g.add(limb(glove, v(0.032, fy, fz + 0.012), v(-0.012, fy, fz - 0.004), 0.0095));
+    g.add(limb(glove, v(-0.012, fy, fz - 0.004), v(-0.03, fy - 0.002, fz + 0.022), 0.0088));
+  }
+  g.add(limb(glove, v(0.03, y + 0.03, z + 0.03), v(-0.004, y + 0.044, z + 0.004), 0.0105));
+  g.add(limb(glove, v(-0.004, y + 0.044, z + 0.004), v(-0.03, y + 0.036, z - 0.012), 0.0095));
+  const wrist = v(0.034, y - 0.03, z + 0.05);
+  forearm(g, wrist, v(0.1, y - 0.18, z + 0.42));
+  return g;
+}
+
+/** Left hand under the handguard at (0, y, z): palm up, fingers up the right side, thumb on the left. */
+function supportHand(y: number, z: number, width = 0.066): THREE.Group {
+  const g = handGroup();
+  const half = width / 2;
+  g.add(rounded(glove, width * 0.8, 0.026, 0.075, -0.004, y - 0.016, z + 0.004));
+  for (let i = 0; i < 4; i++) {
+    const fz = z - 0.03 + i * 0.019;
+    g.add(limb(glove, v(half * 0.6, y - 0.018, fz), v(half + 0.006, y + 0.006, fz - 0.004), 0.009));
+    g.add(limb(glove, v(half + 0.006, y + 0.006, fz - 0.004), v(half + 0.002, y + 0.03, fz - 0.008), 0.0085));
+  }
+  g.add(limb(glove, v(-half * 0.6, y - 0.014, z + 0.03), v(-half - 0.004, y + 0.008, z - 0.012), 0.0105));
+  forearm(g, v(-0.01, y - 0.026, z + 0.045), v(-0.16, y - 0.2, z + 0.42));
+  return g;
+}
+
+/** Left hand cupped round the right one on a handgun. */
+function cupHand(y: number, z: number): THREE.Group {
+  const g = handGroup();
+  g.add(rounded(glove, 0.03, 0.075, 0.07, -0.034, y - 0.01, z + 0.01));
+  for (let i = 0; i < 4; i++) {
+    const fy = y + 0.008 - i * 0.019;
+    g.add(limb(glove, v(-0.034, fy, z - 0.026), v(0.014, fy - 0.004, z - 0.05), 0.0095));
+  }
+  g.add(limb(glove, v(-0.03, y + 0.022, z + 0.02), v(-0.02, y + 0.05, z - 0.03), 0.0105));
+  forearm(g, v(-0.036, y - 0.04, z + 0.05), v(-0.17, y - 0.2, z + 0.4));
+  return g;
 }
 
 function hands(group: THREE.Group, gripZ: number, foreZ: number, foreY = -0.02): void {
-  group.add(box(glove, 0.06, 0.08, 0.08, 0, -0.07, gripZ));
-  group.add(box(sleeve, 0.055, 0.05, 0.16, 0.0, -0.08, gripZ + 0.11));
-  group.add(box(glove, 0.07, 0.06, 0.08, -0.01, foreY - 0.03, foreZ));
-  group.add(box(sleeve, 0.05, 0.05, 0.18, -0.05, foreY - 0.05, foreZ + 0.1));
+  group.add(gripHand(-0.075, gripZ));
+  group.add(supportHand(foreY - 0.04, foreZ));
 }
 
 function buildRifle(): GunParts {
@@ -118,9 +213,7 @@ function buildPistol(): GunParts {
   grip.rotation.x = 0.25;
   g.add(grip);
   g.add(box(dark, 0.01, 0.015, 0.01, 0, 0.032, -0.14));
-  g.add(box(glove, 0.06, 0.07, 0.08, 0, -0.1, 0.03));
-  g.add(box(sleeve, 0.055, 0.05, 0.16, 0, -0.12, 0.14));
-  g.add(box(glove, 0.06, 0.06, 0.07, -0.035, -0.1, 0.02));
+  g.add(gripHand(-0.075, 0.03), cupHand(-0.085, 0.03));
   return { group: g, muzzle: new THREE.Vector3(0, 0.0, -0.16), hipPos: new THREE.Vector3(0.17, -0.17, -0.45), adsPos: new THREE.Vector3(0, -0.04, -0.36), mag: grip };
 }
 
@@ -152,22 +245,38 @@ function buildSniper(): GunParts {
   return { group: g, muzzle: new THREE.Vector3(0, 0.012, -0.78), hipPos: new THREE.Vector3(0.2, -0.2, -0.62), adsPos: new THREE.Vector3(0, -0.085, -0.4), mag };
 }
 
+/** Fist closed round a knife grip along +Y, in the knife's own space (flat of the blade in XY). */
+function knifeFist(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(rounded(glove, 0.05, 0.085, 0.034, 0.012, -0.012, -0.022));
+  for (let i = 0; i < 4; i++) {
+    const fy = 0.034 - i * 0.022;
+    g.add(limb(glove, v(0.03, fy, -0.016), v(-0.006, fy - 0.002, 0.028), 0.0105));
+    g.add(limb(glove, v(-0.006, fy - 0.002, 0.028), v(-0.026, fy - 0.004, 0.006), 0.0098));
+  }
+  g.add(limb(glove, v(-0.02, 0.01, -0.03), v(-0.022, 0.05, 0.004), 0.011));
+  return g;
+}
+
 /** The knife in hand: the model of the knife skin, held at the fist so swings pivot on the hand. */
 function buildKnife(model: THREE.Object3D): GunParts {
   const g = new THREE.Group();
   // Turned on its long axis so the flat of the blade faces the camera, then tilted up and forward.
-  const twist = new THREE.Group();
-  twist.rotation.y = 0.85;
-  twist.add(model);
-  twist.add(box(glove, 0.07, 0.09, 0.08, 0, -0.005, 0.008));
-  const tilt = new THREE.Group();
-  tilt.rotation.x = -0.95;
-  tilt.add(twist);
-  g.add(tilt);
-
-  const forearm = box(sleeve, 0.06, 0.055, 0.22, 0.015, -0.05, 0.14);
-  forearm.rotation.x = 0.25;
-  g.add(forearm);
+  // The knife and the fist share the pose but not the group: an inspection turns the knife alone.
+  const pose = (o: THREE.Object3D): THREE.Group => {
+    const twist = new THREE.Group();
+    twist.rotation.y = 0.85;
+    twist.add(o);
+    const tilt = new THREE.Group();
+    tilt.rotation.x = -0.95;
+    tilt.add(twist);
+    return tilt;
+  };
+  g.add(pose(model));
+  const fist = handGroup();
+  fist.add(pose(knifeFist()));
+  forearm(fist, v(0.01, -0.06, 0.05), v(0.06, -0.2, 0.42));
+  g.add(fist);
   const pos = new THREE.Vector3(0.2, -0.2, -0.46);
   return { group: g, muzzle: new THREE.Vector3(0, 0.21, -0.3), hipPos: pos, adsPos: pos, mag: null };
 }
@@ -240,9 +349,7 @@ function pistolGrip(g: THREE.Group): THREE.Mesh {
   const grip = box(dark, 0.04, 0.11, 0.055, 0, -0.09, 0.02);
   grip.rotation.x = 0.25;
   g.add(grip);
-  g.add(box(glove, 0.06, 0.07, 0.08, 0, -0.1, 0.03));
-  g.add(box(sleeve, 0.055, 0.05, 0.16, 0, -0.12, 0.14));
-  g.add(box(glove, 0.06, 0.06, 0.07, -0.035, -0.1, 0.02));
+  g.add(gripHand(-0.075, 0.03), cupHand(-0.085, 0.03));
   return grip;
 }
 
@@ -488,14 +595,14 @@ export class Viewmodel {
     if (s.inspect >= 0) {
       // Brings the weapon in, shows one side, turns it over to show the other, and puts it back.
       const smooth = THREE.MathUtils.smoothstep;
-      const hold = smooth(s.inspect, 0, 0.12) * (1 - smooth(s.inspect, 0.88, 1));
-      const turn = smooth(s.inspect, 0.12, 0.42) - 2 * smooth(s.inspect, 0.5, 0.8);
-      pos.x -= hold * 0.1;
-      pos.y += hold * 0.05;
-      pos.z += hold * 0.08;
-      rotX += hold * 0.2;
-      rotY += hold * (0.45 + turn * 0.75);
-      rotZ += hold * (0.25 - turn * 0.3);
+      const hold = smooth(s.inspect, 0, 0.15) * (1 - smooth(s.inspect, 0.85, 1));
+      const turn = smooth(s.inspect, 0.15, 0.45) - 2 * smooth(s.inspect, 0.52, 0.8);
+      pos.x -= hold * 0.08;
+      pos.y += hold * 0.04;
+      pos.z += hold * 0.06;
+      rotX += hold * 0.12;
+      rotY += hold * (0.35 + turn * 0.5);
+      rotZ += hold * (0.2 - turn * 0.35);
     }
     const lower = 1 - s.raise;
     pos.y -= lower * 0.3;
@@ -526,7 +633,19 @@ export class Viewmodel {
     const pose = inspectPose(knife ? this.knifeStyle : this.inspectStyle, s.inspect);
     setKnifeInspect(this.blade, knife ? s.inspect : -1);
     g.pivot.rotation.set(pose.rx, pose.ry, pose.rz);
-    g.pivot.position.set(g.pivotBase.x, g.pivotBase.y + pose.dy, g.pivotBase.z);
+    // Tossed tricks: the gun goes up clear of the hands, which drop and open a little, then catch it.
+    const lift = pose.toss * (knife ? 0.07 : 0.13);
+    g.pivot.position.set(g.pivotBase.x, g.pivotBase.y + pose.dy + lift, g.pivotBase.z - pose.toss * 0.03);
+    // Tricks done in hand (the butterfly knife) carry the hands along; once tossed, the turn is
+    // a whole one and leaves them alone.
+    const held = g.pivot.quaternion;
+    const base = HAND_TMP.copy(g.pivotBase).applyQuaternion(held);
+    for (const h of g.hands) {
+      h.quaternion.copy(held).multiply(HAND_Q.setFromEuler(HAND_E.set(pose.toss * 0.25, 0, 0)));
+      h.position.copy(g.pivotBase).sub(base);
+      h.position.y += pose.dy * (1 - pose.toss) - pose.toss * 0.07;
+      h.position.z += pose.toss * 0.02;
+    }
     setKitInspect(g.pivot, pose.amount);
 
     if (this.flashLife > 0) {

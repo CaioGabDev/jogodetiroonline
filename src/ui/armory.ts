@@ -2,6 +2,7 @@ import { progress } from '../core/progress';
 import { account } from '../net/account';
 import { RANKS, SKINS, rankFor, skinById, type BladeShape, type InspectStyle, type Rank, type SkinDef } from '../game/progression';
 import { W, WEAPONS } from '../game/weapons';
+import { CASES, TIERS, caseFor, caseItems, rollCase, tierOf, type CaseDef } from '../game/cases';
 import { SkinPreview } from '../render/skinPreview';
 import { clear, el, show } from './dom';
 import { toast } from './toast';
@@ -161,6 +162,10 @@ export class Armory {
   private grid: HTMLElement;
   private premiumGrid: HTMLElement;
   private knifeGrid: HTMLElement;
+  private caseRow: HTMLElement;
+  private opening: HTMLElement;
+  /** A case is spinning: Esc and the other buttons wait for it. */
+  private spinning = false;
   private where: HTMLElement;
   private preview = new SkinPreview();
   private showcaseInfo: HTMLElement;
@@ -177,6 +182,8 @@ export class Armory {
     this.grid = el('div', { class: 'skin-grid' });
     this.premiumGrid = el('div', { class: 'skin-grid premium' });
     this.knifeGrid = el('div', { class: 'skin-grid knives' });
+    this.caseRow = el('div', { class: 'case-row' });
+    this.opening = el('div', { class: 'overlay case-opening hidden' });
     this.where = el('p', { class: 'hint' });
     this.showcaseInfo = el('div', { class: 'showcase-info' });
     this.gunChips = el('div', { class: 'gun-chips' });
@@ -189,20 +196,27 @@ export class Armory {
       el('h2', { text: 'Arsenal' }),
       this.head,
       showcase,
+      el('h3', { text: 'Caixas' }),
+      el('p', { class: 'hint', text: 'As skins especiais e as facas só saem de caixas. Ganhe moedas jogando (vitória, abates e subir de nível) e abra uma. Se vier uma que você já tem, metade do preço volta.' }),
+      this.caseRow,
       el('h3', { text: 'Coleção premium' }),
-      el('p', { class: 'hint', text: 'Mudam o formato da arma, a cor dos tiros, têm efeito de abate que todo mundo vê e inspeção própria (Y).' }),
+      el('p', { class: 'hint', text: 'Mudam o formato da arma, a cor dos tiros, têm efeito de abate que todo mundo vê e inspeção própria (Y). Saem na Caixa de Armas.' }),
       this.premiumGrid,
       el('h3', { text: 'Facas' }),
-      el('p', { class: 'hint', text: 'Cada faca tem modelo e inspeção próprios, e se equipa separada da skin das armas.' }),
+      el('p', { class: 'hint', text: 'Cada faca tem modelo e inspeção próprios, e se equipa separada da skin das armas. Saem na Caixa de Facas.' }),
       this.knifeGrid,
       el('h3', { text: 'Skins' }),
-      el('p', { class: 'hint', text: 'A skin vale para todas as suas armas, e os outros jogadores também a veem. As de patente são grátis ao chegar no nível; as outras se compram com moedas.' }),
+      el('p', { class: 'hint', text: 'A skin vale para todas as suas armas, e os outros jogadores também a veem. As de patente são grátis ao chegar no nível; as outras saem na Caixa de Armas.' }),
       this.grid,
       el('div', { class: 'armory-foot' }, [this.where, close]),
     ]);
-    this.root = el('div', { class: 'overlay armory hidden' }, [panel]);
+    this.root = el('div', { class: 'overlay armory hidden' }, [panel, this.opening]);
     window.addEventListener('keydown', (e) => {
       if (!this.visible) return;
+      if (!this.opening.classList.contains('hidden')) {
+        if (e.code === 'Escape' && !this.spinning) show(this.opening, false);
+        return;
+      }
       if (e.code === 'Escape') this.close();
       if (e.code === 'KeyY' && !e.repeat) this.preview.inspect();
     });
@@ -261,6 +275,8 @@ export class Armory {
     clear(this.grid);
     clear(this.premiumGrid);
     clear(this.knifeGrid);
+    clear(this.caseRow);
+    for (const c of CASES) this.caseRow.append(this.caseCard(c));
     if (progress.loading) {
       this.grid.append(el('p', { class: 'hint', text: 'Carregando o progresso da conta…' }));
       return;
@@ -311,7 +327,7 @@ export class Armory {
   private async run(task: () => Promise<void>): Promise<void> {
     if (this.busy) return;
     this.busy = true;
-    this.grid.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    this.root.querySelectorAll<HTMLButtonElement>('.skin-grid button, .case-row button').forEach((b) => (b.disabled = true));
     try {
       await task();
     } finally {
@@ -333,6 +349,9 @@ export class Armory {
       action,
     ]);
     if (s.fx) card.style.setProperty('--skin-glow', s.fx.kill);
+    const tier = tierOf(s);
+    if (tier) card.style.setProperty('--tier', TIERS[tier].color);
+    if (tier) card.classList.add('has-tier');
     // A click on the card shows it in the showcase; its button still buys or equips.
     card.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button')) return;
@@ -344,7 +363,9 @@ export class Armory {
   private actionFor(s: SkinDef, level: number): { status: string; action: HTMLElement } {
     const owned = progress.owns(s.id);
     const equipped = progress.isEquipped(s.id);
-    const locked = level < s.level;
+    const tier = tierOf(s);
+    // Case skins have no level: anyone can get them from a case.
+    const locked = tier === null && level < s.level;
 
     let status: string;
     let action: HTMLElement;
@@ -363,25 +384,157 @@ export class Armory {
       });
     } else if (locked) {
       const r = rankFor(s.level);
-      status = s.price > 0 ? `Nível ${s.level} · ${fmt(s.price)} moedas` : `Grátis no nível ${s.level}`;
+      status = `Grátis no nível ${s.level}`;
       action = el('span', { class: 'skin-lock', text: `${r.icon} ${r.name}`, style: { color: r.color } });
     } else {
-      const afford = progress.coins >= s.price;
-      status = `${fmt(s.price)} moedas`;
-      action = el('button', {
-        class: 'btn small' + (afford ? ' primary' : ''),
-        text: afford ? 'Comprar' : 'Sem moedas',
-        onClick: () =>
-          void this.run(async () => {
-            const r = await progress.buy(s.id);
-            if (r === 'ok') toast(`Skin ${s.name} comprada e equipada!`, 'ok');
-            else if (r === 'coins') toast(`Faltam ${fmt(s.price - progress.coins)} moedas para a ${s.name}.`, 'warn');
-            else if (r === 'error') toast('A compra não foi concluída. Tente de novo.', 'error');
-          }),
-      });
-      if (!afford) (action as HTMLButtonElement).disabled = true;
+      const c = caseFor(s);
+      status = c ? `Sai na ${c.name}` : 'Indisponível';
+      action = tier ? el('span', { class: 'tier-tag', text: TIERS[tier].name, style: { color: TIERS[tier].color, borderColor: TIERS[tier].color } }) : el('span');
     }
 
     return { status, action };
+  }
+
+  private caseCard(c: CaseDef): HTMLElement {
+    const items = caseItems(c);
+    const afford = progress.coins >= c.price;
+    const odds = (Object.keys(c.odds) as Array<keyof typeof TIERS>).map((t) =>
+      el('span', { class: 'tier-tag', text: `${TIERS[t].name} ${c.odds[t]}%`, style: { color: TIERS[t].color, borderColor: TIERS[t].color } }),
+    );
+    const strip = el(
+      'div',
+      { class: 'case-items' },
+      items.map((s) => {
+        const canvas = el('canvas', { class: 'case-item-swatch', title: s.name });
+        drawPreview(canvas, s);
+        const t = tierOf(s);
+        if (t) canvas.style.borderColor = TIERS[t].color;
+        return canvas;
+      }),
+    );
+    const open = el('button', {
+      class: 'btn' + (afford ? ' primary' : ''),
+      text: afford ? `Abrir · ${fmt(c.price)}` : `Faltam ${fmt(c.price - progress.coins)} moedas`,
+      onClick: () => void this.buyCase(c),
+    }) as HTMLButtonElement;
+    open.disabled = !afford || progress.loading;
+    const card = el('div', { class: 'case-card' }, [
+      el('div', { class: 'case-box' }, [el('div', { class: 'case-lid' }), el('span', { text: '?' })]),
+      el('div', { class: 'case-info' }, [
+        el('div', { class: 'case-name', text: c.name }),
+        el('div', { class: 'case-odds' }, odds),
+        strip,
+        el('div', { class: 'case-actions' }, [coinLabel(c.price), open]),
+      ]),
+    ]);
+    card.style.setProperty('--case', c.color);
+    return card;
+  }
+
+  /** Pays, asks for the skin (the database draws it when logged in), then spins the reel to it. */
+  private async buyCase(c: CaseDef): Promise<void> {
+    await this.run(async () => {
+      const r = await progress.openCase(c.id);
+      if (r.result === 'coins') {
+        toast(`Faltam moedas para a ${c.name}.`, 'warn');
+        return;
+      }
+      if (r.result !== 'ok' || !r.skin) {
+        toast('Não deu para abrir a caixa. Tente de novo.', 'error');
+        return;
+      }
+      await this.spin(c, skinById(r.skin), r.dup === true, r.refund ?? 0);
+    });
+  }
+
+  /** The reel: tiles slide past and stop on the skin won. */
+  private spin(c: CaseDef, won: SkinDef, dup: boolean, refund: number): Promise<void> {
+    const TILE = 132;
+    const COUNT = 46;
+    const WIN_AT = 39;
+    const tiles: SkinDef[] = [];
+    for (let i = 0; i < COUNT; i++) tiles.push(i === WIN_AT ? won : rollCase(c));
+    const reel = el(
+      'div',
+      { class: 'reel-strip' },
+      tiles.map((s) => {
+        const t = tierOf(s);
+        const canvas = el('canvas', { class: 'skin-preview' });
+        drawPreview(canvas, s);
+        const tile = el('div', { class: 'reel-tile' }, [canvas, el('div', { class: 'skin-name', text: s.name })]);
+        if (t) tile.style.setProperty('--tier', TIERS[t].color);
+        return tile;
+      }),
+    );
+    const result = el('div', { class: 'case-result hidden' });
+    clear(this.opening);
+    this.opening.append(
+      el('div', { class: 'panel case-opening-panel' }, [
+        el('h2', { text: c.name }),
+        el('div', { class: 'reel' }, [reel, el('div', { class: 'reel-marker' })]),
+        result,
+      ]),
+    );
+    show(this.opening, true);
+    this.spinning = true;
+
+    return new Promise((resolve) => {
+      const window_ = this.opening.querySelector('.reel') as HTMLElement;
+      // Lands somewhere inside the winning tile, not always dead center.
+      const jitter = (Math.random() - 0.5) * (TILE - 30);
+      const target = WIN_AT * TILE + TILE / 2 - window_.clientWidth / 2 + jitter;
+      reel.style.transform = 'translateX(0)';
+      void reel.offsetWidth;
+      reel.style.transition = 'transform 5.2s cubic-bezier(0.1, 0.65, 0.12, 1)';
+      reel.style.transform = `translateX(${-target}px)`;
+      let done = false;
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        this.spinning = false;
+        reel.children[WIN_AT]?.classList.add('won');
+        this.showResult(result, won, dup, refund);
+        resolve();
+      };
+      reel.addEventListener('transitionend', finish, { once: true });
+      // In case the transition never fires (tab in the background).
+      setTimeout(finish, 5600);
+    });
+  }
+
+  private showResult(box: HTMLElement, s: SkinDef, dup: boolean, refund: number): void {
+    const t = tierOf(s);
+    const info = t ? TIERS[t] : null;
+    const equip = el('button', {
+      class: 'btn primary',
+      text: 'Equipar',
+      onClick: () =>
+        void this.run(async () => {
+          if (await progress.equip(s.id)) {
+            toast(`${s.name} equipada!`, 'ok');
+            show(this.opening, false);
+          } else toast('Não deu para equipar agora. Tente de novo.', 'error');
+        }),
+    });
+    clear(box);
+    box.append(
+      info ? el('div', { class: 'tier-tag big', text: info.name, style: { color: info.color, borderColor: info.color } }) : '',
+      el('div', { class: 'showcase-name', text: s.name }),
+      el('p', { class: 'hint', text: dup ? `Você já tinha essa: ${fmt(refund)} moedas de volta.` : (s.tagline ?? 'Nova skin na sua coleção!') }),
+      el('div', { class: 'showcase-actions' }, [
+        progress.isEquipped(s.id) ? '' : equip,
+        el('button', {
+          class: 'btn',
+          text: 'Ver na vitrine',
+          onClick: () => {
+            show(this.opening, false);
+            this.select(s.id);
+          },
+        }),
+        el('button', { class: 'btn', text: 'Fechar', onClick: () => show(this.opening, false) }),
+      ]),
+    );
+    if (info) box.style.setProperty('--tier', info.color);
+    show(box, true);
   }
 }
