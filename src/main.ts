@@ -3,7 +3,8 @@ import { audio } from './core/audio';
 import { input } from './core/input';
 import { progress } from './core/progress';
 import type { MatchStats } from './game/progression';
-import { accountProgress } from './net/progressApi';
+import { accountProgress, claimMission } from './net/progressApi';
+import { missions } from './core/missions';
 import { GameLoop } from './core/loop';
 import { normalizeCode } from './core/util';
 import { teamMode, type GameMode, type MapId } from './game/constants';
@@ -31,6 +32,7 @@ import { MainMenu } from './ui/menu';
 import { PauseMenu } from './ui/pause';
 import { ProfileScreen } from './ui/profile';
 import { RankingScreen } from './ui/ranking';
+import { MissionsScreen } from './ui/missions';
 import { Results } from './ui/results';
 import { Scoreboard } from './ui/scoreboard';
 import { SettingsUI } from './ui/settingsUI';
@@ -52,6 +54,7 @@ class App {
   private auth: AuthScreen;
   private profile: ProfileScreen;
   private ranking: RankingScreen;
+  private missions: MissionsScreen;
   private roomBrowser: RoomBrowser;
   private loadout: LoadoutPicker;
   private inventory: Inventory;
@@ -93,6 +96,7 @@ class App {
       onLogout: () => void account.signOut(),
       onProfile: () => this.profile.open(),
       onRanking: () => this.ranking.open(),
+      onMissions: () => this.missions.open(),
     });
     this.lobby = new Lobby(ui, {
       onStart: () => {
@@ -134,8 +138,12 @@ class App {
     account.onRecovery(() => this.auth.openReset());
     this.profile = new ProfileScreen(ui);
     this.ranking = new RankingScreen(ui);
+    this.missions = new MissionsScreen(ui);
+    missions.onChange(() => this.menu.setMissionsReady(missions.ready));
+    this.menu.setMissionsReady(missions.ready);
     account.onChange(() => {
       void progress.useBackend(account.profile ? accountProgress : null);
+      missions.use(account.profile?.id ?? null, account.profile ? claimMission : null);
       this.menu.setAccount(account.profile, account.available);
       void this.refreshRating();
     });
@@ -424,6 +432,13 @@ class App {
         toast(m.text, 'info');
         this.game?.onMessage(m);
         break;
+      case 'kill':
+        this.countKill(m.k, m.v, m.hs, net.localId);
+        this.game?.onMessage(m);
+        break;
+      case 'drill':
+        if (m.mode === 'mira' && this.lobbyState?.offline) missions.record('aimRun');
+        break;
       case 'kit':
       case 'round':
       case 'score':
@@ -462,6 +477,18 @@ class App {
    * Pays the match once. Practice targets and empty rooms don't count: XP, coins and rating need another human.
    * With an account the database validates the match and pays it; a guest is paid in this browser.
    */
+  /** Kills for the missions: targets in practice, players online. */
+  private countKill(killer: number, victim: number, hs: boolean, localId: number): void {
+    if (killer !== localId || victim === localId || !this.lobbyState) return;
+    if (this.lobbyState.offline) {
+      missions.record('practiceKill');
+      if (hs) missions.record('practiceHeadshot');
+    } else {
+      missions.record('kill');
+      if (hs) missions.record('headshot');
+    }
+  }
+
   private reportMatch(m: EndMsg, localId: number, won: boolean): void {
     const lobby = this.lobbyState;
     const row = m.results.find((r) => r.id === localId);
@@ -470,9 +497,22 @@ class App {
     if (!lobby || !row || this.rewarded) return;
     this.rewarded = true;
     if (lobby.offline) return this.results.setRewards(null, 'Treino offline não dá XP nem moedas.');
+    missions.addHistory({
+      t: Date.now(),
+      map: lobby.config.map,
+      mode: lobby.config.arsenal === 'gungame' ? 'gungame' : lobby.config.mode,
+      kills: row.kills,
+      deaths: row.deaths,
+      headshots: row.headshots,
+      damage: row.damage,
+      won,
+      mvp: m.mvp === localId,
+    });
     if (lobby.players.filter((p) => !p.bot).length < 2) {
       return this.results.setRewards(null, 'Só partidas com outro jogador dão XP e moedas.');
     }
+    missions.record('match');
+    if (won) missions.record('win');
     const stats: MatchStats = { kills: row.kills, deaths: row.deaths, headshots: row.headshots, damage: row.damage, won, mvp: m.mvp === localId, shots: row.shots, hits: row.hits, headHits: row.headHits };
     if (!account.profile) {
       const note = account.available ? 'Entre numa conta para guardar o progresso e aparecer no ranking.' : '';

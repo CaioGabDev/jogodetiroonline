@@ -2024,6 +2024,7 @@ export class HostServer {
       const acc = d.shots ? Math.round((d.kills / d.shots) * 100) : 0;
       const avg = d.reactions.length ? Math.round(d.reactions.reduce((a, b) => a + b, 0) / d.reactions.length) : 0;
       this.tell(`Fim: ${d.kills} alvos · precisão ${acc}% · ${d.shots} tiros · ${avg} ms por alvo`);
+      this.broadcast({ type: 'drill', mode: 'mira', kills: d.kills });
       this.tell('Aperte E para tentar de novo.');
       return;
     }
@@ -2087,6 +2088,7 @@ export class HostServer {
       const avg = d.reactions.length ? Math.round(d.reactions.reduce((a, b) => a + b, 0) / d.reactions.length) : 0;
       const bestMs = d.reactions.length ? Math.round(Math.min(...d.reactions)) : 0;
       const pct = Math.round((d.kills / DRILL_TARGETS) * 100);
+      this.broadcast({ type: 'drill', mode: 'reflexo', kills: d.kills });
       this.tell(d.kills ? `Fim: ${d.kills}/${DRILL_TARGETS} (${pct}%) · reação média ${avg} ms · melhor ${bestMs} ms` : `Fim: 0/${DRILL_TARGETS}. Bora de novo!`);
       this.tell('Aperte E para tentar de novo.');
     }

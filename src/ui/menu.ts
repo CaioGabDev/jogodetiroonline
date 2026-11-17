@@ -22,6 +22,7 @@ export interface MenuCallbacks {
   onLogout(): void;
   onProfile(): void;
   onRanking(): void;
+  onMissions(): void;
 }
 
 const CONTROLS: Array<[string, string]> = [
@@ -48,6 +49,7 @@ const ICONS = {
   ranking: 'M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4ZM7 6H4v1a4 4 0 0 0 3.5 4M17 6h3v1a4 4 0 0 1-3.5 4',
   controls: 'M3 7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1ZM7 10h1M11 10h1M15 10h2M7 14h10',
   settings: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4M4 12h14M18 12h2',
+  missions: 'M9 5h10M9 12h10M9 19h10M4 5l1 1 2-2M4 12l1 1 2-2M4 19l1 1 2-2',
 };
 
 function icon(name: keyof typeof ICONS): SVGSVGElement {
@@ -84,6 +86,13 @@ export class MainMenu {
   private rating: number | null = null;
   private armorySub: HTMLElement;
   private rankingTile: HTMLButtonElement;
+  /** Shows how many missions wait to be claimed. */
+  setMissionsReady(n: number): void {
+    this.missionsSub.textContent = n > 0 ? `${n} para resgatar!` : 'Moedas diárias e semanais';
+    this.missionsSub.classList.toggle('tile-alert', n > 0);
+  }
+
+  private missionsSub!: HTMLElement;
   private rankingSub: HTMLElement;
   private controls: HTMLElement;
 
@@ -225,6 +234,8 @@ export class MainMenu {
     const armoryTile = tile('arsenal', 'Arsenal e skins', this.armorySub, () => cb.onArmory());
     this.rankingTile = tile('ranking', 'Ranking', this.rankingSub, () => cb.onRanking());
     this.rankingTile.classList.add('hidden');
+    this.missionsSub = el('small', { text: 'Moedas diárias e semanais' });
+    const missionsTile = tile('missions', 'Missões e histórico', this.missionsSub, () => cb.onMissions());
     const controlsTile = tile('controls', 'Controles', el('small', { text: 'Teclas do jogo' }), () => this.showControls(true));
     const settingsTile = tile('settings', 'Configurações', el('small', { text: 'Mira, vídeo, áudio e teclas' }), () => cb.onSettings());
     this.buttons = [create, join, practice];
@@ -243,7 +254,7 @@ export class MainMenu {
     const shell = el('div', { class: 'menu-shell' }, [
       top,
       el('div', { class: 'menu-main' }, [playPanel, roomsPanel]),
-      el('nav', { class: 'menu-tiles' }, [armoryTile, this.rankingTile, controlsTile, settingsTile]),
+      el('nav', { class: 'menu-tiles' }, [armoryTile, missionsTile, this.rankingTile, controlsTile, settingsTile]),
     ]);
     this.root = el('div', { class: 'screen menu hidden' }, [shell]);
 

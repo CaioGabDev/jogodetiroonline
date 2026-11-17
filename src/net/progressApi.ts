@@ -33,3 +33,14 @@ export const accountProgress: ProgressBackend = {
     return !error && data === true;
   },
 };
+
+/** Pays a finished mission in the account, once per day or week. The database knows the rewards. */
+export async function claimMission(id: string): Promise<'ok' | 'claimed' | 'error'> {
+  if (!supabase) return 'error';
+  const { data, error } = await supabase.rpc('claim_mission', { p_mission: id });
+  if (error) {
+    console.warn('Não deu para resgatar a missão', error.message);
+    return 'error';
+  }
+  return data === 'ok' || data === 'claimed' ? data : 'error';
+}

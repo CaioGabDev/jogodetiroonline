@@ -237,6 +237,13 @@ class ProgressStore {
     return true;
   }
 
+  /** Coins from a mission, for a guest. An account is paid by the database and reloaded instead. */
+  addCoins(n: number): void {
+    if (this.backend || !(n > 0)) return;
+    this.data.coins += Math.floor(n);
+    this.commit();
+  }
+
   /** Pays out a finished online match, for a guest. */
   addMatch(stats: MatchStats): MatchSummary {
     const reward = matchReward(stats);

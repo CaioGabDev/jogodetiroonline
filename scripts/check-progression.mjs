@@ -16,6 +16,8 @@ const P = await vite.ssrLoadModule('/src/game/progression.ts');
 const { parseClientMsg } = await vite.ssrLoadModule('/src/net/protocol.ts');
 const { progress, sanitizeProgress } = await vite.ssrLoadModule('/src/core/progress.ts');
 const C = await vite.ssrLoadModule('/src/game/cases.ts');
+const M = await vite.ssrLoadModule('/src/game/missions.ts');
+const { missions } = await vite.ssrLoadModule('/src/core/missions.ts');
 await vite.close();
 
 // Level curve.
@@ -196,5 +198,30 @@ assert.equal(store.get('arenafps.progress.v1'), localSaved, 'account progress ne
 await progress.useBackend(null);
 assert.equal(progress.remote, false);
 assert.equal(progress.equipped, won, 'logging out brings the browser progress back');
+
+// Missions: count up to the goal, pay once, and the database has the same ids and rewards.
+{
+  assert.match(M.periodKey('daily', new Date('2026-11-18T02:59:00Z')), /^2026-11-17$/, 'the day turns at midnight in Brasília');
+  assert.equal(M.periodKey('daily', new Date('2026-11-18T03:00:00Z')), '2026-11-18');
+  assert.equal(M.periodKey('weekly', new Date('2026-11-22T12:00:00Z')), '2026-11-16', 'weeks start on Monday');
+  const ids = new Set(M.MISSIONS.map((m) => m.id));
+  assert.equal(ids.size, M.MISSIONS.length);
+  const sqlRows = [...sql.matchAll(/\('([dw]_[a-z_]+)', (\d+), '(daily|weekly)'\)/g)].map((m) => ({ id: m[1], reward: Number(m[2]), period: m[3] }));
+  assert.deepEqual(sqlRows, M.MISSIONS.map((m) => ({ id: m.id, reward: m.reward, period: m.period })), 'missions in the migration match missions.ts');
+
+  missions.use(null, null);
+  const coins = progress.coins;
+  const alvos = M.missionById('d_alvos');
+  assert.equal(await missions.claim('d_alvos'), 'incomplete');
+  missions.record('practiceKill', 60);
+  missions.record('practiceKill', 60);
+  assert.equal(missions.progressOf(alvos).done, 100, 'stops at the goal');
+  assert.equal(await missions.claim('d_alvos'), 'ok');
+  assert.equal(progress.coins, coins + alvos.reward);
+  assert.equal(await missions.claim('d_alvos'), 'claimed', 'pays once');
+  assert.equal(progress.coins, coins + alvos.reward);
+  missions.addHistory({ t: 1, map: 'arena', mode: 'ffa', kills: 10, deaths: 5, headshots: 3, damage: 1500, won: true, mvp: false });
+  assert.equal(missions.history.length, 1);
+}
 
 console.log(`progressão ok: nível 10 em ~${matches} partidas, partida típica = ${typical.xp} XP e ${typical.coins} moedas`);

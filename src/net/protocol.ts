@@ -362,6 +362,13 @@ export interface ChatMsg {
   team: boolean;
 }
 
+/** A practice drill finished (offline only): counted by the missions. */
+export interface DrillMsg {
+  type: 'drill';
+  mode: 'mira' | 'reflexo';
+  kills: number;
+}
+
 export interface SysMsg {
   type: 'sys';
   text: string;
@@ -405,6 +412,7 @@ export type HostMsg =
   | PickupMsg
   | ChatMsg
   | SysMsg
+  | DrillMsg
   | PingMsg
   | EndMsg;
 
