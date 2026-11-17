@@ -252,6 +252,11 @@ export class Game {
     this.chat.onSend = (text, team) => this.net.send({ type: 'chat', text, team });
   }
 
+  /** Last known score of everyone, for a player who takes over as host. */
+  scoreSnapshot(): { rows: Map<number, { k: number; d: number; lv: number }>; teams: [number, number] } {
+    return { rows: new Map([...this.scores].map(([id, r]) => [id, { k: r.k, d: r.d, lv: r.lv }])), teams: [...this.teams] as [number, number] };
+  }
+
   dispose(): void {
     this.radar?.dispose();
     this.remotes.forEach((r) => r.dispose());

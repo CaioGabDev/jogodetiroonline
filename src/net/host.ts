@@ -94,6 +94,31 @@ interface Bot {
   downAt: number;
 }
 
+/** What a player who left keeps for a while: coming back with the same rid restores it. */
+export interface Stash {
+  team: Team;
+  kills: number;
+  deaths: number;
+  damage: number;
+  headshots: number;
+  shots: number;
+  hits: number;
+  headHits: number;
+  level: number;
+  at: number;
+}
+
+/** What a player who takes over as host brings from the old host: config, scores and the phase. */
+export interface MigrationSeed {
+  config: MatchConfig;
+  playing: boolean;
+  teams: [number, number];
+  stash: Array<[string, Stash]>;
+}
+
+/** How long a player who dropped keeps their score. */
+const STASH_MS = 120000;
+
 /** One run of the reflex drill. */
 interface Drill {
   running: boolean;
@@ -305,6 +330,10 @@ export class HostServer {
   private nextId = 1;
   private hostId = 0;
   private phase: Phase = 'lobby';
+  /** Players who left recently, by rid: reconnecting brings their score back. */
+  private stash = new Map<string, Stash>();
+  /** Team score to restore when a migrated match starts again. */
+  private seedTeams: [number, number] | null = null;
   /** Map vote after a match: who voted for which option. */
   private vote: { options: MapId[]; votes: Map<number, number>; endsAt: number; timer: number } | null = null;
   private config: MatchConfig;
@@ -355,16 +384,17 @@ export class HostServer {
   }
 
   /** Registers the room with PeerJS (retrying on code collisions). Returns the room code. */
-  async start(): Promise<string> {
+  /** `code`: take over that room's code (host migration); fails if someone still holds it. */
+  async start(code?: string): Promise<string> {
     if (this.offline) {
       this.code = 'TREINO';
     } else {
       let lastErr: unknown = null;
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const code = randomCode(6);
+      for (let attempt = 0; attempt < (code ? 1 : 4); attempt++) {
+        const tryCode = code ?? randomCode(6);
         try {
-          this.peer = await openPeer(peerIdForCode(code));
-          this.code = code;
+          this.peer = await openPeer(peerIdForCode(tryCode));
+          this.code = tryCode;
           break;
         } catch (e) {
           lastErr = e;
@@ -393,6 +423,14 @@ export class HostServer {
     if (this.peer) this.announcer = new RoomAnnouncer(this.peer, () => this.roomInfo());
     this.ticker = new Ticker(1000 / SNAPSHOT_RATE, () => this.tick());
     return this.code;
+  }
+
+  /** Carries on the old host's room: same settings, and everyone's score waits for them to reconnect. */
+  adopt(seed: MigrationSeed): void {
+    this.config = { ...seed.config };
+    const t = now();
+    for (const [rid, st] of seed.stash) this.stash.set(rid, { ...st, at: t });
+    if (seed.playing && !this.bombMode) this.seedTeams = seed.teams;
   }
 
   /** Creates the host's own in-memory client connection. */
@@ -458,6 +496,25 @@ export class HostServer {
     };
   }
 
+  /** Gives a returning player their team and score back. True when there was one. */
+  private restore(p: SPlayer): boolean {
+    const t = now();
+    for (const [rid, st] of this.stash) if (t - st.at > STASH_MS) this.stash.delete(rid);
+    const st = p.info.rid ? this.stash.get(p.info.rid) : undefined;
+    if (!st) return false;
+    this.stash.delete(p.info.rid);
+    if (this.config.mode !== 'ffa') p.info.team = st.team;
+    p.kills = st.kills;
+    p.deaths = st.deaths;
+    p.damage = st.damage;
+    p.headshots = st.headshots;
+    p.shots = st.shots;
+    p.hits = st.hits;
+    p.headHits = st.headHits;
+    p.level = st.level;
+    return true;
+  }
+
   private humanCount(): number {
     let n = 0;
     for (const p of this.players.values()) if (!p.bot) n++;
@@ -481,6 +538,8 @@ export class HostServer {
     p.info.skin = hello.skin ?? DEFAULT_SKIN;
     p.info.knife = hello.knife ?? DEFAULT_KNIFE;
     p.info.lv = hello.lv ?? 1;
+    p.info.rid = hello.rid ?? '';
+    const back = this.restore(p);
     if (local && this.hostId === 0) {
       this.hostId = id;
       p.info.host = true;
@@ -499,14 +558,14 @@ export class HostServer {
     const match = this.phase === 'playing' ? this.matchInfo() : null;
     this.send(p, { type: 'welcome', id, lobby: this.lobbyState(), match });
     this.broadcastLobby();
-    if (!local) this.broadcast({ type: 'sys', text: `${name} entrou na sala` }, id);
+    if (!local) this.broadcast({ type: 'sys', text: back ? `${name} voltou` : `${name} entrou na sala` }, id);
     if (this.phase === 'playing') this.beginSpawn(p);
   }
 
   private createPlayer(id: number, name: string, slot: Slot | null, bot: Bot | null): SPlayer {
     const ammo = fullAmmo();
     return {
-      info: { id, name, team: this.smallerTeam(), color: FFA_COLORS[0], host: false, bot: !!bot, skin: DEFAULT_SKIN, knife: DEFAULT_KNIFE, lv: 1 },
+      info: { id, name, team: this.smallerTeam(), color: FFA_COLORS[0], host: false, bot: !!bot, skin: DEFAULT_SKIN, knife: DEFAULT_KNIFE, lv: 1, rid: '' },
       slot,
       bot,
       x: 0,
@@ -607,6 +666,9 @@ export class HostServer {
     const p = this.players.get(id);
     if (!p) return;
     this.players.delete(id);
+    if (!p.bot && p.info.rid && !this.offline) {
+      this.stash.set(p.info.rid, { team: p.info.team, kills: p.kills, deaths: p.deaths, damage: p.damage, headshots: p.headshots, shots: p.shots, hits: p.hits, headHits: p.headHits, level: p.level, at: now() });
+    }
     if (this.vote?.votes.delete(id)) this.sendVote();
     this.projectiles = this.projectiles.filter((pr) => pr.owner !== p);
     this.fires = this.fires.filter((f) => f.owner !== p);
@@ -799,7 +861,14 @@ export class HostServer {
     if (this.destroyed) return;
     this.closeVote();
     this.phase = 'playing';
-    this.teamScore = [0, 0];
+    // A match carried on from an old host keeps its team score; a new one starts clean, old scores gone.
+    if (this.seedTeams) {
+      this.teamScore = this.seedTeams;
+      this.seedTeams = null;
+    } else {
+      this.teamScore = [0, 0];
+      this.stash.clear();
+    }
     this.endsAt = this.config.timeLimit > 0 && !this.bombMode ? now() + this.config.timeLimit * 60000 : 0;
     this.map = MAPS[this.config.map];
     this.world = new CollisionWorld(this.map);

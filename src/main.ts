@@ -11,7 +11,7 @@ import { teamMode, type GameMode, type MapId } from './game/constants';
 import { Game } from './game/game';
 import type { PracticeSetup } from './game/practice';
 import { rankOf } from './game/ranks';
-import { HostServer } from './net/host';
+import { HostServer, type MigrationSeed } from './net/host';
 import { RoomBrowser } from './net/directory';
 import { NetClient, joinRemote, type DisconnectReason } from './net/client';
 import { account } from './net/account';
@@ -207,11 +207,20 @@ class App {
 
     this.showScreen('menu');
     const code = normalizeCode(new URLSearchParams(location.search).get('sala') ?? '');
+    const last = lastRoom();
     if (code.length === 6) {
       this.menu.setCode(code);
       toast(`Convite para a sala ${code}: digite seu nickname e clique em "Entrar na Sala".`, 'info', 6000);
+    } else if (last) {
+      // Reloaded the page in the middle of a match: the code is there, and the score comes back on joining.
+      this.menu.setCode(last);
+      toast(`Você estava na sala ${last}. Clique em "Entrar" para voltar com o seu placar.`, 'info', 8000);
     }
     this.loop.start();
+    // Closing or reloading the tab mid-match keeps the room on offer for a quick way back.
+    window.addEventListener('pagehide', () => {
+      if (this.net && this.lobbyState && !this.lobbyState.offline) rememberRoom(this.lobbyState.code);
+    });
 
     if (this.sm.softwareRenderer()) {
       toast(
@@ -282,9 +291,9 @@ class App {
 
   // ------------------------------------------------------------------ connection flows
 
-  /** What the others see of this player's progress. */
-  private helloProfile(): { skin: string; knife: string; lv: number } {
-    return { skin: progress.equipped, knife: progress.equippedKnife, lv: progress.level };
+  /** What the others see of this player's progress, and the id that brings their score back on a reconnect. */
+  private helloProfile(): { skin: string; knife: string; lv: number; rid: string } {
+    return { skin: progress.equipped, knife: progress.equippedKnife, lv: progress.level, rid: rejoinId() };
   }
 
   private async createRoom(nick: string, color: string): Promise<void> {
@@ -368,6 +377,7 @@ class App {
   private attach(net: NetClient, welcome: WelcomeMsg): void {
     this.net = net;
     this.lobbyState = welcome.lobby;
+    if (!welcome.lobby.offline) rememberRoom(welcome.lobby.code);
     net.onDisconnect = (r) => this.onHostLost(r);
     this.pause.setRoom(welcome.lobby.code, welcome.lobby.offline);
     if (welcome.match) {
@@ -623,15 +633,94 @@ class App {
 
   private onHostLost(r: DisconnectReason): void {
     const wasClient = !this.host;
+    const lobby = this.lobbyState;
+    const nick = lobby?.players.find((p) => p.id === this.net?.localId);
+    const scores = this.game?.scoreSnapshot() ?? null;
+    const localId = this.net?.localId ?? -1;
     this.leave();
-    if (wasClient) {
-      const msg = r === 'timeout' ? 'Conexão com o host perdida (tempo esgotado).' : 'Host saiu da partida.';
-      this.menu.setError(msg);
-      toast(msg, 'error', 5000);
+    if (!wasClient || !lobby || lobby.offline || !nick) return;
+    void this.recover(r, lobby, localId, nick.name, nick.color, scores);
+  }
+
+  /**
+   * After losing the host: the player with the lowest id left takes over the same room code with everyone's
+   * score, and the others reconnect to it. If the host only dropped for a moment, they reconnect to it instead.
+   */
+  private async recover(r: DisconnectReason, lobby: LobbyState, localId: number, nick: string, color: string, scores: ReturnType<Game['scoreSnapshot']> | null): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    const successor = lobby.players.filter((p) => !p.bot && p.id !== lobby.hostId).reduce((a, p) => (p.id < a ? p.id : a), Infinity);
+    const mine = successor === localId;
+    const why = r === 'timeout' ? 'Conexão com o host perdida.' : 'O host saiu.';
+    toast(mine ? `${why} Você vai assumir a sala…` : `${why} Reconectando…`, 'warn', 5000);
+    let ok = false;
+    for (let attempt = 1; attempt <= 12 && !ok && !this.net; attempt++) {
+      this.menu.setBusy(mine ? `Assumindo a sala ${lobby.code}… (${attempt}/12)` : `Reconectando à sala ${lobby.code}… (${attempt}/12)`);
+      // The successor first gives the old host a moment to come back; the others give the successor time to take over.
+      await new Promise((res) => window.setTimeout(res, attempt === 1 ? (mine ? 2500 : 4000) : 2500));
+      ok = mine ? await this.takeOver(lobby, nick, color, scores) : await this.rejoin(lobby.code, nick, color);
+      // Someone else holds the code (the old host came back): join it instead.
+      if (!ok && mine && attempt >= 3) ok = await this.rejoin(lobby.code, nick, color);
+    }
+    this.busy = false;
+    if (ok) {
+      toast(mine ? 'Você é o novo host. A partida continua!' : 'Reconectado!', 'ok', 4000);
+      return;
+    }
+    this.menu.setBusy(null);
+    const msg = 'Não deu para voltar para a sala.';
+    this.menu.setError(msg);
+    toast(msg, 'error', 5000);
+  }
+
+  private async rejoin(code: string, nick: string, color: string): Promise<boolean> {
+    let net: NetClient | null = null;
+    try {
+      net = await joinRemote(code);
+      const welcome = await net.handshake(nick, color, this.helloProfile());
+      this.menu.setBusy(null);
+      this.attach(net, welcome);
+      if (welcome.match) this.lockForMatch();
+      return true;
+    } catch {
+      net?.close();
+      return false;
     }
   }
 
+  /** Opens the old room's code as its host, with its settings and everyone's score. */
+  private async takeOver(lobby: LobbyState, nick: string, color: string, scores: ReturnType<Game['scoreSnapshot']> | null): Promise<boolean> {
+    const host = new HostServer(false, { onStatus: (t) => toast(t, 'warn') });
+    const playing = lobby.phase === 'playing';
+    const seed: MigrationSeed = {
+      config: lobby.config,
+      playing,
+      teams: scores?.teams ?? [0, 0],
+      stash: lobby.players
+        .filter((p) => !p.bot && p.rid)
+        .map((p) => {
+          const sc = scores?.rows.get(p.id);
+          return [p.rid, { team: p.team, kills: sc?.k ?? 0, deaths: sc?.d ?? 0, damage: 0, headshots: 0, shots: 0, hits: 0, headHits: 0, level: sc?.lv ?? 0, at: 0 }];
+        }),
+    };
+    host.adopt(seed);
+    try {
+      await host.start(lobby.code);
+    } catch {
+      host.destroy();
+      return false;
+    }
+    this.host = host;
+    // The match goes on before anyone arrives, so each player's score is restored as they come in.
+    if (playing) host.startMatch();
+    this.menu.setBusy(null);
+    const ok = await this.connectLocal(host, nick, color);
+    if (ok && playing) this.lockForMatch();
+    return ok;
+  }
+
   private leave(): void {
+    forgetRoom();
     this.stopGame();
     const net = this.net;
     this.net = null;
@@ -657,6 +746,49 @@ function matchResult(m: EndMsg, localId: number, mode: GameMode): MatchResult {
   const place = m.results.findIndex((r) => r.id === localId) + 1;
   const middle = (m.results.length + 1) / 2;
   return place < middle ? 'win' : place === middle ? 'draw' : 'loss';
+}
+
+const LAST_ROOM = 'arenafps.lastroom';
+
+/** The room this tab is in, so a reload can offer to go back. */
+function rememberRoom(code: string): void {
+  try {
+    sessionStorage.setItem(LAST_ROOM, JSON.stringify({ code, at: Date.now() }));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function forgetRoom(): void {
+  try {
+    sessionStorage.removeItem(LAST_ROOM);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Code of the room this tab was in during the last 2 minutes, or null. */
+function lastRoom(): string | null {
+  try {
+    const r = JSON.parse(sessionStorage.getItem(LAST_ROOM) ?? 'null') as { code?: unknown; at?: unknown } | null;
+    return r && typeof r.code === 'string' && typeof r.at === 'number' && Date.now() - r.at < 120000 ? r.code : null;
+  } catch {
+    return null;
+  }
+}
+
+/** This tab's id in rooms, kept across reconnects and reloads so the host can give the score back. */
+function rejoinId(): string {
+  try {
+    let id = sessionStorage.getItem('arenafps.rid');
+    if (!id || !/^[a-z0-9]{8,24}$/.test(id)) {
+      id = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join('');
+      sessionStorage.setItem('arenafps.rid', id);
+    }
+    return id;
+  } catch {
+    return Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join('');
+  }
 }
 
 const app = new App();

@@ -25,6 +25,8 @@ export interface PlayerInfo {
   knife: string;
   /** Level the player claims. Cosmetic: progress lives in each browser. */
   lv: number;
+  /** The player's id for this browser tab, kept across reconnects: their score comes back with it. */
+  rid: string;
 }
 
 export interface LobbyState {
@@ -99,6 +101,8 @@ export interface HelloMsg {
   skin?: string;
   knife?: string;
   lv?: number;
+  /** Rejoin id (see PlayerInfo.rid). */
+  rid?: string;
 }
 
 export interface InputMsg {
@@ -450,7 +454,8 @@ export function parseClientMsg(raw: unknown): ClientMsg | null {
         isFiniteNum(m.v) &&
         (m.skin === undefined || isWeaponSkin(m.skin)) &&
         (m.knife === undefined || isKnifeSkin(m.knife)) &&
-        (m.lv === undefined || (Number.isInteger(m.lv) && (m.lv as number) >= 1 && (m.lv as number) <= MAX_LEVEL))
+        (m.lv === undefined || (Number.isInteger(m.lv) && (m.lv as number) >= 1 && (m.lv as number) <= MAX_LEVEL)) &&
+        (m.rid === undefined || (typeof m.rid === 'string' && /^[a-z0-9]{8,24}$/.test(m.rid)))
         ? (m as unknown as HelloMsg)
         : null;
     case 'input':
