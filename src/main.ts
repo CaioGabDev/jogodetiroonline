@@ -117,6 +117,7 @@ class App {
       },
       onLobby: () => this.host?.backToLobby(),
       onLeave: () => this.leave(),
+      onVote: (i) => this.net?.send({ type: 'vote', i }),
     });
     this.pause = new PauseMenu(ui, {
       onResume: () => input.requestLock(),
@@ -435,6 +436,9 @@ class App {
       case 'kill':
         this.countKill(m.k, m.v, m.hs, net.localId);
         this.game?.onMessage(m);
+        break;
+      case 'vote':
+        this.results.setVote(m);
         break;
       case 'drill':
         if (m.mode === 'mira' && this.lobbyState?.offline) missions.record('aimRun');

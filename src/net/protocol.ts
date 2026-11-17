@@ -1,4 +1,4 @@
-import type { MatchConfig, Team } from '../game/constants';
+import type { MapId, MatchConfig, Team } from '../game/constants';
 import { CHAT_MAX, NAME_MAX } from '../game/constants';
 import { MAX_LEVEL, isKnifeSkin, isWeaponSkin } from '../game/progression';
 import { WEAPON_COUNT } from '../game/weapons';
@@ -169,7 +169,13 @@ export interface BuyMsg {
   item: number;
 }
 
-export type ClientMsg = HelloMsg | InputMsg | ShootMsg | ReloadMsg | ChatSendMsg | PongMsg | SetTeamMsg | SetColorMsg | LoadoutMsg | BuyMsg;
+/** Vote for the next map at the end of a match: index into the vote's options. */
+export interface VoteSendMsg {
+  type: 'vote';
+  i: number;
+}
+
+export type ClientMsg = HelloMsg | InputMsg | ShootMsg | ReloadMsg | ChatSendMsg | PongMsg | SetTeamMsg | SetColorMsg | LoadoutMsg | BuyMsg | VoteSendMsg;
 
 // ---------------------------------------------------------------------------
 // Host -> Client
@@ -362,6 +368,15 @@ export interface ChatMsg {
   team: boolean;
 }
 
+/** Map vote after a match: the options, votes for each, ms left, and the winner once it closes. */
+export interface VoteMsg {
+  type: 'vote';
+  options: MapId[];
+  counts: number[];
+  left: number;
+  winner: MapId | null;
+}
+
 /** A practice drill finished (offline only): counted by the missions. */
 export interface DrillMsg {
   type: 'drill';
@@ -413,6 +428,7 @@ export type HostMsg =
   | ChatMsg
   | SysMsg
   | DrillMsg
+  | VoteMsg
   | PingMsg
   | EndMsg;
 
@@ -468,6 +484,8 @@ export function parseClientMsg(raw: unknown): ClientMsg | null {
       return Array.isArray(m.w) && m.w.length === 5 && m.w.every(isWeapon) && typeof m.go === 'boolean' ? (m as unknown as LoadoutMsg) : null;
     case 'buy':
       return isFiniteNum(m.item) ? (m as unknown as BuyMsg) : null;
+    case 'vote':
+      return Number.isInteger(m.i) && (m.i as number) >= 0 && (m.i as number) < 8 ? (m as unknown as VoteSendMsg) : null;
     case 'chat':
       return isStr(m.text, CHAT_MAX) && typeof m.team === 'boolean' ? (m as unknown as ChatSendMsg) : null;
     case 'pong':

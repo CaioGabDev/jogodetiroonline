@@ -147,8 +147,9 @@ export class Hud {
     this.workBar = el('div', { class: 'work-bar hidden' }, [this.workFill]);
     this.deathBy = el('div', { class: 'death-by' });
     this.deathTimer = el('div', { class: 'death-timer' });
+    this.deathTitle = el('div', { class: 'death-title', text: 'VOCÊ FOI ELIMINADO' });
     this.death = el('div', { class: 'death hidden' }, [
-      el('div', { class: 'death-title', text: 'VOCÊ FOI ELIMINADO' }),
+      this.deathTitle,
       this.deathBy,
       this.deathTimer,
     ]);
@@ -406,8 +407,13 @@ export class Hud {
     this.indicators = [];
   }
 
-  setDeath(byName: string | null, color: string, secondsLeft: number): void {
+  private deathTitle!: HTMLElement;
+
+  /** `killcam`: the replay is on, so the box moves out of the way and says so. */
+  setDeath(byName: string | null, color: string, secondsLeft: number, killcam = false): void {
     show(this.death, byName !== null);
+    this.death.classList.toggle('killcam', killcam);
+    this.text(this.deathTitle, killcam ? 'KILLCAM' : 'VOCÊ FOI ELIMINADO');
     if (byName === null) {
       this.cache.delete(this.deathBy);
       return;

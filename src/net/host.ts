@@ -208,6 +208,8 @@ interface Round {
   why: RoundEnd | null;
 }
 
+/** How long the map vote stays open after a match. */
+const VOTE_MS = 15000;
 const otherTeam = (t: Team): Team => (t === 'red' ? 'blue' : 'red');
 const scoreIndex = (t: Team): 0 | 1 => (t === 'red' ? 0 : 1);
 
@@ -303,6 +305,8 @@ export class HostServer {
   private nextId = 1;
   private hostId = 0;
   private phase: Phase = 'lobby';
+  /** Map vote after a match: who voted for which option. */
+  private vote: { options: MapId[]; votes: Map<number, number>; endsAt: number; timer: number } | null = null;
   private config: MatchConfig;
   private pickups: PickupState[] = this.map.pickups.map(() => ({ active: true, respawnAt: 0 }));
   private teamScore: [number, number] = [0, 0];
@@ -401,6 +405,7 @@ export class HostServer {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    if (this.vote) window.clearTimeout(this.vote.timer);
     this.ticker?.stop();
     this.announcer?.stop();
     for (const p of this.players.values()) {
@@ -602,6 +607,7 @@ export class HostServer {
     const p = this.players.get(id);
     if (!p) return;
     this.players.delete(id);
+    if (this.vote?.votes.delete(id)) this.sendVote();
     this.projectiles = this.projectiles.filter((pr) => pr.owner !== p);
     this.fires = this.fires.filter((f) => f.owner !== p);
     this.broadcast({ type: 'sys', text: `${p.info.name} saiu da partida` });
@@ -683,6 +689,12 @@ export class HostServer {
         break;
       case 'buy':
         this.onBuy(p, m.item);
+        break;
+      case 'vote':
+        if (this.vote && m.i < this.vote.options.length) {
+          this.vote.votes.set(p.info.id, m.i);
+          this.sendVote();
+        }
         break;
       case 'setColor':
         if (this.phase !== 'playing') {
@@ -785,6 +797,7 @@ export class HostServer {
 
   startMatch(): void {
     if (this.destroyed) return;
+    this.closeVote();
     this.phase = 'playing';
     this.teamScore = [0, 0];
     this.endsAt = this.config.timeLimit > 0 && !this.bombMode ? now() + this.config.timeLimit * 60000 : 0;
@@ -825,6 +838,7 @@ export class HostServer {
 
   backToLobby(): void {
     if (this.offline) return;
+    this.closeVote();
     this.phase = 'lobby';
     for (const p of this.players.values()) p.alive = false;
     this.broadcastLobby();
@@ -1824,6 +1838,50 @@ export class HostServer {
     };
     for (const p of this.players.values()) p.alive = false;
     this.broadcast(msg);
+    this.broadcastLobby();
+    if (!this.offline) this.openVote();
+  }
+
+  // ---------------------------------------------------------------- map vote
+
+  /** The current map and two others of the same kind (bomb maps only for the bomb mode). */
+  private openVote(): void {
+    const pool = (Object.keys(MAP_NAMES) as MapId[]).filter((m) => BOMB_MAPS.includes(m) === this.bombMode && m !== this.config.map);
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const options = [this.config.map, ...pool.slice(0, 2)];
+    const endsAt = now() + VOTE_MS;
+    this.vote = { options, votes: new Map(), endsAt, timer: window.setTimeout(() => this.closeVote(), VOTE_MS) };
+    this.sendVote();
+  }
+
+  private tally(): number[] {
+    const v = this.vote;
+    const counts = v ? v.options.map(() => 0) : [];
+    v?.votes.forEach((i) => counts[i]++);
+    return counts;
+  }
+
+  private sendVote(winner: MapId | null = null): void {
+    const v = this.vote;
+    if (!v) return;
+    this.broadcast({ type: 'vote', options: v.options, counts: this.tally(), left: Math.max(0, Math.round(v.endsAt - now())), winner });
+  }
+
+  /** Most votes wins, a tie is drawn among the tied, and no votes keeps the map. The rematch uses it. */
+  private closeVote(): void {
+    const v = this.vote;
+    if (!v) return;
+    window.clearTimeout(v.timer);
+    const counts = this.tally();
+    const top = Math.max(...counts);
+    const tied = v.options.filter((_, i) => counts[i] === top);
+    const winner = top === 0 ? v.options[0] : tied[Math.floor(Math.random() * tied.length)];
+    this.config.map = winner;
+    this.sendVote(winner);
+    this.vote = null;
     this.broadcastLobby();
   }
 

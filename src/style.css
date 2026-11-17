@@ -1457,6 +1457,17 @@ kbd {
   filter: drop-shadow(0 0 4px rgba(255, 0, 0, 0.8));
 }
 
+.death.killcam {
+  top: auto;
+  bottom: 18%;
+  padding: 10px 24px;
+}
+
+.death.killcam .death-title {
+  color: #ff5a4d;
+  letter-spacing: 0.2em;
+}
+
 .death {
   position: absolute;
   top: 26%;
@@ -3107,4 +3118,41 @@ kbd {
   .history-row > :nth-child(n + 4) {
     display: none;
   }
+}
+
+/* Map vote on the results screen */
+.res-vote {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.res-vote-title {
+  font-weight: 800;
+  text-align: center;
+}
+
+.res-vote-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.res-vote-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+}
+
+.res-vote-btn span {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.res-vote-btn.winner {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 1px var(--ok) inset;
+  opacity: 1;
 }

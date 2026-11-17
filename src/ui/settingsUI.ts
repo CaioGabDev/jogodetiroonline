@@ -488,6 +488,7 @@ export class SettingsUI {
       this.row('Mostrar FPS', this.toggle(s.showFps, (v) => settings.update((d) => (d.showFps = v)))),
       this.row('Mostrar ping', this.toggle(s.showPing, (v) => settings.update((d) => (d.showPing = v)))),
       this.row('Mostrar dano causado', this.toggle(s.showDamage, (v) => settings.update((d) => (d.showDamage = v)))),
+      this.row('Killcam', this.toggle(s.killcam, (v) => settings.update((d) => (d.killcam = v))), 'Ao morrer, mostra os últimos segundos pelos olhos de quem te matou'),
       this.row(
         'Tamanho do killfeed',
         this.slider(2, 10, 1, s.killfeedSize, (v) => settings.update((d) => (d.killfeedSize = v)), false, (v) => `${v} linhas`),

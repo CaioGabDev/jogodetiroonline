@@ -101,6 +101,8 @@ export interface Settings {
   showFps: boolean;
   showPing: boolean;
   showDamage: boolean;
+  /** Replay of the last seconds from the killer's eyes after dying. */
+  killcam: boolean;
   killfeedSize: number;
   /** Mouse wheel order of the slots (0-1 primaries, 2 pistol, 3 knife). The first one is the starting weapon. */
   wheel: number[];
@@ -162,6 +164,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showFps: false,
   showPing: true,
   showDamage: true,
+  killcam: true,
   killfeedSize: 5,
   wheel: [0, 1, 2, 3],
   sensScale: 'valorant',
@@ -230,6 +233,7 @@ function sanitize(raw: unknown): Settings {
   s.showFps = bool('showFps', s.showFps);
   s.showPing = bool('showPing', s.showPing);
   s.showDamage = bool('showDamage', s.showDamage);
+  s.killcam = bool('killcam', s.killcam);
   s.killfeedSize = Math.round(num('killfeedSize', 2, 10, s.killfeedSize));
   if (Array.isArray(r.wheel) && s.wheel.every((slot) => (r.wheel as unknown[]).includes(slot)) && r.wheel.length === s.wheel.length) {
     s.wheel = r.wheel as number[];

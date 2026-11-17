@@ -64,6 +64,10 @@ const SILENT_SPEED = 4;
 const KNIFE_SPEED = 1.15;
 /** Bomb mode: seconds on the death view before following a teammate. */
 const DEATH_VIEW_MS = 1500;
+/** Killcam: starts this long after dying and replays this much, ending a moment after the kill. */
+const KILLCAM_START_MS = 500;
+const KILLCAM_LEN_MS = 2400;
+const KILLCAM_AFTER_MS = 200;
 /** Bomb mode: gap between the bomb's beeps, from far from going off to about to. */
 const BEEP_SLOW_MS = 1000;
 const BEEP_FAST_MS = 130;
@@ -200,6 +204,14 @@ export class Game {
 
   // Death cam
   private killerId = -1;
+  /** Killcam of the last death: who killed and the render time it happened at. */
+  private killcam: { killer: number; rt: number } | null = null;
+  /** Render time the killcam has replayed up to, so each recorded shot is drawn once. */
+  private killcamRt = 0;
+  /** Recent shots of other players, replayed by the killcam. */
+  private shotLog: Array<{ rt: number; id: number; w: number; o: number[]; e: number[]; h: number[]; n: number[] }> = [];
+  /** This player as everyone else sees them, from the snapshots: only drawn in the killcam. */
+  private ghost: RemotePlayer | null = null;
   private deathAt = 0;
   private deathPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
@@ -227,6 +239,13 @@ export class Game {
     this.sm.pickups.setAll(match.pickups);
     if (match.config.mode === 'bomb') this.radar = new Radar(deps.hud.root, this.map);
     this.updateLobby(lobby);
+    this.ghost = new RemotePlayer(this.localId, this.displayColor(this.localId));
+    const mine = lobby.players.find((p) => p.id === this.localId);
+    if (mine) {
+      this.ghost.model.setSkin(mine.skin);
+      this.ghost.model.setKnifeSkin(mine.knife);
+    }
+    this.sm.scene.add(this.ghost.model.root);
     this.hud.reset();
     this.hud.show(true);
     this.chat.show(true);
@@ -237,6 +256,8 @@ export class Game {
     this.radar?.dispose();
     this.remotes.forEach((r) => r.dispose());
     this.remotes.clear();
+    this.ghost?.dispose();
+    this.ghost = null;
     this.effects.group.removeFromParent();
     this.viewmodel.root.removeFromParent();
     this.sm.zoom = 1;
@@ -313,6 +334,7 @@ export class Game {
           if (s.i === this.localId) {
             this.hp = s.hp;
             this.protected = (s.f & F_PROTECTED) !== 0;
+            this.ghost?.push(m.t, s);
             continue;
           }
           this.remotes.get(s.i)?.push(m.t, s);
@@ -344,9 +366,13 @@ export class Game {
       case 'kill':
         this.onKill(m.k, m.v, m.w, m.hs);
         break;
-      case 'shot':
+      case 'shot': {
         this.onRemoteShot(m.i, m.w, m.o, m.e, m.h, m.n);
+        const rt = this.net.renderTime();
+        this.shotLog.push({ rt, id: m.i, w: m.w, o: m.o, e: m.e, h: m.h, n: m.n });
+        while (this.shotLog.length && this.shotLog[0].rt < rt - 4000) this.shotLog.shift();
         break;
+      }
       case 'proj':
         this.onProjectile(m);
         break;
@@ -478,6 +504,8 @@ export class Game {
       this.reloadW = -1;
       this.aimT = 0;
       this.viewmodel.visible = false;
+      this.killcam = k !== v && this.remotes.has(k) && !this.bombMode && settings.get().killcam ? { killer: k, rt: this.net.renderTime() } : null;
+      this.killcamRt = 0;
       audio.death();
     } else if (k === this.localId) {
       // Outside the bomb mode the host just refilled the weapon in hand; a reload finishing now would add to it.
@@ -1216,11 +1244,17 @@ export class Game {
       this.pitch = clamp(this.pitch, -1.55, 1.55);
     }
 
-    const rt = this.net.tickRenderClock();
+    const liveRt = this.net.tickRenderClock();
+    // During the killcam everyone is drawn where they were a few seconds ago.
+    const replay = this.killcamTime();
+    const rt = replay ?? liveRt;
     const watched = this.watched();
+    const kcKiller = replay !== null && this.killcam ? this.remotes.get(this.killcam.killer) ?? null : null;
+    this.updateGhost(replay, dt);
+    if (replay !== null) this.replayShots(replay);
     for (const r of this.remotes.values()) {
       const moved = r.interpolate(rt, dt);
-      r.model.root.visible = r.hasData && r.y > -20 && r !== watched;
+      r.model.root.visible = r.hasData && r.y > -20 && r !== watched && r !== kcKiller;
       r.model.setWeapon(r.weapon);
       r.model.update(
         {
@@ -1273,6 +1307,9 @@ export class Game {
         this.yaw + recoilY + (Math.random() - 0.5) * sh,
         this.roll,
       );
+    } else if (kcKiller) {
+      cam.position.set(kcKiller.x, kcKiller.y + eyeHeight(kcKiller.crouch), kcKiller.z);
+      cam.rotation.set(kcKiller.pitch, kcKiller.yaw, 0);
     } else if (watched) {
       cam.position.set(watched.x, watched.y + eyeHeight(watched.crouch), watched.z);
       cam.rotation.set(watched.pitch, watched.yaw, 0);
@@ -1316,6 +1353,40 @@ export class Game {
     audio.setListener(cam.position, _v1);
 
     this.updateHud(dt, fps);
+  }
+
+  /** Render time the killcam shows now, or null when it isn't playing. */
+  private killcamTime(): number | null {
+    const kc = this.killcam;
+    if (!kc || this.alive || this.ended) return null;
+    const into = now() - this.deathAt - KILLCAM_START_MS;
+    if (into < 0 || into > KILLCAM_LEN_MS) return null;
+    return kc.rt - (KILLCAM_LEN_MS - KILLCAM_AFTER_MS) + into;
+  }
+
+  /** This player's body, seen only in the killcam. */
+  private updateGhost(replay: number | null, dt: number): void {
+    const g = this.ghost;
+    if (!g) return;
+    if (replay === null || !g.hasData) {
+      g.model.root.visible = false;
+      return;
+    }
+    g.interpolate(replay, dt);
+    g.model.root.visible = g.y > -20;
+    g.model.setWeapon(g.weapon);
+    g.model.update({ x: g.x, y: g.y, z: g.z, yaw: g.yaw, pitch: g.pitch, crouch: g.crouch, alive: g.alive, protected: false, weapon: g.weapon, speed: g.speed }, dt);
+  }
+
+  /** Draws again the killer's shots as the replay passes them. */
+  private replayShots(replay: number): void {
+    const kc = this.killcam;
+    if (!kc) return;
+    const from = this.killcamRt || replay - 1;
+    this.killcamRt = replay;
+    for (const s of this.shotLog) {
+      if (s.id === kc.killer && s.rt > from && s.rt <= replay) this.onRemoteShot(s.id, s.w, s.o, s.e, s.h, s.n);
+    }
   }
 
   private renderDeathCam(dt: number): void {
@@ -1420,7 +1491,7 @@ export class Game {
     // Death overlay
     if (!this.alive && this.killerId >= 0 && !this.ended && !this.bombMode) {
       const left = Math.max(0, RESPAWN_MS - (t - this.deathAt)) / 1000;
-      this.hud.setDeath(this.nameOf(this.killerId), this.displayColor(this.killerId), left);
+      this.hud.setDeath(this.nameOf(this.killerId), this.displayColor(this.killerId), left, this.killcamTime() !== null);
     } else {
       this.hud.setDeath(null, '', 0);
     }
