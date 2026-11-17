@@ -70,7 +70,8 @@ export const SHOP: Partial<Record<number, ShopEntry>> = {
   [W.SHOTGUN]: { price: 1100, reward: 900, pen: 0.5 },
   [W.CROSSBOW]: { price: 1700, reward: 300, pen: 0.85 },
   [W.DMR]: { price: 2000, reward: 300, pen: 0.8 },
-  [W.RIFLE]: { price: 2900, reward: 300, pen: 0.775 },
+  // The bomb mode keeps its own rifle damage (the Vandal numbers are for the other modes).
+  [W.RIFLE]: { price: 2900, reward: 300, pen: 0.775, damage: 33 },
   [W.SNIPER]: { price: 4750, reward: 100, pen: 0.97, damage: 115 },
   [W.LMG]: { price: 5200, reward: 300, pen: 0.8, damage: 32 },
   [W.KNIFE]: { price: 0, reward: 1500, pen: 0.85, damage: 55 },
