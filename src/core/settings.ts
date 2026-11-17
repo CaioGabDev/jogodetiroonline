@@ -91,6 +91,8 @@ export interface Settings {
   shadows: boolean;
   fpsLimit: number;
   resolutionScale: number;
+  /** Width/height the game is drawn at and then stretched to fill the screen. 0 = the screen's own. */
+  aspect: number;
   masterVolume: number;
   sfxVolume: number;
   uiVolume: number;
@@ -143,6 +145,7 @@ export const DEFAULT_SETTINGS: Settings = {
   shadows: true,
   fpsLimit: 0,
   resolutionScale: 1,
+  aspect: 0,
   masterVolume: 0.8,
   sfxVolume: 0.8,
   uiVolume: 0.7,
@@ -164,6 +167,13 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export const FPS_LIMITS = [0, 30, 60, 90, 120, 144, 165, 240];
+/** Stretched aspect ratios, like the stretched resolutions of other shooters. 0 = native. */
+export const ASPECTS: Array<[number, string]> = [
+  [0, 'Nativa'],
+  [16 / 10, '16:10 esticado'],
+  [4 / 3, '4:3 esticado'],
+  [5 / 4, '5:4 esticado'],
+];
 
 const STORAGE_KEY = 'arenafps.settings.v1';
 
@@ -205,6 +215,7 @@ function sanitize(raw: unknown): Settings {
   s.shadows = bool('shadows', s.shadows);
   s.fpsLimit = FPS_LIMITS.includes(r.fpsLimit as number) ? (r.fpsLimit as number) : 0;
   s.resolutionScale = num('resolutionScale', 0.5, 1, s.resolutionScale);
+  s.aspect = ASPECTS.find(([a]) => Math.abs(a - Number(r.aspect)) < 1e-6)?.[0] ?? 0;
   s.masterVolume = num('masterVolume', 0, 1, s.masterVolume);
   s.sfxVolume = num('sfxVolume', 0, 1, s.sfxVolume);
   s.uiVolume = num('uiVolume', 0, 1, s.uiVolume);

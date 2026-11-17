@@ -2,6 +2,7 @@ import {
   ACTION_LABELS,
   DEG_PER_COUNT,
   FPS_LIMITS,
+  ASPECTS,
   SENS_MIN,
   keyLabel,
   settings,
@@ -387,6 +388,11 @@ export class SettingsUI {
           false,
           (v) => `${Math.round(v * 100)}%`,
         ),
+      ),
+      this.row(
+        'Proporção da tela',
+        this.select(ASPECTS, s.aspect, (v) => settings.update((d) => (d.aspect = v))),
+        'Esticada deixa os inimigos mais largos na tela, mas mostra menos dos lados. HUD e mira não esticam',
       ),
     );
   }
