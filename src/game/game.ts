@@ -18,6 +18,7 @@ import { Effects } from '../render/effects';
 import { Viewmodel } from '../render/viewmodel';
 import { hexColor } from '../render/skins';
 import { skinById, type SkinFx } from './progression';
+import { progress } from '../core/progress';
 import type { BuyState } from '../ui/buyMenu';
 import type { Hud } from '../ui/hud';
 import type { Chat } from '../ui/chat';
@@ -1331,6 +1332,8 @@ export class Game {
 
     // Viewmodel
     const t = this.simT;
+    const mySkin = progress.equipped;
+    this.viewmodel.setCounter(progress.hasCounter(mySkin) ? progress.counterKills(mySkin) : null);
     this.viewmodel.update(dt, {
       aim: aimT,
       speed: Math.min(Math.hypot(this.me.vx, this.me.vz), MOVE.sprint),

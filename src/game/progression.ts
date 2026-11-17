@@ -158,10 +158,14 @@ export interface SkinDef {
   fx?: SkinFx;
   /** Knife skins go on the knife only, equipped apart from the weapon skin. */
   slot?: 'faca';
+  /** Only in that season's case (Christmas or Halloween). */
+  season?: Season;
   knife?: KnifeLook;
   /** One line about the skin, shown in the Arsenal. */
   tagline?: string;
 }
+
+export type Season = 'natal' | 'halloween';
 
 export const DEFAULT_SKIN = 'padrao';
 export const DEFAULT_KNIFE = 'faca_padrao';
@@ -274,6 +278,41 @@ export const SKINS: SkinDef[] = [
   { id: 'faca_borboleta', name: 'Borboleta Neon', pattern: 'stripes', colors: ['#0c0c14', '#ff2bd6'], level: 15, price: 7000, shine: 0.3, glow: 0.9, slot: 'faca', knife: { blade: 'borboleta', edge: '#ff4fe0', inspect: 'butterfly' }, tagline: 'Canivete borboleta: inspecione e ele abre e fecha os cabos.' },
   { id: 'faca_dragao', name: 'Tantō do Dragão', pattern: 'flow', colors: ['#120502', '#8a1c05', '#ffb020'], level: 24, price: 9500, shine: 0.3, glow: 1, slot: 'faca', knife: { blade: 'tanto', edge: '#ffb020', inspect: 'twirl' }, tagline: 'Brasa correndo pela lâmina e o fio em chamas.' },
   { id: 'faca_plasma', name: 'Lâmina de Plasma', pattern: 'scan', colors: ['#03141c', '#0a6b8a', '#5ff4ff'], level: 35, price: 15000, shine: 0.6, glow: 1, slot: 'faca', knife: { blade: 'baioneta', edge: '#5ff4ff', inspect: 'flip' }, tagline: 'Energia pura: linhas de varredura e um fio que acende a cada golpe.' },
+  // Seasonal: only in the Christmas and Halloween cases, while they are open.
+  { id: 'natal_bengala', name: 'Bengala Doce', pattern: 'stripes', colors: ['#f4f4f4', '#d1182b'], level: 1, price: 900, shine: 0.4, glow: 0, season: 'natal', tagline: 'Listras de bengala de Natal.' },
+  { id: 'natal_neve', name: 'Nevasca', pattern: 'camo', colors: ['#f2f7fb', '#bcd4e6', '#ffffff', '#8fb3cf'], level: 1, price: 2600, shine: 0.3, glow: 0.1, season: 'natal', tagline: 'Neve fresca sobre a arma toda.' },
+  { id: 'natal_pinheiro', name: 'Pinheiro', pattern: 'digital', colors: ['#0f3d22', '#1f6b3a', '#d8b13a', '#0a2a17'], level: 1, price: 4200, shine: 0.5, glow: 0.2, season: 'natal', tagline: 'Verde de pinheiro com enfeites dourados.' },
+  {
+    id: 'natal_estrela',
+    name: 'Estrela de Natal',
+    pattern: 'flow',
+    colors: ['#3a0710', '#b0141f', '#ffd36b'],
+    level: 1,
+    price: 9500,
+    shine: 0.8,
+    glow: 0.8,
+    season: 'natal',
+    tagline: 'Cristais vermelhos e dourados, e tiros cor de ouro.',
+    fx: { kit: 'cristal', tracer: '#ffd36b', flash: '#fff1c2', kill: '#ff3b4a', inspect: 'flip' },
+  },
+  { id: 'faca_natal', name: 'Faca Bengala', pattern: 'stripes', colors: ['#f4f4f4', '#d1182b'], level: 1, price: 9000, shine: 0.5, glow: 0.3, slot: 'faca', season: 'natal', knife: { blade: 'karambit', edge: '#ff4d5e', inspect: 'spin' }, tagline: 'Karambit listrado de bengala, com o fio vermelho.' },
+  { id: 'hallo_abobora', name: 'Abóbora', pattern: 'flow', colors: ['#1a0a02', '#c4520a', '#ffb347'], level: 1, price: 900, shine: 0.2, glow: 0.6, season: 'halloween', tagline: 'Abóbora acesa por dentro.' },
+  { id: 'hallo_teia', name: 'Teia', pattern: 'stripes', colors: ['#0b0b0f', '#7a3cff'], level: 1, price: 2600, shine: 0.3, glow: 0.5, season: 'halloween', tagline: 'Teia de aranha roxa no escuro.' },
+  { id: 'hallo_cripta', name: 'Cripta', pattern: 'camo', colors: ['#20231f', '#3d4436', '#11130f', '#6b7a52'], level: 1, price: 4200, shine: 0.1, glow: 0, season: 'halloween', tagline: 'Pedra velha e musgo de cemitério.' },
+  {
+    id: 'hallo_fantasma',
+    name: 'Fantasma',
+    pattern: 'flow',
+    colors: ['#020805', '#0f3d24', '#6bff9e'],
+    level: 1,
+    price: 9500,
+    shine: 0.6,
+    glow: 1,
+    season: 'halloween',
+    tagline: 'Fragmentos verdes do além orbitam a arma.',
+    fx: { kit: 'vazio', tracer: '#6bff9e', flash: '#c2ffd6', kill: '#2bff7a', inspect: 'twirl' },
+  },
+  { id: 'faca_ceifadora', name: 'Ceifadora', pattern: 'flow', colors: ['#050505', '#163a1f', '#6bff9e'], level: 1, price: 9000, shine: 0.4, glow: 1, slot: 'faca', season: 'halloween', knife: { blade: 'karambit', edge: '#6bff9e', inspect: 'twirl' }, tagline: 'Garra da morte com o fio verde do além.' },
 ];
 
 const SKIN_BY_ID = new Map(SKINS.map((s) => [s.id, s]));

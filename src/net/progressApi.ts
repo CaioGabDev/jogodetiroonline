@@ -22,9 +22,15 @@ export const accountProgress: ProgressBackend = {
     }
     const r = (data ?? {}) as Record<string, unknown>;
     if (r.result === 'coins') return { result: 'coins' };
+    if (r.result === 'closed') return { result: 'closed' };
     if (r.result !== 'ok' || !isSkinId(r.skin)) return { result: 'error' };
     const refund = typeof r.refund === 'number' && r.refund > 0 ? Math.floor(r.refund) : 0;
-    return { result: 'ok', skin: r.skin, dup: r.dup === true, refund } satisfies CaseResult;
+    return { result: 'ok', skin: r.skin, dup: r.dup === true, refund, counter: r.counter === true } satisfies CaseResult;
+  },
+  async addCounterKills(id, kills) {
+    if (!supabase) return;
+    const { error } = await supabase.rpc('add_counter_kills', { p_skin: id, p_kills: kills });
+    if (error) console.warn('Contador não salvo', error.message);
   },
   async equip(id) {
     if (!supabase) return false;

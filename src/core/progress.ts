@@ -1,5 +1,5 @@
 import { EMPTY_STATS, type CareerStats } from '../game/stats';
-import { DUPLICATE_REFUND, caseById, rollCase } from '../game/cases';
+import { COUNTER_CHANCE, DUPLICATE_REFUND, caseById, caseOpen, rollCase } from '../game/cases';
 import {
   DEFAULT_KNIFE,
   DEFAULT_SKIN,
@@ -29,6 +29,9 @@ export interface ProgressData {
   equipped: string;
   /** Knife skin, equipped apart from the weapon skin. */
   equippedKnife: string;
+  /** Skins that came with a kill counter (StatTrak style), and the kills each has counted. */
+  counters: string[];
+  counterKills: Record<string, number>;
   /** Career totals; only shown for guests, an account reads them from player_stats. */
   career: CareerStats;
   matches: number;
@@ -50,10 +53,12 @@ export interface MatchSummary {
 
 /** What opening a case gave: the skin, and the coins back when it was already owned. */
 export interface CaseResult {
-  result: 'ok' | 'coins' | 'error';
+  result: 'ok' | 'coins' | 'closed' | 'error';
   skin?: string;
   dup?: boolean;
   refund?: number;
+  /** The skin came with a kill counter (or a repeated skin got one). */
+  counter?: boolean;
 }
 
 /** Where an account's progress lives. The database rolls every case and pays every match. */
@@ -61,6 +66,8 @@ export interface ProgressBackend {
   load(): Promise<ProgressData | null>;
   openCase(id: string): Promise<CaseResult>;
   equip(id: string): Promise<boolean>;
+  /** Adds kills to a skin's counter. Cosmetic: the database only checks that the skin has one. */
+  addCounterKills(id: string, kills: number): Promise<void>;
 }
 
 /** What the database answered for a match: totals after it, and what it paid. */
@@ -73,7 +80,7 @@ export interface ServerMatch {
 }
 
 function fresh(): ProgressData {
-  return { xp: 0, coins: 0, bought: [], equipped: DEFAULT_SKIN, equippedKnife: DEFAULT_KNIFE, career: { ...EMPTY_STATS }, matches: 0, wins: 0, kills: 0 };
+  return { xp: 0, coins: 0, bought: [], equipped: DEFAULT_SKIN, equippedKnife: DEFAULT_KNIFE, counters: [], counterKills: {}, career: { ...EMPTY_STATS }, matches: 0, wins: 0, kills: 0 };
 }
 
 const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
@@ -95,6 +102,10 @@ export function sanitizeProgress(raw: unknown): ProgressData {
   d.career.kills = Math.max(d.career.kills, d.kills);
   if (Array.isArray(r.bought)) d.bought = [...new Set(r.bought.filter(isSkinId))];
   if (isWeaponSkin(r.equipped)) d.equipped = r.equipped;
+  if (Array.isArray(r.counters)) d.counters = [...new Set(r.counters.filter(isSkinId))];
+  // The account sends it as counter_kills.
+  const ck = (r.counter_kills ?? r.counterKills) as Record<string, unknown> | null | undefined;
+  if (ck && typeof ck === 'object') for (const id of d.counters) d.counterKills[id] = count(ck[id]);
   // The account sends it as equipped_knife; this browser saves it as equippedKnife.
   const knife = r.equipped_knife ?? r.equippedKnife;
   if (isKnifeSkin(knife)) d.equippedKnife = knife;
@@ -212,14 +223,53 @@ class ProgressStore {
       await this.reload();
       return r;
     }
+    if (!caseOpen(c)) return { result: 'closed' };
     if (this.data.coins < c.price) return { result: 'coins' };
     const skin = rollCase(c);
     const dup = this.data.bought.includes(skin.id);
-    const refund = dup ? Math.floor(c.price * DUPLICATE_REFUND) : 0;
+    // A counter on a skin already owned upgrades it instead of paying coins back.
+    const counter = Math.random() * 100 < COUNTER_CHANCE && !this.data.counters.includes(skin.id);
+    const refund = dup && !counter ? Math.floor(c.price * DUPLICATE_REFUND) : 0;
     this.data.coins -= c.price - refund;
     if (!dup) this.data.bought.push(skin.id);
+    if (counter) {
+      this.data.counters.push(skin.id);
+      this.data.counterKills[skin.id] = 0;
+    }
     this.commit();
-    return { result: 'ok', skin: skin.id, dup, refund };
+    return { result: 'ok', skin: skin.id, dup, refund, counter };
+  }
+
+  hasCounter(id: string): boolean {
+    return this.data.counters.includes(id);
+  }
+
+  counterKills(id: string): number {
+    return this.data.counterKills[id] ?? 0;
+  }
+
+  /** Kills not yet sent to the account, per skin. */
+  private pendingKills = new Map<string, number>();
+
+  /** A kill with a counter skin: counted here at once, and sent to the account with flushCounters. */
+  addCounterKill(id: string): void {
+    if (!this.hasCounter(id)) return;
+    this.data.counterKills[id] = (this.data.counterKills[id] ?? 0) + 1;
+    if (this.backend) {
+      this.pendingKills.set(id, (this.pendingKills.get(id) ?? 0) + 1);
+      this.notify();
+    } else this.commit();
+  }
+
+  /** Sends the counted kills to the account (end of a match). */
+  flushCounters(): void {
+    const backend = this.backend;
+    if (!backend) return;
+    // The database takes at most 60 kills a call.
+    for (const [id, n] of this.pendingKills) {
+      for (let left = n; left > 0; left -= 60) void backend.addCounterKills(id, Math.min(60, left)).catch(() => undefined);
+    }
+    this.pendingKills.clear();
   }
 
   async equip(id: string): Promise<boolean> {

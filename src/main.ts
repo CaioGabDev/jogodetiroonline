@@ -9,6 +9,7 @@ import { GameLoop } from './core/loop';
 import { normalizeCode } from './core/util';
 import { teamMode, type GameMode, type MapId } from './game/constants';
 import { Game } from './game/game';
+import { WEAPONS } from './game/weapons';
 import type { PracticeSetup } from './game/practice';
 import { rankOf } from './game/ranks';
 import { HostServer, type MigrationSeed } from './net/host';
@@ -444,7 +445,7 @@ class App {
         this.game?.onMessage(m);
         break;
       case 'kill':
-        this.countKill(m.k, m.v, m.hs, net.localId);
+        this.countKill(m.k, m.v, m.w, m.hs, net.localId);
         this.game?.onMessage(m);
         break;
       case 'vote':
@@ -492,7 +493,7 @@ class App {
    * With an account the database validates the match and pays it; a guest is paid in this browser.
    */
   /** Kills for the missions: targets in practice, players online. */
-  private countKill(killer: number, victim: number, hs: boolean, localId: number): void {
+  private countKill(killer: number, victim: number, w: number, hs: boolean, localId: number): void {
     if (killer !== localId || victim === localId || !this.lobbyState) return;
     if (this.lobbyState.offline) {
       missions.record('practiceKill');
@@ -500,6 +501,8 @@ class App {
     } else {
       missions.record('kill');
       if (hs) missions.record('headshot');
+      // Kill counters only count real players.
+      progress.addCounterKill(WEAPONS[w]?.melee ? progress.equippedKnife : progress.equipped);
     }
   }
 
@@ -511,6 +514,7 @@ class App {
     if (!lobby || !row || this.rewarded) return;
     this.rewarded = true;
     if (lobby.offline) return this.results.setRewards(null, 'Treino offline não dá XP nem moedas.');
+    progress.flushCounters();
     missions.addHistory({
       t: Date.now(),
       map: lobby.config.map,
@@ -722,6 +726,7 @@ class App {
 
   private leave(): void {
     forgetRoom();
+    progress.flushCounters();
     this.stopGame();
     const net = this.net;
     this.net = null;

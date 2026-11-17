@@ -3156,3 +3156,32 @@ kbd {
   box-shadow: 0 0 0 1px var(--ok) inset;
   opacity: 1;
 }
+
+/* Seasonal cases and kill counters */
+.case-card.closed {
+  opacity: 0.55;
+  filter: grayscale(0.4);
+}
+
+.case-card.seasonal:not(.closed) {
+  box-shadow: 0 0 24px -10px var(--case);
+}
+
+.counter-tag {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #1b1200;
+  background: #ff9f1a;
+}
+
+.counter-tag.big {
+  position: static;
+  font-size: 13px;
+  padding: 4px 10px;
+}

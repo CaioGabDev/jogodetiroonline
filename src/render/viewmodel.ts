@@ -445,6 +445,10 @@ export class Viewmodel {
   private inspectStyle = skinById(DEFAULT_SKIN).fx?.inspect ?? 'default';
   private knifeSkin = DEFAULT_KNIFE;
   private knifeStyle = skinById(DEFAULT_KNIFE).knife?.inspect ?? 'default';
+  /** Kill counter screen on the side of the gun, for skins that have one. */
+  private counter: THREE.Mesh;
+  private counterCanvas = document.createElement('canvas');
+  private counterValue: number | null = null;
   /** The knife model in hand, for its inspection and swing effects. */
   private blade: THREE.Object3D = knifeModel(skinById(DEFAULT_KNIFE));
 
@@ -478,6 +482,18 @@ export class Viewmodel {
     );
     this.flash.visible = false;
     this.root.add(this.flash);
+    this.counterCanvas.width = 256;
+    this.counterCanvas.height = 80;
+    const tex = new THREE.CanvasTexture(this.counterCanvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this.counter = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.095, 0.03),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, depthTest: true }),
+    );
+    // Mounted on the left side, turned back toward the camera so it reads from behind the gun.
+    this.counter.rotation.set(-0.15, -0.55, 0);
+    this.counter.visible = false;
+    this.counter.userData.kitPart = true;
     scene.add(this.root);
     void assetsReady.then(() => this.useAssets());
   }
@@ -540,6 +556,50 @@ export class Viewmodel {
     this.guns[W.KNIFE] = knife;
     this.root.add(knife.group);
     applySkin(knife.pivot, next.id, UNSKINNED);
+  }
+
+  /** Kills on the skin's counter, or null for a skin without one. The knife shows none. */
+  setCounter(kills: number | null): void {
+    if (kills === this.counterValue) return;
+    this.counterValue = kills;
+    if (kills === null) return;
+    const c = this.counterCanvas.getContext('2d');
+    if (!c) return;
+    c.clearRect(0, 0, 256, 80);
+    c.fillStyle = '#0d0f12';
+    c.beginPath();
+    c.roundRect(2, 2, 252, 76, 10);
+    c.fill();
+    c.strokeStyle = '#3a3f47';
+    c.lineWidth = 3;
+    c.stroke();
+    c.fillStyle = '#ff9f1a';
+    c.font = 'bold 18px monospace';
+    c.textBaseline = 'top';
+    c.fillText('ABATES', 14, 10);
+    c.font = 'bold 44px monospace';
+    c.fillText(String(Math.min(999999, kills)).padStart(6, '0'), 14, 28);
+    (this.counter.material as THREE.MeshBasicMaterial).map!.needsUpdate = true;
+  }
+
+  /** Puts the counter on the left side of the gun in hand, toward the back. */
+  private placeCounter(g: GunModel): void {
+    const show = this.counterValue !== null && this.current !== W.KNIFE;
+    this.counter.visible = show;
+    if (!show || this.counter.parent === g.pivot) return;
+    g.pivot.add(this.counter);
+    const box = new THREE.Box3();
+    g.pivot.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(g.pivot.matrixWorld).invert();
+    const m = new THREE.Matrix4();
+    g.pivot.traverse((o) => {
+      if (!(o instanceof THREE.Mesh) || o.userData.kitPart) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      box.union(o.geometry.boundingBox!.clone().applyMatrix4(m.multiplyMatrices(inv, o.matrixWorld)));
+    });
+    if (box.isEmpty()) return;
+    const c = box.getCenter(new THREE.Vector3());
+    this.counter.position.set(box.min.x - 0.012, c.y + (box.max.y - c.y) * 0.35, c.z - (c.z - box.min.z) * 0.05);
   }
 
   setWeapon(w: number): void {
@@ -679,6 +739,7 @@ export class Viewmodel {
       }
     }
     setKitInspect(g.pivot, pose.amount);
+    this.placeCounter(g);
 
     if (this.flashLife > 0) {
       this.flashLife -= dt;
