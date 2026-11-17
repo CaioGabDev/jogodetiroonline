@@ -1,4 +1,5 @@
 import { EMPTY_STATS, type CareerStats } from '../game/stats';
+import { DUPLICATE_REFUND, caseById, rollCase } from '../game/cases';
 import {
   DEFAULT_KNIFE,
   DEFAULT_SKIN,
@@ -23,7 +24,7 @@ const STORAGE_KEY = 'arenafps.progress.v1';
 export interface ProgressData {
   xp: number;
   coins: number;
-  /** Skins bought. Level skins are owned by reaching the level and are not listed. */
+  /** Skins won in cases (or bought before cases). Level skins are owned by reaching the level and are not listed. */
   bought: string[];
   equipped: string;
   /** Knife skin, equipped apart from the weapon skin. */
@@ -43,17 +44,22 @@ export interface MatchSummary {
   rankAfter: Rank;
   /** Coins from the levels gained, on top of `reward.coins`. */
   levelCoins: number;
-  /** Skins the levels gained gave for free, and the ones that became available to buy. */
+  /** Skins the levels gained gave for free. */
   unlocked: SkinDef[];
-  buyable: SkinDef[];
 }
 
-export type BuyResult = 'ok' | 'owned' | 'level' | 'coins' | 'error';
+/** What opening a case gave: the skin, and the coins back when it was already owned. */
+export interface CaseResult {
+  result: 'ok' | 'coins' | 'error';
+  skin?: string;
+  dup?: boolean;
+  refund?: number;
+}
 
-/** Where an account's progress lives. The database checks every purchase and pays every match. */
+/** Where an account's progress lives. The database rolls every case and pays every match. */
 export interface ProgressBackend {
   load(): Promise<ProgressData | null>;
-  buy(id: string): Promise<BuyResult>;
+  openCase(id: string): Promise<CaseResult>;
   equip(id: string): Promise<boolean>;
 }
 
@@ -197,22 +203,23 @@ class ProgressStore {
     return this.data.bought.includes(id);
   }
 
-  /** Buys and equips. */
-  async buy(id: string): Promise<BuyResult> {
-    const s = skinById(id);
-    if (this.owns(id)) return 'owned';
-    if (this.level < s.level) return 'level';
-    if (this.data.coins < s.price) return 'coins';
+  /** Pays for a case and draws a skin. A skin already owned gives part of the price back. Doesn't equip. */
+  async openCase(id: string): Promise<CaseResult> {
+    const c = caseById(id);
+    if (!c) return { result: 'error' };
     if (this.backend) {
-      const r = await this.backend.buy(id).catch((): BuyResult => 'error');
+      const r = await this.backend.openCase(id).catch((): CaseResult => ({ result: 'error' }));
       await this.reload();
       return r;
     }
-    this.data.coins -= s.price;
-    this.data.bought.push(id);
-    this.wear(id);
+    if (this.data.coins < c.price) return { result: 'coins' };
+    const skin = rollCase(c);
+    const dup = this.data.bought.includes(skin.id);
+    const refund = dup ? Math.floor(c.price * DUPLICATE_REFUND) : 0;
+    this.data.coins -= c.price - refund;
+    if (!dup) this.data.bought.push(skin.id);
     this.commit();
-    return 'ok';
+    return { result: 'ok', skin: skin.id, dup, refund };
   }
 
   async equip(id: string): Promise<boolean> {
@@ -291,7 +298,6 @@ class ProgressStore {
       rankAfter: rankFor(levelAfter),
       levelCoins,
       unlocked: reached.filter((s) => s.price === 0),
-      buyable: reached.filter((s) => s.price > 0),
     };
   }
 

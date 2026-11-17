@@ -554,27 +554,31 @@ export interface InspectPose {
   dy: number;
   /** 0..1: how far into the trick, for the parts to react. */
   amount: number;
+  /** 0..1: the gun is out of the hands (thrown), which make room for it. */
+  toss: number;
 }
 
 const smooth = THREE.MathUtils.smoothstep;
 
 /** Extra turn of the gun in hand for the premium inspections, on top of the normal one. `p` is 0..1. */
 export function inspectPose(style: InspectStyle, p: number): InspectPose {
-  const pose: InspectPose = { rx: 0, ry: 0, rz: 0, dy: 0, amount: 0 };
+  const pose: InspectPose = { rx: 0, ry: 0, rz: 0, dy: 0, amount: 0, toss: 0 };
   if (p < 0 || p > 1) return pose;
   pose.amount = smooth(p, 0.08, 0.2) * (1 - smooth(p, 0.82, 0.96));
   switch (style) {
     case 'spin': {
-      // A full roll around the barrel.
+      // Tossed up, a full roll around the barrel, and caught.
       const a = smooth(p, 0.3, 0.7);
       pose.rz = a * Math.PI * 2;
+      pose.toss = smooth(p, 0.2, 0.32) * (1 - smooth(p, 0.68, 0.8));
       break;
     }
     case 'flip': {
       // Tossed end over end and caught.
-      const a = smooth(p, 0.28, 0.64);
+      const a = smooth(p, 0.28, 0.66);
       pose.rx = -a * Math.PI * 2;
-      pose.dy = Math.sin(a * Math.PI) * 0.09;
+      pose.dy = Math.sin(a * Math.PI) * 0.12;
+      pose.toss = smooth(p, 0.18, 0.3) * (1 - smooth(p, 0.64, 0.76));
       break;
     }
     case 'butterfly': {
@@ -586,9 +590,10 @@ export function inspectPose(style: InspectStyle, p: number): InspectPose {
       break;
     }
     case 'twirl': {
-      // Two turns flat in the hand, like a gunslinger.
-      const a = smooth(p, 0.24, 0.74);
+      // Two turns flat in the air, like a gunslinger, and caught.
+      const a = smooth(p, 0.26, 0.72);
       pose.ry = a * Math.PI * 4;
+      pose.toss = smooth(p, 0.16, 0.28) * (1 - smooth(p, 0.7, 0.82));
       break;
     }
     default:

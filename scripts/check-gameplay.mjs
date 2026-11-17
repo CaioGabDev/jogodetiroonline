@@ -26,7 +26,7 @@ assert.equal(stk(W.RIFLE, 60), 4);
 assert.equal(stk(W.SMG, 10), 4);
 assert.equal(stk(W.SMG, 30), 6);
 assert.equal(stk(W.SNIPER, 100), 1);
-assert.equal(stk(W.KNIFE, 1), 1);
+assert.equal(stk(W.KNIFE, 1), 2);
 // Desert Eagle: one headshot kills up to 15 m, the body takes two.
 const headStk = (w, dist) => Math.ceil(MAX_HP / damageAt(WEAPONS[w], dist, true));
 assert.equal(headStk(W.DEAGLE, 2), 1);

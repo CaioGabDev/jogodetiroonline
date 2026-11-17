@@ -68,7 +68,7 @@ No começo da partida, na tela de spawn, você tem **10 segundos** para escolher
 | Revólver | 6 | 2 tiros de perto, preciso, recarga lenta |
 | Pistola Automática | 20 | dispara em rajada, recuo médio |
 
-**Faca:** mata com 2 golpes no corpo ou 1 na cabeça, em até 2,8 m. O `V` dá o golpe com qualquer arma em mãos. Com ela na mão o boneco corre muito mais rápido (até 17,5 m/s) e para na hora, menos no modo Bomba.
+**Faca:** mata com 2 golpes no corpo ou 1 na cabeça, em até 2,8 m. O `V` dá o golpe com qualquer arma em mãos. Com ela na mão o boneco fica um pouco mais rápido (até 9,6 m/s) e muda de direção mais rápido, menos no modo Bomba.
 
 **Pular enquanto corre** (toque no Shift, depois W + Espaço) dá um impulso de velocidade (+25%) e mais controle no ar, com qualquer arma. O boneco continua correndo durante o pulo, e segurar o Espaço emenda um pulo no outro.
 
@@ -206,7 +206,14 @@ Abates contam até 60 e dano até 8.000 por partida. O nível vai até 55 e cada
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Nível | 1 | 3 | 6 | 10 | 15 | 20 | 26 | 33 | 40 | 50 |
 
-No menu, **Arsenal e skins** mostra a patente, o XP e a loja. A skin vale para todas as suas armas e os outros jogadores a veem. Floresta, Deserto, Urbano e Ártico vêm de graça com a patente; as outras (Tigre, Oceano, Carmesim, Neon, Cerejeira, Lava, Galáxia, Ouro e Diamante) custam moedas e algumas pedem nível mínimo. O catálogo e os números ficam em `src/game/progression.ts`.
+No menu, **Arsenal e skins** mostra a patente, o XP e a loja. A skin vale para todas as suas armas e os outros jogadores a veem. Floresta, Deserto, Urbano e Ártico vêm de graça com a patente. Todas as outras (as comuns pagas, as premium e as facas) só saem de **caixas**:
+
+| Caixa | Preço | Chances |
+| --- | --- | --- |
+| Caixa de Armas | 1.200 moedas | Comum 60%, Raro 26%, Épico 10%, Lendário 4% |
+| Caixa de Facas | 2.500 moedas | Raro 70%, Épico 23%, Lendário 7% |
+
+Ao abrir, uma roleta gira e para na skin sorteada. Se vier uma que você já tem, metade do preço volta. Skins de caixa não pedem nível. O catálogo fica em `src/game/progression.ts` e as caixas em `src/game/cases.ts`.
 
 A **coleção premium** vai além da pintura. Cada skin muda o formato da arma com peças próprias, animadas, colore o traçante e o clarão do tiro, tem um efeito de abate que todo mundo na partida vê e uma inspeção (`Y`) própria. No Arsenal, a vitrine mostra a arma em 3D: dá para trocar a arma mostrada e inspecionar (`Y` ou o botão) antes de comprar. A faca recebe só a pintura.
 
@@ -219,7 +226,7 @@ A **coleção premium** vai além da pintura. Cada skin muda o formato da arma c
 
 As peças são montadas em código (`src/render/skinKits.ts`) a partir do tamanho de cada arma, então a mesma skin serve em todas.
 
-**Com conta**, o progresso fica no Supabase (`player_stats`) e quem paga é o banco: o `submit_match` confere a partida (duração, kills possíveis, intervalo entre partidas) e calcula XP e moedas, e comprar ou equipar passa pelas funções `buy_skin` e `equip_skin`, que conferem nível, moedas e posse. Valem as mesmas regras do elo: partida online, com outro jogador, jogada até o fim. Moedas e compras só o dono vê (`my_progress`); nível e skin equipada são públicos. O catálogo do banco fica na migration `20261112000100_progressao.sql`, e o `npm run check` confere que ele bate com `progression.ts`.
+**Com conta**, o progresso fica no Supabase (`player_stats`) e quem paga é o banco: o `submit_match` confere a partida (duração, kills possíveis, intervalo entre partidas) e calcula XP e moedas, e abrir caixas ou equipar passa pelas funções `open_case` (o sorteio é feito no banco) e `equip_skin`, que conferem moedas e posse. Valem as mesmas regras do elo: partida online, com outro jogador, jogada até o fim. Moedas e compras só o dono vê (`my_progress`); nível e skin equipada são públicos. O catálogo do banco fica na migration `20261112000100_progressao.sql`, e o `npm run check` confere que ele bate com `progression.ts`.
 
 **Sem conta**, o progresso fica só no navegador (`localStorage`): trocar de navegador ou limpar os dados zera tudo, e ele não passa para a conta ao entrar.
 

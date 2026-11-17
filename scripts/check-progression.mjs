@@ -14,7 +14,8 @@ globalThis.localStorage = {
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'error' });
 const P = await vite.ssrLoadModule('/src/game/progression.ts');
 const { parseClientMsg } = await vite.ssrLoadModule('/src/net/protocol.ts');
-const { progress } = await vite.ssrLoadModule('/src/core/progress.ts');
+const { progress, sanitizeProgress } = await vite.ssrLoadModule('/src/core/progress.ts');
+const C = await vite.ssrLoadModule('/src/game/cases.ts');
 await vite.close();
 
 // Level curve.
@@ -58,7 +59,7 @@ assert.equal(ids.size, P.SKINS.length, 'skin ids are unique');
 assert.ok(ids.has(P.DEFAULT_SKIN));
 for (const s of P.SKINS) {
   assert.ok(s.level >= 1 && s.level <= P.MAX_LEVEL, `${s.id} level`);
-  assert.ok(s.id === P.DEFAULT_SKIN || s.colors.length >= 1, `${s.id} colors`);
+  assert.ok(s.id === P.DEFAULT_SKIN || s.id === P.DEFAULT_KNIFE || s.colors.length >= 1, `${s.id} colors`);
   for (const c of s.colors) assert.match(c, /^#[0-9a-f]{6}$/, `${s.id} color ${c}`);
 }
 assert.equal(P.skinById('nao-existe').id, P.DEFAULT_SKIN);
@@ -74,7 +75,7 @@ const sql = readdirSync(dir)
   .sort()
   .map((f) => readFileSync(new URL(f, dir), 'utf8'))
   .join(' ');
-const rows = [...sql.matchAll(/\('([a-z]+)', (\d+), (\d+)\)/g)].map((m) => ({ id: m[1], level: Number(m[2]), price: Number(m[3]) }));
+const rows = [...sql.matchAll(/\('([a-z_]+)', (\d+), (\d+)(?:, '[a-z]+')?\)/g)].map((m) => ({ id: m[1], level: Number(m[2]), price: Number(m[3]) }));
 assert.deepEqual(rows, P.SKINS.map((s) => ({ id: s.id, level: s.level, price: s.price })), 'catalog in the migration matches progression.ts');
 
 // Hello: skin and level are checked by the host.
@@ -90,8 +91,32 @@ assert.equal(progress.level, 1);
 assert.equal(progress.coins, 0);
 assert.equal(progress.equipped, P.DEFAULT_SKIN);
 assert.equal(progress.owns('floresta'), false, 'level skin locked at level 1');
-assert.equal(await progress.buy('tigre'), 'coins');
+assert.equal((await progress.openCase('armas')).result, 'coins');
 assert.equal(await progress.equip('tigre'), false);
+assert.equal((await progress.openCase('nao-existe')).result, 'error');
+
+// Cases: odds add up, every special skin is in exactly one case, level skins in none, and the draw follows the odds.
+for (const c of C.CASES) {
+  assert.equal(Object.values(c.odds).reduce((a, b) => a + b, 0), 100, `${c.id} odds`);
+  for (const t of Object.keys(c.odds)) assert.ok(C.caseItems(c).some((s) => C.tierOf(s) === t), `${c.id} has ${t}`);
+}
+for (const s of P.SKINS) {
+  const inCases = C.CASES.filter((c) => C.caseItems(c).includes(s)).length;
+  assert.equal(inCases, s.price > 0 ? 1 : 0, `${s.id} cases`);
+}
+{
+  let seed = 7;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const armas = C.caseById('armas');
+  const n = 20000;
+  const got = {};
+  for (let i = 0; i < n; i++) {
+    const t = C.tierOf(C.rollCase(armas, rand));
+    got[t] = (got[t] ?? 0) + 1;
+  }
+  for (const [t, p] of Object.entries(armas.odds)) assert.ok(Math.abs((got[t] / n) * 100 - p) < 1.5, `${t}: ${(got[t] / n) * 100}% vs ${p}%`);
+  assert.equal(C.rollCase(C.caseById('facas'), () => 0.999).slot, 'faca');
+}
 
 const before = progress.coins;
 const sum = progress.addMatch({ kills: 30, deaths: 5, headshots: 10, damage: 5000, won: true, mvp: true });
@@ -100,32 +125,51 @@ assert.equal(progress.coins, before + sum.reward.coins + sum.levelCoins);
 assert.ok(sum.levelAfter >= 3 && progress.owns('floresta'), 'Floresta comes with level 3');
 assert.ok(sum.unlocked.some((s) => s.id === 'floresta'));
 
-while (progress.coins < 600) progress.addMatch({ kills: 10, deaths: 5, headshots: 2, damage: 1500, won: false, mvp: false });
+while (progress.coins < 1200) progress.addMatch({ kills: 10, deaths: 5, headshots: 2, damage: 1500, won: false, mvp: false });
 const coins = progress.coins;
-assert.equal(await progress.buy('tigre'), 'ok');
-assert.equal(progress.coins, coins - 600);
-assert.equal(progress.equipped, 'tigre', 'buying equips');
-assert.equal(await progress.buy('tigre'), 'owned');
+const opened = await progress.openCase('armas');
+assert.equal(opened.result, 'ok');
+const won = opened.skin;
+assert.ok(C.tierOf(P.skinById(won)), 'a case gives a special skin');
+assert.equal(opened.dup, false);
+assert.equal(progress.coins, coins - 1200);
+assert.ok(progress.owns(won), 'the skin is kept');
+assert.equal(progress.equipped, P.DEFAULT_SKIN, 'opening does not equip');
+assert.equal(await progress.equip(won), true);
 assert.equal(await progress.equip('padrao'), true);
-assert.equal(await progress.equip('tigre'), true);
-assert.equal(await progress.buy('diamante'), 'level', 'General skin needs level 50');
+assert.equal(await progress.equip(won), true);
+// A skin already owned gives half the price back.
+while (progress.coins < 1200) progress.addMatch({ kills: 10, deaths: 5, headshots: 2, damage: 1500, won: false, mvp: false });
+{
+  const real = Math.random;
+  const before = progress.coins;
+  const tierPos = { lendario: 0, epico: 4, raro: 14, comum: 40 }[C.tierOf(P.skinById(won))];
+  const pool = C.caseItems(C.caseById('armas')).filter((s) => C.tierOf(s) === C.tierOf(P.skinById(won)));
+  let k = 0;
+  Math.random = () => (k++ === 0 ? (tierPos + 0.5) / 100 : (pool.indexOf(P.skinById(won)) + 0.5) / pool.length);
+  const again = await progress.openCase('armas');
+  Math.random = real;
+  assert.equal(again.skin, won);
+  assert.equal(again.dup, true);
+  assert.equal(again.refund, 600);
+  assert.equal(progress.coins, before - 600);
+}
 
 const saved = JSON.parse(store.get('arenafps.progress.v1'));
-assert.equal(saved.equipped, 'tigre');
-assert.deepEqual(saved.bought, ['tigre']);
+assert.equal(saved.equipped, won);
+assert.deepEqual(saved.bought, [won]);
 assert.equal(saved.coins, progress.coins);
 
 // Logged in: the account's data replaces the browser's, purchases go to the server, and nothing is saved locally.
 const calls = [];
 const account = { xp: P.totalXpFor(12), coins: 5000, bought: ['neon'], equipped: 'neon', matches: 40, wins: 20, kills: 500 };
 await progress.useBackend({
-  load: async () => ({ ...account, bought: [...account.bought] }),
-  buy: async (id) => {
-    calls.push(['buy', id]);
-    account.coins -= P.skinById(id).price;
-    account.bought.push(id);
-    account.equipped = id;
-    return 'ok';
+  load: async () => sanitizeProgress({ ...account, bought: [...account.bought] }),
+  openCase: async (id) => {
+    calls.push(['case', id]);
+    account.coins -= 1200;
+    account.bought.push('cerejeira');
+    return { result: 'ok', skin: 'cerejeira', dup: false, refund: 0 };
   },
   equip: async (id) => {
     calls.push(['equip', id]);
@@ -137,10 +181,11 @@ assert.equal(progress.remote, true);
 assert.equal(progress.level, 12);
 assert.equal(progress.equipped, 'neon');
 assert.equal(progress.owns('tigre'), false, 'the browser purchase is not in the account');
-assert.equal(await progress.buy('cerejeira'), 'ok');
-assert.equal(progress.coins, 5000 - 2200, 'reloaded from the server after buying');
+assert.equal((await progress.openCase('armas')).skin, 'cerejeira');
+assert.equal(progress.coins, 5000 - 1200, 'reloaded from the server after opening');
+assert.ok(progress.owns('cerejeira'));
 assert.equal(await progress.equip('urbano'), true);
-assert.deepEqual(calls, [['buy', 'cerejeira'], ['equip', 'urbano']]);
+assert.deepEqual(calls, [['case', 'armas'], ['equip', 'urbano']]);
 const paid = progress.applyServerMatch(
   { kills: 10, deaths: 4, headshots: 3, damage: 1500, won: true, mvp: false },
   { xp: account.xp + 1525, coins: 9999, xpGain: 1525, coinGain: 131, levelCoins: 100 },
@@ -150,6 +195,6 @@ assert.equal(paid.reward.xp, 1525);
 assert.equal(store.get('arenafps.progress.v1'), localSaved, 'account progress never touches localStorage');
 await progress.useBackend(null);
 assert.equal(progress.remote, false);
-assert.equal(progress.equipped, 'tigre', 'logging out brings the browser progress back');
+assert.equal(progress.equipped, won, 'logging out brings the browser progress back');
 
 console.log(`progressão ok: nível 10 em ~${matches} partidas, partida típica = ${typical.xp} XP e ${typical.coins} moedas`);

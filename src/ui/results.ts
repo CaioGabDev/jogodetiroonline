@@ -145,7 +145,6 @@ export class Results {
       );
     }
     for (const s of sum.unlocked) news.push(el('div', { class: 'rw-news', text: `Skin liberada: ${s.name}` }));
-    for (const s of sum.buyable) news.push(el('div', { class: 'rw-news', text: `Nova skin na loja: ${s.name}` }));
 
     this.rewards.append(
       el('div', { class: 'rw-head' }, [

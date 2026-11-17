@@ -31,13 +31,16 @@ class Account {
   profile: Profile | null = null;
   private userId: string | null = null;
   private listeners = new Set<() => void>();
+  private recoveryListeners = new Set<() => void>();
 
   get available(): boolean {
     return supabase !== null;
   }
 
   init(): void {
-    supabase?.auth.onAuthStateChange((_event, session) => {
+    supabase?.auth.onAuthStateChange((event, session) => {
+      // Came back from the "forgot password" e-mail: the player is signed in and must pick a new password.
+      if (event === 'PASSWORD_RECOVERY') window.setTimeout(() => this.recoveryListeners.forEach((l) => l()), 0);
       const id = session?.user.id ?? null;
       if (id === this.userId) return;
       this.userId = id;
@@ -49,6 +52,12 @@ class Account {
   onChange(l: () => void): () => void {
     this.listeners.add(l);
     return () => this.listeners.delete(l);
+  }
+
+  /** Runs when the player opens the password reset link. */
+  onRecovery(l: () => void): () => void {
+    this.recoveryListeners.add(l);
+    return () => this.recoveryListeners.delete(l);
   }
 
   setProfile(p: Profile | null): void {
@@ -96,6 +105,21 @@ class Account {
       provider: 'google',
       options: { redirectTo: location.origin + location.pathname + location.search },
     });
+    return error ? authMessage(error) : null;
+  }
+
+  /** Sends the password reset link. The link comes back to this page, which then asks for the new password. */
+  async resetPassword(email: string): Promise<string | null> {
+    if (!supabase) return null;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    return error ? authMessage(error) : null;
+  }
+
+  /** New password for the signed-in player (after opening the reset link). */
+  async updatePassword(password: string): Promise<string | null> {
+    if (!supabase) return null;
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error?.code === 'same_password') return 'A nova senha precisa ser diferente da antiga.';
     return error ? authMessage(error) : null;
   }
 

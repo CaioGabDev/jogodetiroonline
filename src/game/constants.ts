@@ -44,11 +44,12 @@ export const HITBOX = {
 export const MOVE = {
   walk: 5.4,
   sprint: 8.1,
-  knifeWalk: 12,
-  knifeSprint: 17.5,
-  knifeAirAccel: 9,
-  /** High accel and friction: with the knife, starts, stops and turns are near-instant. */
-  knifeAccel: 40,
+  /** A bit faster than with a gun, not a different game. */
+  knifeWalk: 6.6,
+  knifeSprint: 9.6,
+  knifeAirAccel: 6,
+  /** Quicker starts, stops and turns than with a gun. */
+  knifeAccel: 24,
   knifeFriction: 16,
   crouch: 2.6,
   ads: 2.9,
