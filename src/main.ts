@@ -691,7 +691,8 @@ class App {
   /** Opens the old room's code as its host, with its settings and everyone's score. */
   private async takeOver(lobby: LobbyState, nick: string, color: string, scores: ReturnType<Game['scoreSnapshot']> | null): Promise<boolean> {
     const host = new HostServer(false, { onStatus: (t) => toast(t, 'warn') });
-    const playing = lobby.phase === 'playing';
+    // Bomb rounds can't be rebuilt: that match goes back to the lobby.
+    const playing = lobby.phase === 'playing' && lobby.config.mode !== 'bomb';
     const seed: MigrationSeed = {
       config: lobby.config,
       playing,
