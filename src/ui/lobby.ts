@@ -29,6 +29,8 @@ export interface LobbyCallbacks {
   onColor(c: string): void;
   onConfig(patch: Partial<MatchConfig>): void;
   onBalance(): void;
+  /** Opens the friends list to invite them; null without an account. */
+  onFriends: (() => void) | null;
 }
 
 export function inviteLink(code: string): string {
@@ -97,7 +99,11 @@ export class Lobby {
     const panel = el('div', { class: 'panel lobby-panel' }, [
       el('div', { class: 'lobby-head' }, [
         el('div', {}, [el('div', { class: 'field-label', text: 'Código da sala' }), this.codeEl]),
-        el('div', { class: 'lobby-copy' }, [copyLink, copyCode]),
+        el('div', { class: 'lobby-copy' }, [
+          copyLink,
+          copyCode,
+          el('button', { class: 'btn small primary lobby-friends', text: 'Chamar amigos', onClick: () => this.cb.onFriends?.() }),
+        ]),
       ]),
       el('div', { class: 'lobby-body' }, [
         el('div', { class: 'lobby-col' }, [el('h3', {}, ['Jogadores ', this.countEl]), this.players]),

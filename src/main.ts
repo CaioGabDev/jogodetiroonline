@@ -7,7 +7,7 @@ import { accountProgress, claimMission } from './net/progressApi';
 import { missions } from './core/missions';
 import { GameLoop } from './core/loop';
 import { normalizeCode } from './core/util';
-import { teamMode, type GameMode, type MapId } from './game/constants';
+import { MAP_NAMES, teamMode, type GameMode, type MapId } from './game/constants';
 import { Game } from './game/game';
 import { WEAPONS } from './game/weapons';
 import type { PracticeSetup } from './game/practice';
@@ -34,6 +34,9 @@ import { PauseMenu } from './ui/pause';
 import { ProfileScreen } from './ui/profile';
 import { RankingScreen } from './ui/ranking';
 import { MissionsScreen } from './ui/missions';
+import { SocialScreen } from './ui/social';
+import { QueueScreen } from './ui/queue';
+import { ranked, social } from './net/social';
 import { Results } from './ui/results';
 import { Scoreboard } from './ui/scoreboard';
 import { SettingsUI } from './ui/settingsUI';
@@ -56,6 +59,13 @@ class App {
   private profile: ProfileScreen;
   private ranking: RankingScreen;
   private missions: MissionsScreen;
+  private social: SocialScreen;
+  private queue: QueueScreen;
+  /** Friends poll: running while logged in. */
+  private socialTimer = 0;
+  private socialBusy = false;
+  /** Ranked queue poll, while searching. */
+  private queueTimer = 0;
   private roomBrowser: RoomBrowser;
   private loadout: LoadoutPicker;
   private inventory: Inventory;
@@ -98,6 +108,8 @@ class App {
       onProfile: () => this.profile.open(),
       onRanking: () => this.ranking.open(),
       onMissions: () => this.missions.open(),
+      onFriends: () => this.social.open(),
+      onRanked: () => void this.startQueue(),
     });
     this.lobby = new Lobby(ui, {
       onStart: () => {
@@ -110,6 +122,13 @@ class App {
       onColor: (color) => this.net?.send({ type: 'setColor', color }),
       onConfig: (patch) => this.host?.setConfig(patch),
       onBalance: () => this.host?.autoBalance(),
+      onFriends: () => {
+        if (account.profile) this.social.open();
+        else {
+          toast('Entre numa conta para ter amigos e chamar eles para a sala.', 'info');
+          this.auth.open();
+        }
+      },
     });
     this.results = new Results(ui, {
       onRematch: () => {
@@ -141,11 +160,18 @@ class App {
     this.profile = new ProfileScreen(ui);
     this.ranking = new RankingScreen(ui);
     this.missions = new MissionsScreen(ui);
+    this.social = new SocialScreen(ui, {
+      currentRoom: () => this.onlineRoom(),
+      joinRoom: (code) => this.followTo(code),
+      refresh: () => void this.pollSocial(),
+    });
+    this.queue = new QueueScreen(ui, () => void this.cancelQueue());
     missions.onChange(() => this.menu.setMissionsReady(missions.ready));
     this.menu.setMissionsReady(missions.ready);
     account.onChange(() => {
       void progress.useBackend(account.profile ? accountProgress : null);
       missions.use(account.profile?.id ?? null, account.profile ? claimMission : null);
+      this.startSocial();
       this.menu.setAccount(account.profile, account.available);
       void this.refreshRating();
     });
@@ -632,6 +658,152 @@ class App {
     if (this.game) {
       this.game.dispose();
       this.game = null;
+    }
+  }
+
+  // ------------------------------------------------------------------ friends, party and ranked
+
+  /** Online room this player is in, or null. */
+  private onlineRoom(): string | null {
+    return this.net && this.lobbyState && !this.lobbyState.offline ? this.lobbyState.code : null;
+  }
+
+  /** Polls friends, invites and the party every 5 s while logged in. */
+  private startSocial(): void {
+    window.clearInterval(this.socialTimer);
+    if (!account.profile) {
+      this.social.update({ friends: [], invites: [], party: null });
+      return;
+    }
+    void this.pollSocial();
+    this.socialTimer = window.setInterval(() => void this.pollSocial(), 5000);
+  }
+
+  private async pollSocial(): Promise<void> {
+    if (!account.profile || this.socialBusy) return;
+    this.socialBusy = true;
+    try {
+      const st = await social.poll(this.onlineRoom());
+      if (!st || !account.profile) return;
+      this.social.update(st);
+      this.menu.setFriends(this.social.pending, st.friends.filter((f) => f.online && f.status === 'accepted').length);
+      // Party members go where the leader goes, from the menu or a lobby (never out of a match).
+      const p = st.party;
+      const me = account.profile.id;
+      if (p && p.leader !== me && p.room && p.room !== this.onlineRoom() && !this.busy && (this.screen === 'menu' || this.screen === 'lobby')) {
+        toast('Entrando na sala do líder do grupo…', 'info');
+        this.followTo(p.room);
+      }
+    } finally {
+      this.socialBusy = false;
+    }
+  }
+
+  /** Joins a room by code, leaving the current one first. */
+  private followTo(code: string): void {
+    if (this.busy || code === this.onlineRoom()) return;
+    this.social.close();
+    if (this.net) this.leave();
+    const nick = this.menu.nickname;
+    if (nick.length < 3) {
+      this.menu.setCode(code);
+      toast('Digite um nickname e clique em Entrar.', 'warn');
+      return;
+    }
+    void this.joinRoom(nick, this.menu.chosenColor, code);
+  }
+
+  private async startQueue(): Promise<void> {
+    if (!account.profile || this.busy || this.queue.visible) return;
+    this.queue.open();
+    await ranked.join();
+    this.queue.setStatus('Procurando jogadores…');
+    window.clearInterval(this.queueTimer);
+    this.queueTimer = window.setInterval(() => void this.pollQueue(), 2500);
+  }
+
+  private async cancelQueue(): Promise<void> {
+    window.clearInterval(this.queueTimer);
+    this.queue.close();
+    await ranked.leave();
+  }
+
+  private queuePolling = false;
+
+  private async pollQueue(): Promise<void> {
+    if (this.queuePolling || !this.queue.visible) return;
+    this.queuePolling = true;
+    try {
+      const q = await ranked.poll();
+      if (!q || !this.queue.visible) return;
+      if (q.state === 'searching') {
+        this.queue.setStatus(`${q.nearby} na fila perto do seu elo (±${q.window}).`);
+        return;
+      }
+      if (q.state !== 'found' || !q.code) return;
+      window.clearInterval(this.queueTimer);
+      this.queue.setStatus('Partida encontrada!');
+      this.queue.close();
+      audio.matchEnd(true);
+      if (q.host) await this.hostRanked(q.code, q.map ?? 'arena', q.players ?? 2);
+      else await this.joinRanked(q.code);
+    } finally {
+      this.queuePolling = false;
+    }
+  }
+
+  /** The player who formed the match hosts it: ranked deathmatch, and it starts once everyone is in. */
+  private async hostRanked(code: string, map: string, expected: number): Promise<void> {
+    const nick = account.profile?.username ?? this.menu.nickname;
+    for (let attempt = 0; attempt < 4 && !this.net; attempt++) {
+      this.menu.setBusy('Criando a sala ranqueada…');
+      const host = new HostServer(false, { onStatus: (t) => toast(t, 'warn') });
+      host.setConfig({ mode: 'ffa', arsenal: 'all', map: (Object.hasOwn(MAP_NAMES, map) ? map : 'arena') as MapId, killLimit: 30, timeLimit: 10 });
+      try {
+        await host.start(code);
+      } catch {
+        host.destroy();
+        await new Promise((r) => window.setTimeout(r, 1500));
+        continue;
+      }
+      this.host = host;
+      if (!(await this.connectLocal(host, nick, this.menu.chosenColor))) return;
+      this.menu.setBusy(null);
+      toast(`Sala ranqueada ${code}: esperando ${expected} jogadores…`, 'info', 6000);
+      const began = performance.now();
+      const wait = window.setInterval(() => {
+        if (this.host !== host) return window.clearInterval(wait);
+        const humans = host.lobbyState().players.filter((p) => !p.bot).length;
+        const waited = performance.now() - began;
+        if (humans >= expected || (humans >= 2 && waited > 25000)) {
+          window.clearInterval(wait);
+          host.startMatch();
+          this.lockForMatch();
+        } else if (waited > 60000) {
+          window.clearInterval(wait);
+          toast('Os outros jogadores não chegaram. A sala fica aberta para quem quiser entrar.', 'warn', 7000);
+        }
+      }, 1000);
+      return;
+    }
+    this.menu.setBusy(null);
+    this.menu.setError('Não deu para criar a sala ranqueada. Tente a fila de novo.');
+  }
+
+  /** Everyone else joins the host's code, giving the host time to open it. */
+  private async joinRanked(code: string): Promise<void> {
+    const nick = account.profile?.username ?? this.menu.nickname;
+    this.busy = true;
+    let ok = false;
+    for (let attempt = 1; attempt <= 10 && !ok; attempt++) {
+      this.menu.setBusy(`Entrando na partida ranqueada… (${attempt}/10)`);
+      await new Promise((r) => window.setTimeout(r, attempt === 1 ? 2500 : 2000));
+      ok = await this.rejoin(code, nick, this.menu.chosenColor);
+    }
+    this.busy = false;
+    if (!ok) {
+      this.menu.setBusy(null);
+      this.menu.setError('Não deu para entrar na partida ranqueada. Tente a fila de novo.');
     }
   }
 
