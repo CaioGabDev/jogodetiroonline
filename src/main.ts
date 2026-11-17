@@ -131,6 +131,7 @@ class App {
     this.settingsUI = new SettingsUI(ui);
     this.armory = new Armory(ui);
     this.auth = new AuthScreen(ui);
+    account.onRecovery(() => this.auth.openReset());
     this.profile = new ProfileScreen(ui);
     this.ranking = new RankingScreen(ui);
     account.onChange(() => {
