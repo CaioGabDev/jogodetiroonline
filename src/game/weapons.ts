@@ -75,6 +75,8 @@ export interface WeaponDef {
    * so the pattern can be learned and pulled down. Replaces `pattern` and the random kick.
    */
   spray?: ReadonlyArray<readonly [number, number]>;
+  /** Distance only weakens body shots: a headshot always does full damage. */
+  headNoFalloff?: boolean;
   /** Aiming looks through a full-screen scope. */
   scoped?: boolean;
   /** Movement speed multiplier while holding this weapon. */
@@ -168,17 +170,17 @@ function thrown(d: ThrownDef): WeaponDef {
 }
 
 /**
- * Rifle spray, in the style of Valorant's Vandal: the first shots stay put, then a strong climb up to the
- * tenth shot, then the climb stops and the aim swings left and right for the rest of the 30.
+ * Rifle spray, modeled on Valorant's Vandal, one entry per shot of the 25: the first shot doesn't move the aim,
+ * the next two barely, then a steep climb up to the ninth, then the climb stops and the aim sways left and
+ * right for the rest of the magazine. Same every time, so it can be learned and pulled down.
  */
 export const RIFLE_SPRAY: ReadonlyArray<readonly [number, number]> = [
-  [0.15, 0], [0.35, 0], [0.6, 0.05],
-  [1.3, 0.1], [1.45, -0.1], [1.45, 0.15], [1.3, -0.1], [1.1, 0.1], [0.9, 0],
-  [0.45, 0.7], [0.3, 0.9], [0.2, 1.0],
-  [0.12, 0.7], [0.1, 0.3], [0.1, -0.5], [0.1, -1.0], [0.1, -1.2],
-  [0.08, -1.1], [0.08, -0.8], [0.08, -0.2], [0.08, 0.6], [0.08, 1.1],
-  [0.08, 1.2], [0.08, 0.9], [0.08, 0.2], [0.08, -0.6], [0.08, -1.1],
-  [0.08, -1.0], [0.08, -0.5], [0.08, 0.3],
+  [0.1, 0], [0.3, 0], [0.55, 0],
+  [1.35, 0.05], [1.5, -0.05], [1.55, 0.1], [1.45, -0.05], [1.25, 0.05], [1.0, 0],
+  [0.35, 0.75], [0.2, 0.95], [0.12, 0.85], [0.1, 0.4],
+  [0.08, -0.35], [0.08, -0.9], [0.08, -1.15], [0.08, -0.95], [0.06, -0.4],
+  [0.06, 0.35], [0.06, 0.95], [0.06, 1.15], [0.06, 0.8],
+  [0.06, 0.1], [0.06, -0.7], [0.06, -1.1],
 ];
 
 export const WEAPONS: WeaponDef[] = [
@@ -187,13 +189,15 @@ export const WEAPONS: WeaponDef[] = [
     name: 'Rifle de Assalto',
     short: 'RIFLE',
     category: 'primary',
-    desc: 'Equilibrado, recuo médio',
-    damage: 33,
-    interval: 86,
+    desc: 'Igual à Vandal: 1 tiro na cabeça mata a qualquer distância',
+    // Vandal: 160 de 150 HP na cabeça e 40 no corpo, a 9,75 tiros/s, sem perda com a distância.
+    // Na escala de 100 HP: 27 no corpo (4 tiros) e 108 na cabeça (1 tiro).
+    damage: 27,
+    interval: 103,
     auto: true,
-    mag: 30,
-    reserve: 90,
-    maxReserve: 180,
+    mag: 25,
+    reserve: 75,
+    maxReserve: 150,
     infiniteReserve: false,
     pellets: 1,
     spreadHip: 0.03,
@@ -203,18 +207,18 @@ export const WEAPONS: WeaponDef[] = [
     kick: 0.006,
     kickYaw: 0.004,
     recover: 6,
-    reloadTime: 2.2,
+    reloadTime: 2.5,
     zoom: 1.35,
     adsTime: 0.2,
     range: 200,
-    falloff: { start: 38, end: 40, min: 0.76 },
+    falloff: null,
     tracer: 0xffd27a,
     ammoPickup: 60,
     sound: 'rifle',
     fireKick: 1,
     shape: { len: 0.75, h: 0.12 },
     spray: RIFLE_SPRAY,
-    headMul: 1.4,
+    headMul: 4,
     sprintOut: 200,
     moveMul: 0.95,
   },
@@ -565,12 +569,13 @@ export const WEAPONS: WeaponDef[] = [
     adsTime: 0.15,
     range: 170,
     falloff: { start: 15, end: 17, min: 0.6 },
+    headNoFalloff: true,
     tracer: 0xffe6a0,
     ammoPickup: 0,
     sound: 'deagle',
     fireKick: 1.6,
     shape: { len: 0.42, h: 0.14 },
-    // 50 × 2 = 100: a headshot kills, up to where the falloff starts (15 m).
+    // 50 × 2 = 100: a headshot kills at any distance; the falloff only weakens body shots.
     headMul: 2,
     sprintOut: 150,
   },
@@ -793,7 +798,7 @@ export const RECOIL_PATTERN = [0, 0.3, -0.2, 0.5, 0.8, 0.4, -0.3, -0.9, -1.2, -0
 
 export function damageAt(def: WeaponDef, dist: number, head: boolean): number {
   let dmg = def.damage * (head ? def.headMul : 1);
-  if (def.falloff) {
+  if (def.falloff && !(head && def.headNoFalloff)) {
     const f = def.falloff;
     const t = Math.min(1, Math.max(0, (dist - f.start) / (f.end - f.start)));
     dmg *= 1 - t * (1 - f.min);

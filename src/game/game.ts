@@ -41,6 +41,8 @@ const SLIDE_ROLL = 0.06;
 const RECOVER_DELAY_MS = 300;
 /** A shot this long after the previous one counts as a first shot again: no base spread and no bloom. */
 const SPRAY_RESET_MS = 350;
+/** Below this speed (m/s) a shot counts as standing still: no movement spread. */
+const STILL_SPEED = 1.2;
 /** Below this (radians, well under a pixel) recoil snaps to zero, so the view returns exactly to where it was. */
 const RECOIL_EPSILON = 0.0003;
 const BLOOM_EPSILON = 0.0001;
@@ -911,7 +913,9 @@ export class Game {
       return (this.me.crouch && this.me.onGround ? s * 0.75 : s) + (spraying ? this.bloom : 0);
     }
     let s = firstShot ? 0 : def.spreadHip + (def.spreadAds - def.spreadHip) * this.aimT;
-    s += Math.min(1, speed / 6) * def.spreadMove * (1 - this.aimT * 0.5);
+    // Like Valorant: stopped or barely moving (after a counter-strafe) counts as still, so the first shot goes
+    // exactly where the crosshair is. Moving faster than that opens the spread.
+    s += clamp((speed - STILL_SPEED) / 5, 0, 1) * def.spreadMove * (1 - this.aimT * 0.5);
     if (!this.me.onGround) s += def.spreadAir;
     if (this.me.crouch && this.me.onGround) s *= 0.75;
     return spraying ? s + this.bloom : s;
